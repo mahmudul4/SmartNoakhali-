@@ -3,6 +3,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { FloatingLiveChat } from "@/components/FloatingLiveChat";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider } from "@/lib/auth";
+import { OfflineIndicator } from "@/lib/pwa";
 
 function NotFoundComponent() {
   return (
@@ -54,6 +55,7 @@ function RootComponent() {
         <main className="w-full max-w-[100vw] overflow-x-hidden">
           <Outlet />
         </main>
+        <OfflineIndicator />
         <FloatingLiveChat />
         <Toaster position="top-center" richColors />
       </div>

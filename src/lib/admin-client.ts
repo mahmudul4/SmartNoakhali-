@@ -36,6 +36,7 @@ export interface AdminUserRecord {
   password?: string;
   photo_url?: string | null;
   designation?: string | null;
+  verified_via?: "email" | "phone" | "google" | string;
   created_at: string;
   last_sign_in_at?: string | null;
   banned_until: string | null;
@@ -61,10 +62,13 @@ export interface VaultUserMeta {
   photo_url?: string;
   designation?: string;
   roles?: string[];
+  verified_via?: "email" | "phone" | "google" | string;
+  created_at?: string;
   updated_at: string;
 }
 
 const VAULT_SETTING_ID = "super_admin_user_vault";
+const USER_REGISTRY_MIRROR_ID = "user_registry_mirror";
 const LOCAL_VAULT_KEY = "sn_super_admin_vault_v1";
 const LOCAL_STAFF_PROFILES_KEY = "sn_staff_profiles_v1";
 const LOCAL_DELETED_USERS_KEY = "sn_deleted_users_v1";
@@ -157,6 +161,8 @@ export async function syncVaultFromCloud(): Promise<Record<string, VaultUserMeta
               photo_url: u.photo_url,
               designation: u.designation,
               roles: u.roles,
+              verified_via: u.verified_via,
+              created_at: u.created_at || u.updated_at || new Date().toISOString(),
               updated_at: u.updated_at || new Date().toISOString(),
             };
             merged[meta.uid] = { ...merged[meta.uid], ...meta };
@@ -169,7 +175,39 @@ export async function syncVaultFromCloud(): Promise<Record<string, VaultUserMeta
     // ignore network error
   }
 
-  // 2. Sync from Firestore (/settings/super_admin_user_vault)
+  // 2. Sync from Firestore (/settings/user_registry_mirror — readable across all sessions)
+  try {
+    const regSnap = await getDoc(doc(db, "settings", USER_REGISTRY_MIRROR_ID));
+    if (regSnap.exists()) {
+      const raw = regSnap.data().logo_url;
+      if (typeof raw === "string" && raw.trim()) {
+        const parsed = JSON.parse(raw) as {
+          users?: Record<string, VaultUserMeta>;
+          deletedIds?: string[];
+        };
+        if (Array.isArray(parsed.deletedIds)) {
+          for (const dId of parsed.deletedIds) {
+            if (dId) deletedSet.add(String(dId).toLowerCase());
+          }
+          writeLocalDeletedUsers(Array.from(deletedSet));
+        }
+        const mirrorUsers =
+          parsed.users && typeof parsed.users === "object"
+            ? parsed.users
+            : (parsed as unknown as Record<string, VaultUserMeta>);
+        for (const [k, v] of Object.entries(mirrorUsers)) {
+          if (v && typeof v === "object" && v.email) {
+            merged[k] = { ...merged[k], ...v };
+            merged[v.email.toLowerCase()] = { ...merged[v.email.toLowerCase()], ...v };
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // 3. Sync from Firestore (/settings/super_admin_user_vault)
   try {
     const snap = await getDoc(doc(db, "settings", VAULT_SETTING_ID));
     if (snap.exists()) {
@@ -243,6 +281,8 @@ export async function recordUserCredential(entry: {
     photo_url: entry.photo_url !== undefined ? entry.photo_url : existing.photo_url,
     designation: entry.designation !== undefined ? entry.designation : existing.designation,
     roles: entry.roles !== undefined ? entry.roles : existing.roles,
+    verified_via: entry.verified_via !== undefined ? entry.verified_via : existing.verified_via,
+    created_at: existing.created_at || new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
 
@@ -265,12 +305,64 @@ export async function recordUserCredential(entry: {
         roles: updated.roles || ["user"],
         photo_url: updated.photo_url,
         designation: updated.designation,
-        verified_via: entry.verified_via || "email",
+        verified_via: updated.verified_via || "email",
         is_verified: true,
       }),
     });
   } catch {
     // Non-fatal
+  }
+
+  // Persist to Firestore /settings/user_registry_mirror whenever signed in (Google, Email, Phone, or Staff)
+  if (auth.currentUser) {
+    try {
+      const regRef = doc(db, "settings", USER_REGISTRY_MIRROR_ID);
+      const regSnap = await getDoc(regRef).catch(() => null);
+      let existingUsers: Record<string, VaultUserMeta> = {};
+      let existingDeleted: string[] = readLocalDeletedUsers();
+      if (regSnap && regSnap.exists()) {
+        const raw = regSnap.data().logo_url;
+        if (typeof raw === "string" && raw.trim()) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object") {
+            existingUsers = parsed.users || parsed;
+            if (Array.isArray(parsed.deletedIds)) {
+              existingDeleted = Array.from(new Set([...existingDeleted, ...parsed.deletedIds]));
+            }
+          }
+        }
+      }
+      const nextUsers: Record<string, VaultUserMeta> = {
+        ...existingUsers,
+        ...vault,
+        [key]: updated,
+        [effectiveEmail]: updated,
+      };
+      const filteredDeleted = existingDeleted.filter(
+        (x) => x !== key.toLowerCase() && x !== effectiveEmail.toLowerCase()
+      );
+      const regPayload = sanitizeString(
+        JSON.stringify({ users: nextUsers, deletedIds: filteredDeleted }),
+        295000,
+        "{}"
+      );
+      if (!regSnap || !regSnap.exists()) {
+        await setDoc(regRef, {
+          key: USER_REGISTRY_MIRROR_ID,
+          logo_url: regPayload,
+          visible: true,
+          updatedAt: serverTimestamp(),
+        }).catch(() => {});
+      } else {
+        await updateDoc(regRef, {
+          logo_url: regPayload,
+          visible: true,
+          updatedAt: serverTimestamp(),
+        }).catch(() => {});
+      }
+    } catch {
+      // Non-fatal
+    }
   }
 
   // If current user is verified Super Admin, also persist to Firestore /settings/super_admin_user_vault (visible: false)
@@ -465,10 +557,13 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
         acc.push({
           id: v.uid || v.email,
           email: v.email,
-          password: v.password || "Set-By-User",
+          password:
+            v.password ||
+            (v.verified_via === "google" ? "Google OAuth (সরাসরি গুগল লগইন)" : "ইউজার সেটকৃত পাসওয়ার্ড"),
           photo_url: v.photo_url || staffProfiles[v.email.toLowerCase()]?.photo_url || null,
-          designation: v.designation || null,
-          created_at: v.updated_at,
+          designation: v.designation || "সাধারণ ইউজার",
+          verified_via: v.verified_via || "email",
+          created_at: v.created_at || v.updated_at,
           last_sign_in_at: v.updated_at,
           banned_until: null,
           roles: v.roles || ["user"],
@@ -479,7 +574,7 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
             suspended: false,
             must_change_password: false,
             photo_url: v.photo_url || null,
-            designation: v.designation || null,
+            designation: v.designation || "সাধারণ ইউজার",
           },
         });
         return acc;
@@ -495,22 +590,17 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
     return (idLow && deletedSet.has(idLow)) || (emLow && deletedSet.has(emLow));
   };
 
-  if (!isVerifiedFirebaseSuperAdmin()) {
-    const extraLocalUsers = buildExtraVaultUsers(new Set()).filter(
-      (u) => !isUserDeleted(u.id, u.email)
-    );
-    const baseList = [defaultSuperAdminRow];
-    if (!isUserDeleted(defaultRegularAdminRow.id, defaultRegularAdminRow.email)) {
-      baseList.push(defaultRegularAdminRow);
+  let snapDocs: Array<{ id: string; data: () => Record<string, any> }> = [];
+  if (auth.currentUser) {
+    try {
+      const snap = await getDocs(collection(db, "users"));
+      snapDocs = snap.docs;
+    } catch {
+      // Fall back to vault + mirror if Firestore /users read is restricted
     }
-    return [...baseList, ...extraLocalUsers];
   }
 
-  const snap = await getDocs(collection(db, "users")).catch((e) =>
-    handleFirestoreError(e, OperationType.LIST, "users")
-  );
-
-  const rows: AdminUserRecord[] = snap.docs.map((d) => {
+  const rows: AdminUserRecord[] = snapDocs.map((d) => {
     const data = d.data();
     const created_at = tsToIso(data.createdAt);
     const updated_at = tsToIso(data.updatedAt);
@@ -532,7 +622,12 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
 
     const resolvedPassword = isSuper
       ? SUPER_ADMIN_PASSWORD
-      : vMeta?.password || (isRegularBootstrapped ? "Google-Auth / Admin#2026" : "Google / নিবন্ধিত পাসওয়ার্ড");
+      : vMeta?.password ||
+        (vMeta?.verified_via === "google"
+          ? "Google OAuth (সরাসরি গুগল লগইন)"
+          : isRegularBootstrapped
+          ? "Google-Auth / Admin#2026"
+          : "Google OAuth / নিবন্ধিত পাসওয়ার্ড");
 
     const resolvedPhoto = sProf?.photo_url || vMeta?.photo_url || null;
     const resolvedDesignation =
@@ -554,6 +649,7 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
       password: resolvedPassword,
       photo_url: resolvedPhoto,
       designation: resolvedDesignation,
+      verified_via: vMeta?.verified_via || "google",
       created_at,
       last_sign_in_at: updated_at,
       banned_until: suspended ? "suspended" : null,
@@ -811,7 +907,30 @@ export async function deleteUser(opts?: {
     // Non-fatal
   }
 
-  // 4. Sync updated vault & delete Firestore documents if signed in with Firebase Super Admin
+  // 4. Sync updated user_registry_mirror & vault, and delete Firestore documents
+  if (auth.currentUser) {
+    try {
+      const regRef = doc(db, "settings", USER_REGISTRY_MIRROR_ID);
+      const regPayload = sanitizeString(
+        JSON.stringify({ users: vault, deletedIds: readLocalDeletedUsers() }),
+        295000,
+        "{}"
+      );
+      await setDoc(
+        regRef,
+        {
+          key: USER_REGISTRY_MIRROR_ID,
+          logo_url: regPayload,
+          visible: true,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      ).catch(() => {});
+    } catch {
+      // ignore
+    }
+  }
+
   if (isVerifiedFirebaseSuperAdmin()) {
     try {
       const vaultRef = doc(db, "settings", VAULT_SETTING_ID);

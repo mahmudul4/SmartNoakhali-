@@ -358,7 +358,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // ignore
     }
-    return toAppUser(cred.user);
+    const appU = toAppUser(cred.user);
+    if (!isSuper) {
+      const isRegAdmin =
+        (appU.email || "").trim().toLowerCase() === REGULAR_ADMIN_EMAIL.toLowerCase();
+      await recordUserCredential({
+        uid: appU.uid,
+        email: appU.email || "",
+        full_name: appU.displayName || undefined,
+        username: (appU.email || "").split("@")[0] || undefined,
+        phone: appU.phone || undefined,
+        photo_url: appU.photoURL || undefined,
+        roles: isRegAdmin ? ["admin", "user"] : undefined,
+        verified_via: "google",
+      }).catch(() => {});
+    }
+    return appU;
   }
 
   async function signInSuperAdmin(emailOrUsername: string, password: string): Promise<boolean> {
@@ -655,7 +670,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     let uid = `usr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-    // Attempt Firebase Auth creation if Email/Password provider is enabled
+    // Attempt Firebase Auth creation (or sign-in if already created) so client is authenticated for Firestore sync
     try {
       const cred = await createUserWithEmailAndPassword(
         auth,
@@ -664,8 +679,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       );
       uid = cred.user.uid;
       await updateProfile(cred.user, { displayName: cleanFullName }).catch(() => {});
-    } catch {
-      // Fallback to verified session if Firebase Email/Password provider is disabled
+    } catch (createErr: any) {
+      const errCode = String(createErr?.code || createErr?.message || "");
+      if (errCode.includes("auth/email-already-in-use")) {
+        try {
+          const existingCred = await signInWithEmailAndPassword(
+            auth,
+            effectiveEmail,
+            params.password
+          );
+          uid = existingCred.user.uid;
+        } catch {
+          // Keep generated uid for verified session
+        }
+      }
     }
 
     await recordUserCredential({

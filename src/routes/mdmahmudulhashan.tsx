@@ -61,6 +61,7 @@ import {
   type SiteMetaConfig,
   type StaffProfileEntry,
 } from "@/lib/store";
+import { downloadAppPackageBinary } from "@/lib/pwa";
 import { useAuth } from "@/lib/auth";
 import {
   useCloudDonations,
@@ -1272,13 +1273,24 @@ function AppPackagesAdminPanel() {
             </div>
           </div>
 
-          <a
-            href={pkg?.downloadUrl || `/api/apps/download/${platform}`}
-            download={pkg?.fileName}
+          <button
+            type="button"
+            onClick={() => {
+              void downloadAppPackageBinary({
+                platform,
+                fileName: pkg?.fileName,
+                fileSize: pkg?.fileSize,
+                downloadUrl: pkg?.downloadUrl,
+                embeddedDataUrl: pkg?.embeddedDataUrl,
+                chunkCount: pkg?.chunkCount,
+              })
+                .then((res) => toast.success(`${res.fileName} ডাউনলোড শুরু হয়েছে`))
+                .catch((err) => toast.error(err?.message || "ডাউনলোড ব্যর্থ"));
+            }}
             className="flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary-deep hover:bg-primary/20"
           >
             <Download className="h-3.5 w-3.5" /> টেস্ট ডাউনলোড
-          </a>
+          </button>
         </div>
 
         {/* Direct File Upload Dropzone */}
@@ -1299,7 +1311,11 @@ function AppPackagesAdminPanel() {
           </p>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
             {pkg?.fileSize
-              ? `ফাইল সাইজ: ${(pkg.fileSize / 1024).toFixed(1)} KB • ভার্সন: v${pkg.version}`
+              ? `ফাইল সাইজ: ${
+                  pkg.fileSize >= 1024 * 1024
+                    ? `${(pkg.fileSize / (1024 * 1024)).toFixed(2)} MB`
+                    : `${(pkg.fileSize / 1024).toFixed(1)} KB`
+                } • ভার্সন: v${pkg.version}`
               : isIOS
                 ? "সমর্থিত ফাইল: .ipa, .mobileconfig"
                 : "সমর্থিত ফাইল: .apk"}
@@ -3312,9 +3328,22 @@ function UsersEditor() {
                       </button>
                       <p className="truncate text-xs text-muted-foreground">{u.email}</p>
                       <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                        {u.profile?.username && (
+                          <span className="font-mono text-primary-deep">@{u.profile.username}</span>
+                        )}
                         {u.profile?.phone && <span>📞 {u.profile.phone}</span>}
                         {(u.profile?.designation || u.designation) && (
                           <span>🏷️ {u.profile?.designation || u.designation}</span>
+                        )}
+                        <span className="font-mono text-[10px]">UID: {u.id.slice(0, 14)}</span>
+                        {u.verified_via && (
+                          <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary-deep">
+                            {u.verified_via === "google"
+                              ? "Google OAuth"
+                              : u.verified_via === "phone"
+                                ? "মোবাইল নিবন্ধন"
+                                : "ইমেইল নিবন্ধন"}
+                          </span>
                         )}
                       </div>
 
@@ -3624,8 +3653,19 @@ function UserDetailsModal({
         <div className="grid grid-cols-2 gap-2 text-xs">
           <Info label="পূর্ণ নাম" val={user.profile?.full_name || "—"} />
           <Info label="ইউজারনেম" val={user.profile?.username || "—"} />
-          <Info label="ফোন নম্বর" val={user.profile?.phone || "—"} />
+          <Info label="ইমেইল ঠিকানা" val={user.email || "—"} />
+          <Info label="মোবাইল নম্বর" val={user.profile?.phone || "—"} />
           <Info label="পদবি" val={user.profile?.designation || user.designation || "—"} />
+          <Info
+            label="লগইন মাধ্যম"
+            val={
+              user.verified_via === "google"
+                ? "Google সরাসরি লগইন"
+                : user.verified_via === "phone"
+                  ? "মোবাইল নিবন্ধন"
+                  : "ইমেইল / পাসওয়ার্ড"
+            }
+          />
           <Info label="একাউন্ট তৈরি" val={fmt(user.created_at)} />
           <Info label="শেষ লগইন" val={fmt(user.last_sign_in_at)} />
           <Info

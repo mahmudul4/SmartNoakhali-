@@ -699,6 +699,107 @@ export async function handler(event) {
     return jsonResponse(200, { ok: true });
   }
 
+  // 10. Mobile App Package Status, Upload & Direct Binary Download (/api/apps/*)
+  if (method === "GET" && apiPath === "/api/apps/status") {
+    const manifest = readJsonStore("app_packages_manifest.json", {});
+    return jsonResponse(200, { ok: true, apps: manifest });
+  }
+
+  if (method === "POST" && apiPath === "/api/apps/upload") {
+    const platform = body.platform === "ios" ? "ios" : body.platform === "android" ? "android" : "";
+    const fileDataBase64 = body.fileDataBase64;
+    if (!platform || !fileDataBase64 || typeof fileDataBase64 !== "string") {
+      return jsonResponse(400, { error: "অবৈধ অ্যাপ ফাইল বা প্ল্যাটফর্ম" });
+    }
+    ensureTmpDir();
+    const base64Clean = fileDataBase64.includes(",")
+      ? fileDataBase64.split(",")[1]
+      : fileDataBase64;
+    const buffer = Buffer.from(base64Clean, "base64");
+    const defaultExt = platform === "android" ? ".apk" : ".mobileconfig";
+    const safeOriginal = String(body.fileName || `Smart-Noakhali-${platform}${defaultExt}`)
+      .replace(/\s+\./g, ".")
+      .replace(/[^a-zA-Z0-9._-]/g, "_");
+    const savedFile = `smart-noakhali-${platform}-${Date.now()}-${safeOriginal}`;
+    try {
+      fs.writeFileSync(path.join(TMP_DIR, savedFile), buffer);
+    } catch {
+      // ignore
+    }
+    const manifest = readJsonStore("app_packages_manifest.json", {});
+    const meta = {
+      platform,
+      fileName: safeOriginal,
+      fileSize: buffer.length,
+      version: String(body.version || "2.0.0").trim(),
+      mimeType:
+        platform === "android"
+          ? "application/vnd.android.package-archive"
+          : body.mimeType || "application/x-apple-aspen-config",
+      uploadedAt: new Date().toISOString(),
+      savedFile,
+      downloadUrl: `/api/apps/download/${platform}`,
+    };
+    manifest[platform] = meta;
+    writeJsonStore("app_packages_manifest.json", manifest);
+    return jsonResponse(200, {
+      ok: true,
+      meta,
+      downloadUrl: `/api/apps/download/${platform}`,
+    });
+  }
+
+  if (method === "GET" && apiPath.startsWith("/api/apps/download/")) {
+    const platform = apiPath.endsWith("/ios") ? "ios" : "android";
+    const manifest = readJsonStore("app_packages_manifest.json", {});
+    const meta = manifest[platform] || {};
+    const defaultFileName =
+      platform === "android" ? "Smart-Noakhali-Android.apk" : "Smart-Noakhali-iOS.mobileconfig";
+    const defaultMime =
+      platform === "android"
+        ? "application/vnd.android.package-archive"
+        : "application/x-apple-aspen-config";
+    const bundledDownloadsDir = path.resolve(process.cwd(), "public", "downloads");
+
+    const candidates = [
+      meta.savedFile ? path.join(TMP_DIR, meta.savedFile) : "",
+      meta.savedFile ? path.join(bundledDownloadsDir, meta.savedFile) : "",
+      path.join(bundledDownloadsDir, defaultFileName),
+    ].filter(Boolean);
+
+    for (const candidatePath of candidates) {
+      try {
+        if (fs.existsSync(candidatePath)) {
+          const buf = fs.readFileSync(candidatePath);
+          const cleanName = String(meta.fileName || defaultFileName)
+            .replace(/\s+\./g, ".")
+            .replace(/\.json$/i, "");
+          return {
+            statusCode: 200,
+            isBase64Encoded: true,
+            headers: {
+              "Content-Type": meta.mimeType || defaultMime,
+              "Content-Disposition": `attachment; filename="${cleanName}"`,
+              "Cache-Control": "public, max-age=3600",
+            },
+            body: buf.toString("base64"),
+          };
+        }
+      } catch {
+        // try next candidate
+      }
+    }
+
+    return {
+      statusCode: 302,
+      headers: {
+        Location: `/downloads/${defaultFileName}`,
+        "Cache-Control": "no-store",
+      },
+      body: "",
+    };
+  }
+
   return jsonResponse(200, { ok: true });
 }
 

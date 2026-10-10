@@ -10,8 +10,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const DOWNLOADS_DIR = path.resolve(__dirname, "public", "downloads");
-const MANIFEST_PATH = path.join(DOWNLOADS_DIR, "manifest.json");
 const DATA_DIR = path.resolve(__dirname, "public", "data");
+const MANIFEST_PATH = path.join(DATA_DIR, "app_packages_manifest.json");
 const CHAT_STORE_PATH = path.join(DATA_DIR, "live_chat_store.json");
 const AUTH_USERS_PATH = path.join(DATA_DIR, "verified_users_store.json");
 const DELETED_USERS_PATH = path.join(DATA_DIR, "deleted_users.json");
@@ -33,17 +33,55 @@ interface AppBinaryMeta {
   mimeType: string;
   uploadedAt: string;
   savedFile: string;
+  downloadUrl?: string;
+}
+
+function getDefaultManifest(): Record<string, AppBinaryMeta> {
+  const androidFile = "Smart-Noakhali-Android.apk";
+  const iosFile = "Smart-Noakhali-iOS.mobileconfig";
+  const androidPath = path.join(DOWNLOADS_DIR, androidFile);
+  const iosPath = path.join(DOWNLOADS_DIR, iosFile);
+  const out: Record<string, AppBinaryMeta> = {};
+  if (fs.existsSync(androidPath)) {
+    const st = fs.statSync(androidPath);
+    out.android = {
+      platform: "android",
+      fileName: androidFile,
+      fileSize: st.size,
+      version: "2.0.0",
+      mimeType: "application/vnd.android.package-archive",
+      uploadedAt: st.mtime.toISOString(),
+      savedFile: androidFile,
+      downloadUrl: `/downloads/${androidFile}`,
+    };
+  }
+  if (fs.existsSync(iosPath)) {
+    const st = fs.statSync(iosPath);
+    out.ios = {
+      platform: "ios",
+      fileName: iosFile,
+      fileSize: st.size,
+      version: "2.0.0",
+      mimeType: "application/x-apple-aspen-config",
+      uploadedAt: st.mtime.toISOString(),
+      savedFile: iosFile,
+      downloadUrl: `/downloads/${iosFile}`,
+    };
+  }
+  return out;
 }
 
 function readManifest(): Record<string, AppBinaryMeta> {
+  const fallback = getDefaultManifest();
   try {
     if (fs.existsSync(MANIFEST_PATH)) {
-      return JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf-8"));
+      const parsed = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf-8"));
+      return { ...fallback, ...(parsed || {}) };
     }
   } catch {
     // ignore
   }
-  return {};
+  return fallback;
 }
 
 function writeManifest(data: Record<string, AppBinaryMeta>) {
@@ -1297,10 +1335,12 @@ async function startServer() {
       const savedFile = `smart-noakhali-${platform}-${Date.now()}-${safeOriginal}`;
       const targetPath = path.join(DOWNLOADS_DIR, savedFile);
 
-      // Clean up older binary for same platform
+      // Clean up older custom binary for same platform (keep canonical fallback updated too)
       const manifest = readManifest();
+      const canonicalName =
+        platform === "android" ? "Smart-Noakhali-Android.apk" : "Smart-Noakhali-iOS.mobileconfig";
       const prev = manifest[platform];
-      if (prev?.savedFile) {
+      if (prev?.savedFile && prev.savedFile !== canonicalName) {
         const oldPath = path.join(DOWNLOADS_DIR, prev.savedFile);
         if (fs.existsSync(oldPath)) {
           try {
@@ -1312,19 +1352,25 @@ async function startServer() {
       }
 
       fs.writeFileSync(targetPath, buffer);
+      // Also mirror to canonical path in public/downloads/ so static /downloads/... always matches
+      try {
+        fs.writeFileSync(path.join(DOWNLOADS_DIR, canonicalName), buffer);
+      } catch {
+        // ignore
+      }
 
       const meta: AppBinaryMeta = {
         platform,
         fileName: safeOriginal,
         fileSize: buffer.length,
-        version: (version || "1.0.0").trim(),
+        version: (version || "2.0.0").trim(),
         mimeType:
-          mimeType ||
-          (platform === "android"
+          platform === "android"
             ? "application/vnd.android.package-archive"
-            : "application/octet-stream"),
+            : mimeType || "application/x-apple-aspen-config",
         uploadedAt: new Date().toISOString(),
         savedFile,
+        downloadUrl: `/api/apps/download/${platform}`,
       };
 
       manifest[platform] = meta;
@@ -1347,14 +1393,27 @@ async function startServer() {
     const platform = req.params.platform === "ios" ? "ios" : "android";
     const manifest = readManifest();
     const meta = manifest[platform];
+    const defaultFileName =
+      platform === "android" ? "Smart-Noakhali-Android.apk" : "Smart-Noakhali-iOS.mobileconfig";
+    const defaultMime =
+      platform === "android"
+        ? "application/vnd.android.package-archive"
+        : "application/x-apple-aspen-config";
 
-    if (meta && meta.savedFile) {
-      const filePath = path.join(DOWNLOADS_DIR, meta.savedFile);
+    const candidates = [
+      meta?.savedFile ? path.join(DOWNLOADS_DIR, meta.savedFile) : "",
+      path.join(DOWNLOADS_DIR, defaultFileName),
+    ].filter(Boolean);
+
+    for (const filePath of candidates) {
       if (fs.existsSync(filePath)) {
-        res.setHeader("Content-Type", meta.mimeType || "application/octet-stream");
+        const cleanDownloadName = (meta?.fileName || defaultFileName)
+          .replace(/\s+\./g, ".")
+          .replace(/\.json$/i, "");
+        res.setHeader("Content-Type", meta?.mimeType || defaultMime);
         res.setHeader(
           "Content-Disposition",
-          `attachment; filename="${meta.fileName || `smart-noakhali-${platform}`}"`
+          `attachment; filename="${cleanDownloadName}"`
         );
         res.sendFile(filePath);
         return;
@@ -1362,6 +1421,28 @@ async function startServer() {
     }
 
     res.status(404).send("এই প্ল্যাটফর্মের অ্যাপ ফাইল এখনো আপলোড করা হয়নি।");
+  });
+
+  app.get("/downloads/:file", (req, res) => {
+    const requested = path.basename(req.params.file || "").replace(/\s+\./g, ".").replace(/\.json$/i, "");
+    if (!requested) {
+      res.status(404).end();
+      return;
+    }
+    const filePath = path.join(DOWNLOADS_DIR, requested);
+    if (!fs.existsSync(filePath)) {
+      res.status(404).end();
+      return;
+    }
+    const lower = requested.toLowerCase();
+    const mime = lower.endsWith(".apk")
+      ? "application/vnd.android.package-archive"
+      : lower.endsWith(".mobileconfig")
+        ? "application/x-apple-aspen-config"
+        : "application/octet-stream";
+    res.setHeader("Content-Type", mime);
+    res.setHeader("Content-Disposition", `attachment; filename="${requested}"`);
+    res.sendFile(filePath);
   });
 
   // ============================================================================
@@ -1580,7 +1661,7 @@ ${contextSummary}
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false, watch: null },
       appType: "spa",
     });
     app.use(vite.middlewares);

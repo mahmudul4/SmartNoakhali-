@@ -1,0 +1,487 @@
+import React, { useEffect, useState } from "react";
+import { Download, Smartphone, Share, PlusSquare, X, WifiOff, CheckCircle2 } from "lucide-react";
+import { doc, getDoc } from "firebase/firestore";
+import { registerSW } from "virtual:pwa-register";
+import { db } from "@/lib/firebase";
+
+// Register Service Worker in production; clean up any dev-sw in development
+if (typeof window !== "undefined") {
+  if (import.meta.env.PROD) {
+    try {
+      registerSW({ immediate: true });
+    } catch {
+      // ignore in non-SW environments
+    }
+  } else if ("serviceWorker" in navigator) {
+    navigator.serviceWorker
+      .getRegistrations()
+      .then((regs) => {
+        for (const r of regs) {
+          void r.unregister();
+        }
+      })
+      .catch(() => {});
+  }
+}
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+}
+
+let globalDeferredPrompt: BeforeInstallPromptEvent | null = null;
+const promptListeners = new Set<(e: BeforeInstallPromptEvent | null) => void>();
+
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeinstallprompt", (e: Event) => {
+    e.preventDefault();
+    globalDeferredPrompt = e as BeforeInstallPromptEvent;
+    promptListeners.forEach((fn) => fn(globalDeferredPrompt));
+  });
+
+  window.addEventListener("appinstalled", () => {
+    globalDeferredPrompt = null;
+    promptListeners.forEach((fn) => fn(null));
+  });
+}
+
+const IDB_NAME = "sn_app_binary_idb_v1";
+const IDB_STORE = "binaries";
+
+function openAppBinaryIdb(): Promise<IDBDatabase | null> {
+  if (typeof window === "undefined" || !("indexedDB" in window)) {
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve) => {
+    try {
+      const req = window.indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const database = req.result;
+        if (!database.objectStoreNames.contains(IDB_STORE)) {
+          database.createObjectStore(IDB_STORE);
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+export async function saveBinaryToIdb(
+  platform: "android" | "ios",
+  fileName: string,
+  fileSize: number,
+  buffer: ArrayBuffer
+): Promise<void> {
+  const idb = await openAppBinaryIdb();
+  if (!idb) return;
+  await new Promise<void>((resolve) => {
+    try {
+      const tx = idb.transaction(IDB_STORE, "readwrite");
+      tx.objectStore(IDB_STORE).put(
+        {
+          platform,
+          fileName,
+          fileSize,
+          buffer,
+          savedAt: new Date().toISOString(),
+        },
+        platform
+      );
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
+export async function loadBinaryFromIdb(
+  platform: "android" | "ios",
+  expectedSize?: number
+): Promise<ArrayBuffer | null> {
+  const idb = await openAppBinaryIdb();
+  if (!idb) return null;
+  return new Promise((resolve) => {
+    try {
+      const tx = idb.transaction(IDB_STORE, "readonly");
+      const req = tx.objectStore(IDB_STORE).get(platform);
+      req.onsuccess = () => {
+        const res = req.result as
+          | { fileSize?: number; buffer?: ArrayBuffer }
+          | undefined;
+        if (res?.buffer && res.buffer.byteLength >= 1000) {
+          if (!expectedSize || Math.abs(res.buffer.byteLength - expectedSize) <= 64) {
+            resolve(res.buffer);
+            return;
+          }
+        }
+        resolve(null);
+      };
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+async function decodeBase64DataUrlToBuffer(dataUrlOrBase64: string): Promise<ArrayBuffer | null> {
+  try {
+    const cleanB64 = dataUrlOrBase64.includes(",")
+      ? dataUrlOrBase64.split(",")[1]
+      : dataUrlOrBase64;
+    const binStr = atob(cleanB64.trim());
+    const len = binStr.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binStr.charCodeAt(i);
+    }
+    return bytes.buffer;
+  } catch {
+    return null;
+  }
+}
+
+export async function loadChunkedBinaryFromFirestore(
+  platform: "android" | "ios",
+  chunkCount: number
+): Promise<ArrayBuffer | null> {
+  if (!chunkCount || chunkCount <= 0 || chunkCount > 80) return null;
+  try {
+    const chunkPromises = Array.from({ length: chunkCount }, (_, idx) =>
+      getDoc(doc(db, "settings", `app_pkg_chunk_${platform}_${idx}`))
+    );
+    const snaps = await Promise.all(chunkPromises);
+    const parts: string[] = [];
+    for (const s of snaps) {
+      if (!s.exists()) return null;
+      const chunkStr = s.data()?.logo_url;
+      if (typeof chunkStr !== "string" || !chunkStr) return null;
+      parts.push(chunkStr);
+    }
+    const joined = parts.join("");
+    return await decodeBase64DataUrlToBuffer(joined);
+  } catch {
+    return null;
+  }
+}
+
+export function sanitizeAppFileName(rawName: string | undefined, platform: "android" | "ios"): string {
+  const fallback =
+    platform === "android" ? "Smart-Noakhali-Android.apk" : "Smart-Noakhali-iOS.mobileconfig";
+  if (!rawName || !rawName.trim()) return fallback;
+  let cleaned = rawName
+    .trim()
+    .replace(/\s+\./g, ".")
+    .replace(/\s+/g, "-")
+    .replace(/\.json$/i, "");
+  if (platform === "android") {
+    cleaned = cleaned.replace(/\.apk$/i, ".apk");
+    if (!cleaned.toLowerCase().endsWith(".apk")) {
+      cleaned = `${cleaned}.apk`;
+    }
+  } else {
+    if (
+      !cleaned.toLowerCase().endsWith(".mobileconfig") &&
+      !cleaned.toLowerCase().endsWith(".ipa")
+    ) {
+      cleaned = `${cleaned}.mobileconfig`;
+    }
+  }
+  return cleaned;
+}
+
+export async function downloadAppPackageBinary(opts: {
+  platform: "android" | "ios";
+  fileName?: string;
+  fileSize?: number;
+  downloadUrl?: string;
+  embeddedDataUrl?: string;
+  chunkCount?: number;
+}): Promise<{ ok: boolean; fileName: string; byteLength: number }> {
+  const { platform, embeddedDataUrl, downloadUrl, fileSize, chunkCount } = opts;
+  const cleanFileName = sanitizeAppFileName(opts.fileName, platform);
+  const mimeType =
+    platform === "android"
+      ? "application/vnd.android.package-archive"
+      : "application/x-apple-aspen-config";
+  const staticPath =
+    platform === "android"
+      ? "/downloads/Smart-Noakhali-Android.apk"
+      : "/downloads/Smart-Noakhali-iOS.mobileconfig";
+  const apiPath = `/api/apps/download/${platform}`;
+
+  // 1. Check local IndexedDB binary cache first if size matches
+  const cachedBuf = await loadBinaryFromIdb(platform, fileSize);
+  if (cachedBuf && cachedBuf.byteLength > 1000) {
+    triggerBlobDownload(cachedBuf, mimeType, cleanFileName);
+    return { ok: true, fileName: cleanFileName, byteLength: cachedBuf.byteLength };
+  }
+
+  // 2. If embedded data URL is present and valid binary (> 1KB), decode directly
+  if (embeddedDataUrl && embeddedDataUrl.startsWith("data:")) {
+    const buf = await decodeBase64DataUrlToBuffer(embeddedDataUrl);
+    if (buf && buf.byteLength > 1000) {
+      await saveBinaryToIdb(platform, cleanFileName, buf.byteLength, buf);
+      triggerBlobDownload(buf, mimeType, cleanFileName);
+      return { ok: true, fileName: cleanFileName, byteLength: buf.byteLength };
+    }
+  }
+
+  // 3. If multi-megabyte binary is stored in Firebase Firestore chunks, reassemble & download
+  if (chunkCount && chunkCount > 0) {
+    const chunkedBuf = await loadChunkedBinaryFromFirestore(platform, chunkCount);
+    if (chunkedBuf && chunkedBuf.byteLength > 1000) {
+      await saveBinaryToIdb(platform, cleanFileName, chunkedBuf.byteLength, chunkedBuf);
+      triggerBlobDownload(chunkedBuf, mimeType, cleanFileName);
+      return { ok: true, fileName: cleanFileName, byteLength: chunkedBuf.byteLength };
+    }
+  }
+
+  // 4. Try candidate URLs (API download first if custom uploaded, then static /downloads/*)
+  const candidates = Array.from(
+    new Set(
+      [
+        downloadUrl && !downloadUrl.startsWith("/api/apps/download") ? downloadUrl : "",
+        apiPath,
+        staticPath,
+        downloadUrl || "",
+      ].filter(Boolean)
+    )
+  );
+
+  for (const url of candidates) {
+    try {
+      const resp = await fetch(url, { cache: "no-cache" });
+      if (!resp.ok) continue;
+      const contentType = (resp.headers.get("content-type") || "").toLowerCase();
+      // Reject JSON or HTML fallback responses so Chrome never saves .apk.json or 0.01KB files!
+      if (contentType.includes("application/json") || contentType.includes("text/html")) {
+        continue;
+      }
+      const buf = await resp.arrayBuffer();
+      if (buf.byteLength < 1000) {
+        continue;
+      }
+      // Also verify first bytes aren't JSON '{"ok":' or HTML '<!doctype'
+      const prefix = new TextDecoder("utf-8", { fatal: false })
+        .decode(buf.slice(0, 32))
+        .trim()
+        .toLowerCase();
+      if (prefix.startsWith("{") || prefix.startsWith("<!doctype") || prefix.startsWith("<html")) {
+        continue;
+      }
+
+      await saveBinaryToIdb(platform, cleanFileName, buf.byteLength, buf);
+      triggerBlobDownload(buf, mimeType, cleanFileName);
+      return { ok: true, fileName: cleanFileName, byteLength: buf.byteLength };
+    } catch {
+      // try next candidate
+    }
+  }
+
+  throw new Error("অ্যাপ ফাইলটি ডাউনলোড করা যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।");
+}
+
+function triggerBlobDownload(buf: ArrayBuffer, mimeType: string, fileName: string) {
+  const blob = new Blob([buf], { type: mimeType });
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = fileName;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    try {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      // ignore
+    }
+  }, 4000);
+}
+
+export function usePWAInstall() {
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(
+    () => globalDeferredPrompt
+  );
+  const [isInstalled, setIsInstalled] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
+  const [isAndroid, setIsAndroid] = useState(false);
+
+  useEffect(() => {
+    const isStandalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      (window.navigator as unknown as { standalone?: boolean }).standalone === true;
+    setIsInstalled(isStandalone);
+
+    const ua = window.navigator.userAgent.toLowerCase();
+    setIsIOS(/iphone|ipad|ipod/.test(ua));
+    setIsAndroid(/android/.test(ua));
+
+    const listener = (e: BeforeInstallPromptEvent | null) => {
+      setDeferredPrompt(e);
+      if (!e) {
+        const nowStandalone =
+          window.matchMedia("(display-mode: standalone)").matches ||
+          (window.navigator as unknown as { standalone?: boolean }).standalone === true;
+        if (nowStandalone) setIsInstalled(true);
+      }
+    };
+    promptListeners.add(listener);
+    return () => {
+      promptListeners.delete(listener);
+    };
+  }, []);
+
+  const install = async (): Promise<boolean> => {
+    const promptEvent = deferredPrompt || globalDeferredPrompt;
+    if (!promptEvent) return false;
+    await promptEvent.prompt();
+    const { outcome } = await promptEvent.userChoice;
+    if (outcome === "accepted") {
+      setIsInstalled(true);
+      globalDeferredPrompt = null;
+      setDeferredPrompt(null);
+      return true;
+    }
+    return false;
+  };
+
+  return {
+    isInstallable: Boolean(deferredPrompt || globalDeferredPrompt),
+    isInstalled,
+    isIOS,
+    isAndroid,
+    install,
+  };
+}
+
+export function useOnlineStatus() {
+  const [isOnline, setIsOnline] = useState(
+    typeof navigator !== "undefined" ? navigator.onLine : true
+  );
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
+  return isOnline;
+}
+
+export const PWAInstallButton: React.FC = () => {
+  const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
+  const [showIOSGuide, setShowIOSGuide] = useState(false);
+
+  if (isInstalled) {
+    return null;
+  }
+
+  if (isInstallable) {
+    return (
+      <button
+        type="button"
+        onClick={() => void install()}
+        className="flex shrink-0 items-center gap-1 rounded-full bg-white/15 px-2.5 py-1.5 text-[11px] font-bold text-amber-200 ring-1 ring-amber-300/40 transition hover:bg-white/25 active:scale-95"
+        title="এক ক্লিকে অ্যাপ ইনস্টল করুন"
+      >
+        <Download className="h-3.5 w-3.5 shrink-0" />
+        <span className="hidden xs:inline sm:inline">অ্যাপ ইনস্টল</span>
+      </button>
+    );
+  }
+
+  if (isIOS) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => setShowIOSGuide(true)}
+          className="flex shrink-0 items-center gap-1 rounded-full bg-white/15 px-2.5 py-1.5 text-[11px] font-bold text-amber-200 ring-1 ring-amber-300/40 transition hover:bg-white/25"
+        >
+          <Smartphone className="h-3.5 w-3.5 shrink-0" />
+          <span className="hidden sm:inline">iOS অ্যাপ</span>
+        </button>
+
+        {showIOSGuide && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+            onClick={() => setShowIOSGuide(false)}
+          >
+            <div
+              className="w-full max-w-sm rounded-3xl bg-card p-5 text-foreground shadow-elevated"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-border pb-3">
+                <h3 className="font-display text-base font-bold text-primary-deep">
+                  iPhone / iPad-এ অ্যাপ ইনস্টল করুন
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowIOSGuide(false)}
+                  className="rounded-full bg-muted p-1 text-muted-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="mt-3 space-y-2.5 text-xs text-muted-foreground">
+                <p className="flex items-center gap-2">
+                  <Share className="h-4 w-4 shrink-0 text-primary" />
+                  <span>
+                    ১. Safari ব্রাউজারের নিচে <strong>Share</strong> বাটনে ট্যাপ করুন।
+                  </span>
+                </p>
+                <p className="flex items-center gap-2">
+                  <PlusSquare className="h-4 w-4 shrink-0 text-primary" />
+                  <span>
+                    ২. নিচে স্ক্রল করে <strong>Add to Home Screen</strong> নির্বাচন করুন।
+                  </span>
+                </p>
+                <p className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                  <span>
+                    ৩. উপরে ডান কোণায় <strong>Add</strong> ট্যাপ করলেই অ্যাপ ইনস্টল হয়ে যাবে!
+                  </span>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowIOSGuide(false)}
+                className="mt-4 w-full rounded-2xl bg-gradient-hero py-2.5 text-xs font-bold text-white shadow-card"
+              >
+                বুঝেছি
+              </button>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
+
+  return null;
+};
+
+export const OfflineIndicator: React.FC = () => {
+  const isOnline = useOnlineStatus();
+
+  if (isOnline) return null;
+
+  return (
+    <div className="fixed bottom-4 left-4 z-50 flex items-center gap-2 rounded-full bg-amber-600 px-3.5 py-2 text-xs font-bold text-white shadow-elevated">
+      <WifiOff className="h-3.5 w-3.5 animate-pulse" />
+      <span>অফলাইন মোড — সংরক্ষিত ডাটা ব্যবহৃত হচ্ছে</span>
+    </div>
+  );
+};

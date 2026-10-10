@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useLogo, useCategories } from "@/lib/store";
 import { useAuth } from "@/lib/auth";
+import { PWAInstallButton } from "@/lib/pwa";
 
 export function SiteHeader() {
   const [open, setOpen] = useState(false);
@@ -124,6 +125,7 @@ export function SiteHeader() {
         </Link>
 
         <div className="flex shrink-0 items-center gap-1.5">
+          <PWAInstallButton />
           {isAuthed && isStaff && (
             <Link
               to="/mdmahmudulhashan"
