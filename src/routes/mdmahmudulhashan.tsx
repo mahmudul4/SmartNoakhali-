@@ -1,0 +1,6453 @@
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useRef, useState } from "react";
+import {
+  Loader2,
+  Users as UsersIcon,
+  KeyRound,
+  MessageCircle,
+  RefreshCcw,
+  ShieldOff,
+  ShieldAlert,
+  FileText,
+  Send,
+  ArrowLeft,
+  Lock,
+  Unlock,
+  ShieldCheck,
+  LogOut,
+  Check,
+  X,
+  Trash2,
+  Upload,
+  Image as ImageIcon,
+  AlertCircle,
+  Smartphone,
+  Apple,
+  Plus,
+  Eye,
+  EyeOff,
+  Edit3,
+  Save,
+  Bell,
+  LayoutGrid,
+  ArrowUp,
+  ArrowDown,
+  RotateCcw,
+  HandCoins,
+  Search,
+  UserCircle2,
+  Copy,
+  Download,
+  Settings,
+  Activity,
+  Camera,
+  CheckCircle2,
+  Sparkles,
+  Database,
+} from "lucide-react";
+import { toast } from "sonner";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { auth, SUPER_ADMIN_EMAIL } from "@/lib/firebase";
+import { CATEGORY_ICONS, CATEGORY_TINTS } from "@/data/categories";
+import {
+  useLogo,
+  useCategories,
+  useDonationConfig,
+  useStaffProfiles,
+  useAppPackages,
+  useSiteMetaConfig,
+  type CategoryConfigItem,
+  type DonationConfig,
+  type SiteMetaConfig,
+  type StaffProfileEntry,
+} from "@/lib/store";
+import { useAuth } from "@/lib/auth";
+import {
+  useCloudDonations,
+  useCloudSubmissions,
+  useCloudDonors,
+  useCloudDonorEvents,
+  useAppLinks,
+  useEmergencyRequests,
+  useCategoryAccess,
+  useEmergencyBanners,
+  useChatThreads,
+  useThreadMessages,
+  markThreadRead,
+  uploadPublicImage,
+  getUserSubmissionCounts,
+  type BannerRow,
+  type ChatThreadRow,
+  type SubmissionRow,
+  type DonationRow,
+  type DonorRow,
+  type DonorEventRow,
+  type EmergencyReqRow,
+} from "@/lib/cloud";
+import {
+  listUsers,
+  createUser,
+  setUserRole,
+  deleteUser,
+  suspendUser,
+  resetUserPassword,
+  updateUserProfile,
+  listThreadsWithUsers,
+  isProtectedMainSuperAdmin,
+  recordUserCredential,
+  type AdminUserRecord,
+} from "@/lib/admin-client";
+import {
+  useStaffAuditLogs,
+  recordStaffActivity,
+  restoreDeletedAuditItem,
+  type StaffActivityLogEntry,
+} from "@/lib/staff-audit";
+import { AttachmentView, VoiceRecorderButton } from "@/routes/chat";
+import { SecurityPanel } from "@/components/security/SecurityPanel";
+import {
+  getLoginLockoutRemainingSeconds,
+  recordFailedAdminLogin,
+  clearFailedAdminLogins,
+  getAdminSecurityPin,
+  isAdminPanelLocked,
+  setAdminPanelLocked,
+  getSavedBackupCodes,
+  logEvent,
+} from "@/lib/security";
+
+export const Route = createFileRoute("/mdmahmudulhashan")({
+  head: () => ({
+    meta: [
+      { title: "সুপার এডমিন ও স্টাফ কন্ট্রোল প্যানেল — স্মার্ট নোয়াখালী" },
+      { name: "robots", content: "noindex, nofollow" },
+    ],
+  }),
+  component: AdminPage,
+});
+
+function AdminPage() {
+  const navigate = useNavigate();
+  const { isAuthed, isAdmin, isEditor, isModerator, isMainAdmin, loading, signOut, user } =
+    useAuth();
+  const isStaff = isAdmin || isEditor || isModerator || isMainAdmin;
+  const wasAuthedRef = useRef(false);
+  const wasNonSuperStaffRef = useRef(false);
+  const [screenLocked, setScreenLocked] = useState(() => isAdminPanelLocked());
+
+  useEffect(() => {
+    if (isAuthed && isStaff) {
+      wasAuthedRef.current = true;
+      wasNonSuperStaffRef.current = !isMainAdmin;
+    } else if (isAuthed && !isStaff && !loading) {
+      // Regular logged-in user should not see Super Admin login page
+      navigate({ to: "/auth", replace: true });
+    } else if (wasAuthedRef.current && !loading && !isAuthed) {
+      wasAuthedRef.current = false;
+      if (wasNonSuperStaffRef.current) {
+        navigate({ to: "/auth", replace: true });
+      }
+    }
+  }, [isAuthed, isStaff, isMainAdmin, loading, navigate]);
+
+  if (loading) {
+    return (
+      <div className="px-4 py-12 text-center text-sm text-muted-foreground">
+        <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin text-primary" />
+        এডমিন সিকিউরিটি যাচাই হচ্ছে...
+      </div>
+    );
+  }
+
+  if (!isAuthed || !isStaff) {
+    if (wasNonSuperStaffRef.current || (isAuthed && !isStaff)) {
+      return (
+        <div className="px-4 py-12 text-center text-sm text-muted-foreground">
+          <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin text-primary" />
+          লগইন পেজে নিয়ে যাওয়া হচ্ছে...
+        </div>
+      );
+    }
+    return <AdminLoginForm />;
+  }
+
+  const handleLogout = async () => {
+    const wasSuper = isMainAdmin;
+    wasAuthedRef.current = false;
+    wasNonSuperStaffRef.current = !wasSuper;
+    setAdminPanelLocked(false);
+    setScreenLocked(false);
+    await signOut();
+    toast.success("সফলভাবে লগআউট হয়েছে");
+    if (!wasSuper) {
+      navigate({ to: "/auth", replace: true });
+    }
+  };
+
+  const activePin = user?.id ? getAdminSecurityPin(user.id) : "";
+  if (screenLocked && activePin) {
+    return (
+      <AdminPinLockScreen
+        userId={user?.id || "super_admin_mahmudul"}
+        userEmail={user?.email || ""}
+        onUnlock={() => {
+          setAdminPanelLocked(false);
+          setScreenLocked(false);
+        }}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
+  return (
+    <Dashboard
+      onLogout={handleLogout}
+      isMainAdmin={isMainAdmin}
+      onLockScreen={() => {
+        setAdminPanelLocked(true);
+        setScreenLocked(true);
+        void logEvent("panel_locked", "Admin panel locked manually");
+        toast.info("এডমিন প্যানেল পিন লক করা হয়েছে");
+      }}
+    />
+  );
+}
+
+function AdminPinLockScreen({
+  userId,
+  userEmail,
+  onUnlock,
+  onLogout,
+}: {
+  userId: string;
+  userEmail: string;
+  onUnlock: () => void;
+  onLogout: () => void | Promise<void>;
+}) {
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+
+  function handleUnlock(e: React.FormEvent) {
+    e.preventDefault();
+    const savedPin = getAdminSecurityPin(userId);
+    const backupCodes = getSavedBackupCodes(userId);
+    const trimmed = pin.trim();
+    if ((savedPin && trimmed === savedPin) || backupCodes.includes(trimmed)) {
+      setError("");
+      void logEvent("panel_unlocked", "Unlocked with PIN/backup code");
+      toast.success("প্যানেল আনলক হয়েছে");
+      onUnlock();
+    } else {
+      setError("ভুল সিকিউরিটি পিন বা রিকভারি কোড!");
+      toast.error("ভুল পিন কোড");
+    }
+  }
+
+  return (
+    <div className="mx-auto max-w-md px-4 pt-12 pb-20">
+      <div className="rounded-3xl border border-primary/30 bg-gradient-card p-6 text-center shadow-elevated">
+        <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-primary/15 text-primary ring-2 ring-primary/30">
+          <Lock className="h-8 w-8" />
+        </div>
+        <h2 className="font-display text-xl font-bold text-primary-deep">
+          এডমিন সিকিউরিটি লক সক্রিয়
+        </h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {userEmail} • প্যানেলে প্রবেশ করতে আপনার গোপন পিন অথবা ব্যাকআপ কোড দিন
+        </p>
+
+        <form onSubmit={handleUnlock} className="mt-5 space-y-3">
+          <input
+            type="password"
+            value={pin}
+            onChange={(e) => setPin(e.target.value)}
+            placeholder="পিন বা ব্যাকআপ কোড দিন"
+            autoFocus
+            className="w-full rounded-2xl border border-border bg-background px-4 py-3 text-center font-mono text-lg tracking-widest outline-none focus:border-primary"
+          />
+          {error && <p className="text-xs font-semibold text-destructive">{error}</p>}
+          <button
+            type="submit"
+            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-hero py-3 text-sm font-bold text-primary-foreground shadow-elevated"
+          >
+            <Unlock className="h-4 w-4" /> আনলক করুন
+          </button>
+        </form>
+
+        <button
+          type="button"
+          onClick={() => void onLogout()}
+          className="mt-4 text-xs font-semibold text-muted-foreground underline hover:text-destructive"
+        >
+          লগআউট করুন
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AdminLoginForm() {
+  const { signInSuperAdmin } = useAuth();
+  const { logo } = useLogo();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    const lockedSec = getLoginLockoutRemainingSeconds();
+    if (lockedSec > 0) {
+      return toast.error(
+        `অতিরিক্ত ভুল চেষ্টার কারণে লক করা হয়েছে। ${lockedSec} সেকেন্ড পর চেষ্টা করুন।`
+      );
+    }
+
+    const cleanInput = username.trim().toLowerCase();
+    const isSuperInput =
+      cleanInput === SUPER_ADMIN_EMAIL.toLowerCase() ||
+      cleanInput === "mahmudul" ||
+      cleanInput === "mahmud" ||
+      cleanInput === "mdmahmudulhashan0";
+
+    if (!isSuperInput) {
+      toast.error("শুধুমাত্র সুপার এডমিন এই প্যানেল দিয়ে লগইন করতে পারবেন!");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const ok = await signInSuperAdmin(username, password);
+      if (ok) {
+        clearFailedAdminLogins();
+        await recordUserCredential({
+          uid: auth.currentUser?.uid || "super_admin_mahmudul",
+          email: SUPER_ADMIN_EMAIL,
+          password: password,
+          full_name: "মেইন সুপার এডমিন",
+          roles: ["admin", "editor", "moderator", "user"],
+        });
+        toast.success("স্বাগতম, মেইন সুপার এডমিন!");
+        return;
+      }
+      recordFailedAdminLogin();
+      await logEvent("login_failed", username);
+      toast.error("ভুল সুপার এডমিন পাসওয়ার্ড!");
+    } catch (err: any) {
+      recordFailedAdminLogin();
+      await logEvent("login_failed", username);
+      toast.error(err?.message || "ভুল ইমেইল বা পাসওয়ার্ড");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mx-auto max-w-md px-4 pt-12 pb-20">
+      <div className="rounded-3xl bg-gradient-card p-6 shadow-elevated">
+        <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-white p-1 ring-2 ring-gold shadow-gold">
+          <img
+            src={logo}
+            alt="Smart Noakhali Logo"
+            className="h-full w-full rounded-full object-contain"
+          />
+        </div>
+
+        <form onSubmit={onSubmit} className="space-y-3.5">
+          <div>
+            <label className="text-xs font-semibold text-primary-deep">
+              ইমেইল বা ইউজারনেমঃ
+            </label>
+            <input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
+              required
+              className="mt-1 w-full rounded-xl border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-primary-deep">
+              পাসওয়ার্ডঃ
+            </label>
+            <div className="relative mt-1">
+              <input
+                type={showPw ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                required
+                className="w-full rounded-xl border bg-background px-3 py-2.5 pr-10 text-sm outline-none focus:border-primary"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPw((v) => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+          <button
+            disabled={busy}
+            type="submit"
+            className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-hero py-3 text-sm font-semibold text-primary-foreground shadow-elevated disabled:opacity-60"
+          >
+            {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+            সুপার এডমিন হিসেবে লগইন করুন
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+type Tab =
+  | "overview"
+  | "activity"
+  | "profile"
+  | "categories"
+  | "info"
+  | "donation"
+  | "donors"
+  | "events"
+  | "emergency"
+  | "banners"
+  | "chat"
+  | "apps"
+  | "users"
+  | "access"
+  | "settings"
+  | "security";
+
+function getRoleBadgeText(
+  isMainAdmin: boolean,
+  isAdmin: boolean,
+  isEditor: boolean,
+  isModerator: boolean
+) {
+  if (isMainAdmin) return "সুপার এডমিন (সব অ্যাকসেস)";
+  if (isAdmin) return "এডমিন (নির্ধারিত অ্যাকসেস)";
+  if (isEditor) return "এডিটর";
+  if (isModerator) return "মোডারেটর";
+  return "স্টাফ";
+}
+
+function Dashboard({
+  onLogout,
+  isMainAdmin,
+  onLockScreen,
+}: {
+  onLogout: () => void | Promise<void>;
+  isMainAdmin: boolean;
+  onLockScreen: () => void;
+}) {
+  const {
+    isFirebaseVerifiedAdmin,
+    signInWithGoogle,
+    user,
+    isAdmin,
+    isEditor,
+    isModerator,
+  } = useAuth();
+  const { categories, allCategories } = useCategories();
+  const { getStaffProfile } = useStaffProfiles();
+  const subs = useCloudSubmissions();
+  const dons = useCloudDonations();
+  const donors = useCloudDonors();
+  const events = useCloudDonorEvents();
+  const emerg = useEmergencyRequests();
+  const banners = useEmergencyBanners();
+  const chatThreadsHook = useChatThreads();
+  const unreadChatCount = chatThreadsHook.items.reduce(
+    (sum, t) => sum + (Number(t.staff_unread) || 0),
+    0
+  );
+  const auditHook = useStaffAuditLogs();
+  const deletedAuditCount = auditHook.logs.filter(
+    (l) => l.action_type === "delete" && !l.restored
+  ).length;
+  const { logo } = useLogo();
+  const [tab, setTab] = useState<Tab>("overview");
+
+  const myStaffProfile =
+    getStaffProfile(user?.id) || getStaffProfile(user?.email);
+  const myAvatar = myStaffProfile?.photo_url || logo;
+  const myDisplayName =
+    myStaffProfile?.full_name ||
+    user?.displayName ||
+    (isMainAdmin ? "মেইন সুপার এডমিন" : user?.email?.split("@")[0] || "এডমিন");
+  const myRoleLabel = getRoleBadgeText(isMainAdmin, isAdmin, isEditor, isModerator);
+  const hasPin = Boolean(user?.id && getAdminSecurityPin(user.id));
+
+  const pendingSubs = subs.items.filter((s) => s.status === "pending");
+  const pendingDons = dons.items.filter((d) => d.status === "pending");
+  const pendingDonors = donors.items.filter((d) => d.status === "pending");
+  const pendingEvents = events.items.filter((e) => e.status === "pending");
+  const pendingEmerg = emerg.items.filter((e) => e.status === "pending");
+  const totalAmount = dons.items
+    .filter((d) => d.status === "approved")
+    .reduce((s, x) => s + Number(x.amount), 0);
+  const approvedDonors = donors.items.filter((d) => d.status === "approved").length;
+  const activeBanners = banners.items.filter((b) => b.visible).length;
+  const totalPending =
+    pendingSubs.length +
+    (isMainAdmin ? pendingDons.length : 0) +
+    pendingDonors.length +
+    pendingEvents.length +
+    pendingEmerg.length;
+
+  // Enforce strict tab isolation so non-Super Admins cannot access Super Admin tabs
+  useEffect(() => {
+    if (
+      !isMainAdmin &&
+      (tab === "activity" ||
+        tab === "categories" ||
+        tab === "donation" ||
+        tab === "users" ||
+        tab === "access" ||
+        tab === "apps" ||
+        tab === "settings")
+    ) {
+      setTab("overview");
+    }
+  }, [isMainAdmin, tab]);
+
+  return (
+    <div className="mx-auto max-w-3xl px-4 pb-28 pt-4">
+      {/* Top Personal Profile & Control Header */}
+      <div className="mb-4 rounded-3xl bg-gradient-hero p-4 text-primary-foreground shadow-elevated">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setTab("profile")}
+              className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-full bg-white p-0.5 ring-2 ring-gold shadow-gold"
+              title="প্রোফাইল ফটো পরিবর্তন করুন"
+            >
+              <img
+                src={myAvatar}
+                alt={myDisplayName}
+                className="h-full w-full rounded-full object-cover"
+              />
+              <span className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition group-hover:opacity-100">
+                <Camera className="h-4 w-4 text-white" />
+              </span>
+            </button>
+            <div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <p className="font-display text-base font-bold">{myDisplayName}</p>
+                <span className="inline-flex items-center gap-1 rounded-full bg-gold/25 px-2.5 py-0.5 text-[10px] font-bold text-gold ring-1 ring-gold/50">
+                  <ShieldCheck className="h-3 w-3" /> {myRoleLabel}
+                </span>
+              </div>
+              <p className="text-xs opacity-90">
+                {user?.email || SUPER_ADMIN_EMAIL} •{" "}
+                {totalPending > 0 ? `${totalPending} টি অপেক্ষমাণ` : "সব আপডেট"}
+              </p>
+              <button
+                type="button"
+                onClick={() => setTab("profile")}
+                className="mt-1 inline-flex items-center gap-1 rounded-full bg-white/15 px-2.5 py-0.5 text-[10px] font-semibold text-white hover:bg-white/25"
+              >
+                <UserCircle2 className="h-3 w-3" /> আমার প্রোফাইল ও ফটো আপলোড
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            {hasPin && (
+              <button
+                type="button"
+                onClick={onLockScreen}
+                title="প্যানেল লক করুন"
+                className="flex items-center gap-1 rounded-full bg-amber-400/20 px-2.5 py-1.5 text-xs font-bold text-gold ring-1 ring-gold/40 transition hover:bg-amber-400/30"
+              >
+                <Lock className="h-3.5 w-3.5" /> লক
+              </button>
+            )}
+            <button
+              onClick={() => window.location.reload()}
+              title="রিফ্রেশ"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 transition hover:bg-white/25"
+            >
+              <RefreshCcw className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => void onLogout()}
+              className="flex items-center gap-1 rounded-full bg-white/15 px-3 py-1.5 text-xs font-semibold transition hover:bg-white/25 active:scale-95"
+            >
+              <LogOut className="h-3.5 w-3.5" /> লগআউট
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats Grid */}
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        <Stat label="সক্রিয় ক্যাটাগরি" value={`${categories.length}/${allCategories.length}`} />
+        <Stat
+          label="অপেক্ষমাণ তথ্য"
+          value={String(pendingSubs.length)}
+          accent={pendingSubs.length > 0}
+        />
+        {isMainAdmin && (
+          <Stat
+            label="অপেক্ষমাণ অনুদান"
+            value={String(pendingDons.length)}
+            accent={pendingDons.length > 0}
+          />
+        )}
+        <Stat
+          label="অপেক্ষমাণ দাতা"
+          value={String(pendingDonors.length)}
+          accent={pendingDonors.length > 0}
+        />
+        {isMainAdmin && (
+          <Stat label="মোট অনুদান" value={`${totalAmount.toLocaleString("bn-BD")}৳`} />
+        )}
+        <Stat label="অনুমোদিত দাতা" value={String(approvedDonors)} />
+        <Stat
+          label="জরুরী রিকোয়েস্ট"
+          value={String(pendingEmerg.length)}
+          accent={pendingEmerg.length > 0}
+        />
+        <Stat label="সক্রিয় ব্যানার" value={String(activeBanners)} />
+      </div>
+
+      {/* Navigation Tabs */}
+      <div className="mt-5 flex flex-wrap gap-1.5 rounded-2xl bg-muted p-1.5">
+        <TabBtn active={tab === "overview"} onClick={() => setTab("overview")}>
+          ড্যাশবোর্ড
+        </TabBtn>
+        {isMainAdmin && (
+          <TabBtn
+            active={tab === "activity"}
+            onClick={() => setTab("activity")}
+            badge={deletedAuditCount > 0 ? deletedAuditCount : auditHook.logs.length}
+          >
+            🕵️ স্টাফ অ্যাক্টিভিটি ও ডিলিট লগ
+          </TabBtn>
+        )}
+        <TabBtn active={tab === "profile"} onClick={() => setTab("profile")}>
+          আমার প্রোফাইল
+        </TabBtn>
+        {isMainAdmin && (
+          <TabBtn active={tab === "categories"} onClick={() => setTab("categories")}>
+            ক্যাটাগরি
+          </TabBtn>
+        )}
+        <TabBtn active={tab === "info"} onClick={() => setTab("info")} badge={pendingSubs.length}>
+          তথ্য
+        </TabBtn>
+        {isMainAdmin && (
+          <TabBtn
+            active={tab === "donation"}
+            onClick={() => setTab("donation")}
+            badge={pendingDons.length}
+          >
+            অনুদান
+          </TabBtn>
+        )}
+        <TabBtn
+          active={tab === "donors"}
+          onClick={() => setTab("donors")}
+          badge={pendingDonors.length}
+        >
+          দাতা
+        </TabBtn>
+        <TabBtn
+          active={tab === "events"}
+          onClick={() => setTab("events")}
+          badge={pendingEvents.length}
+        >
+          রক্তদান
+        </TabBtn>
+        <TabBtn
+          active={tab === "emergency"}
+          onClick={() => setTab("emergency")}
+          badge={pendingEmerg.length}
+        >
+          জরুরী
+        </TabBtn>
+        <TabBtn active={tab === "banners"} onClick={() => setTab("banners")}>
+          ব্যানার
+        </TabBtn>
+        <TabBtn
+          active={tab === "chat"}
+          onClick={() => setTab("chat")}
+          badge={unreadChatCount}
+        >
+          লাইভ চ্যাট
+        </TabBtn>
+        {isMainAdmin && (
+          <TabBtn active={tab === "apps"} onClick={() => setTab("apps")}>
+            অ্যাপ আপলোড
+          </TabBtn>
+        )}
+        {isMainAdmin && (
+          <TabBtn active={tab === "users"} onClick={() => setTab("users")}>
+            ইউজার ও পাসওয়ার্ড
+          </TabBtn>
+        )}
+        {isMainAdmin && (
+          <TabBtn active={tab === "access"} onClick={() => setTab("access")}>
+            অ্যাকসেস
+          </TabBtn>
+        )}
+        {isMainAdmin && (
+          <TabBtn active={tab === "settings"} onClick={() => setTab("settings")}>
+            সেটিংস
+          </TabBtn>
+        )}
+        <TabBtn active={tab === "security"} onClick={() => setTab("security")}>
+          নিরাপত্তা
+        </TabBtn>
+      </div>
+
+      {/* Active Tab Content */}
+      <div className="mt-4">
+        {tab === "overview" && (
+          <OverviewPanel
+            onJump={setTab}
+            isMainAdmin={isMainAdmin}
+            pendingSubs={pendingSubs.length}
+            pendingDons={pendingDons.length}
+            pendingDonors={pendingDonors.length}
+            pendingEvents={pendingEvents.length}
+            pendingEmerg={pendingEmerg.length}
+            activeBanners={activeBanners}
+            allSubs={subs.items}
+            recentSubs={subs.items.slice(0, 5)}
+            recentDons={dons.items.slice(0, 5)}
+            auditLogs={auditHook.logs}
+          />
+        )}
+
+        {tab === "activity" && isMainAdmin && (
+          <StaffActivityAuditPanel auditHook={auditHook} />
+        )}
+
+        {tab === "profile" && <MyStaffProfilePanel isMainAdmin={isMainAdmin} />}
+
+        {tab === "categories" && isMainAdmin && <CategoriesEditor />}
+
+        {tab === "info" && <SubmissionsAdminPanel subs={subs} />}
+
+        {tab === "donation" && isMainAdmin && <DonationsAdminPanel dons={dons} />}
+
+        {tab === "donors" && <DonorsAdminPanel donors={donors} />}
+
+        {tab === "events" && <EventsAdminPanel events={events} donors={donors} />}
+
+        {tab === "emergency" && <EmergencyEditor />}
+        {tab === "banners" && <BannersEditor />}
+        {tab === "chat" && <ChatThreadsAdmin />}
+        {tab === "apps" && isMainAdmin && <AppPackagesAdminPanel />}
+        {tab === "users" && isMainAdmin && <UsersEditor />}
+        {tab === "access" && isMainAdmin && <AccessEditor />}
+        {tab === "settings" && isMainAdmin && <SettingsAdminPanel />}
+        {tab === "security" && <SecurityPanel />}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Staff Individual Profile Workspace ("প্রোফাইলের মত কাজ করবে + প্রোফাইল ফটো আপলোড")
+// Regular Admin / Editor / Moderator ONLY see their own profile.
+// Super Admin sees their own profile PLUS all staff profiles!
+// ============================================================================
+function MyStaffProfilePanel({ isMainAdmin }: { isMainAdmin: boolean }) {
+  const { user, username: authUsername, isAdmin, isEditor, isModerator } = useAuth();
+  const { profiles: staffMap, getStaffProfile, upsertStaffProfile } = useStaffProfiles();
+  const { logo } = useLogo();
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  const existing = getStaffProfile(user?.id) || getStaffProfile(user?.email);
+  const roleLabel = isMainAdmin
+    ? "সুপার এডমিন"
+    : isAdmin
+      ? "এডমিন"
+      : isEditor
+        ? "এডিটর"
+        : isModerator
+          ? "মোডারেটর"
+          : "স্টাফ";
+
+  const [fullName, setFullName] = useState(
+    existing?.full_name || user?.displayName || (isMainAdmin ? "মেইন সুপার এডমিন" : "")
+  );
+  const [username, setUsername] = useState(existing?.username || authUsername || "");
+  const [phone, setPhone] = useState(existing?.phone || user?.phone || "");
+  const [designation, setDesignation] = useState(
+    existing?.designation || (isMainAdmin ? "প্রধান প্রশাসক (Super Admin)" : roleLabel)
+  );
+  const [photoUrl, setPhotoUrl] = useState(existing?.photo_url || "");
+  const [saving, setSaving] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+
+  // Super Admin editing another staff member's photo/profile
+  const staffTargetInputRef = useRef<HTMLInputElement>(null);
+  const [targetStaffUid, setTargetStaffUid] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (existing) {
+      if (existing.full_name) setFullName(existing.full_name);
+      if (existing.phone) setPhone(existing.phone);
+      if (existing.designation) setDesignation(existing.designation);
+      if (existing.photo_url) setPhotoUrl(existing.photo_url);
+    }
+  }, [existing?.full_name, existing?.phone, existing?.designation, existing?.photo_url]);
+
+  async function onUploadMyPhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !user) return;
+    if (!file.type.startsWith("image/")) return toast.error("শুধু ছবি ফাইল নির্বাচন করুন");
+    if (file.size > 5 * 1024 * 1024) return toast.error("ছবি ৫MB এর কম হতে হবে");
+
+    setUploadingPhoto(true);
+    try {
+      const compressed = await uploadPublicImage(file, `staff_avatars/${user.id}`);
+      if (!compressed) throw new Error("ছবি প্রসেস করা যায়নি");
+      setPhotoUrl(compressed);
+
+      await upsertStaffProfile({
+        uid: user.id,
+        email: user.email || "",
+        full_name: fullName.trim() || user.email?.split("@")[0] || roleLabel,
+        role_label: roleLabel,
+        photo_url: compressed,
+        phone: phone.trim(),
+        designation: designation.trim(),
+      });
+      await updateUserProfile({
+        data: {
+          user_id: user.id,
+          email: user.email || undefined,
+          full_name: fullName.trim() || undefined,
+          username: username.trim() || undefined,
+          phone: phone.trim() || undefined,
+          photo_url: compressed,
+          designation: designation.trim() || undefined,
+        },
+      });
+      await logEvent("profile_photo_updated", user.email || user.id);
+      toast.success("প্রোফাইল ফটো সফলভাবে আপডেট হয়েছে!");
+    } catch (err: any) {
+      toast.error(err?.message || "ফটো আপলোড ব্যর্থ");
+    } finally {
+      setUploadingPhoto(false);
+    }
+  }
+
+  async function handleSaveMyProfile(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user) return;
+    if (!fullName.trim()) return toast.error("আপনার নাম লিখুন");
+    setSaving(true);
+    try {
+      await upsertStaffProfile({
+        uid: user.id,
+        email: user.email || "",
+        full_name: fullName.trim(),
+        role_label: roleLabel,
+        photo_url: photoUrl,
+        phone: phone.trim(),
+        designation: designation.trim() || roleLabel,
+      });
+      await updateUserProfile({
+        data: {
+          user_id: user.id,
+          email: user.email || undefined,
+          full_name: fullName.trim(),
+          username: username.trim() || undefined,
+          phone: phone.trim() || undefined,
+          photo_url: photoUrl || undefined,
+          designation: designation.trim() || undefined,
+        },
+      });
+      toast.success("আপনার প্রোফাইল সংরক্ষিত হয়েছে!");
+    } catch (err: any) {
+      toast.error(err?.message || "সংরক্ষণ ব্যর্থ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function onSuperAdminStaffPhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !targetStaffUid) return;
+    const item = staffMap[targetStaffUid];
+    if (!item) return;
+    const compressed = await uploadPublicImage(file, `staff_avatars/${targetStaffUid}`);
+    if (!compressed) return toast.error("ফটো আপলোড ব্যর্থ");
+    try {
+      await upsertStaffProfile({
+        ...item,
+        photo_url: compressed,
+      });
+      await updateUserProfile({
+        data: {
+          user_id: targetStaffUid,
+          photo_url: compressed,
+        },
+      });
+      toast.success(`${item.full_name}-এর প্রোফাইল ফটো আপডেট হয়েছে`);
+    } catch (err: any) {
+      toast.error(err?.message || "ত্রুটি");
+    } finally {
+      setTargetStaffUid(null);
+    }
+  }
+
+  // Filter deduplicated staff list for Super Admin
+  const allStaffItems: StaffProfileEntry[] = (Object.values(staffMap) as StaffProfileEntry[]).filter(
+    (item, idx, arr) =>
+      arr.findIndex(
+        (x) =>
+          (x.email && item.email && x.email.toLowerCase() === item.email.toLowerCase()) ||
+          x.uid === item.uid
+      ) === idx
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-3xl bg-card p-5 shadow-card">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
+          <div>
+            <h2 className="flex items-center gap-2 font-display text-base font-bold text-primary-deep">
+              <UserCircle2 className="h-5 w-5 text-primary" /> আমার ব্যক্তিগত এডমিন প্রোফাইল
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              এখানে আপনার নাম ও প্রোফাইল ফটো সেট করুন। আপনি লাইভ চ্যাটে গ্রাহকের মেসেজের উত্তর দিলে আপনার এই নাম ও ফটো গ্রাহকের কাছে শো করবে।
+            </p>
+          </div>
+          <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary-deep">
+            পদবি: {roleLabel}
+          </span>
+        </div>
+
+        <div className="mt-5 grid gap-6 md:grid-cols-[200px_1fr]">
+          {/* Avatar Upload Column */}
+          <div className="flex flex-col items-center text-center">
+            <div className="relative h-28 w-28 overflow-hidden rounded-full border-4 border-primary/20 bg-muted shadow-elevated">
+              <img
+                src={photoUrl || logo}
+                alt={fullName}
+                className="h-full w-full object-cover"
+              />
+              {uploadingPhoto && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                  <Loader2 className="h-6 w-6 animate-spin text-white" />
+                </div>
+              )}
+            </div>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              onChange={onUploadMyPhoto}
+              className="hidden"
+            />
+            <button
+              type="button"
+              disabled={uploadingPhoto}
+              onClick={() => photoInputRef.current?.click()}
+              className="mt-3 flex items-center gap-1.5 rounded-full bg-gradient-hero px-4 py-2 text-xs font-bold text-primary-foreground shadow-card"
+            >
+              <Camera className="h-3.5 w-3.5" /> প্রোফাইল ফটো আপলোড
+            </button>
+            <p className="mt-1.5 text-[10px] text-muted-foreground">
+              JPG, PNG বা WebP (সর্বোচ্চ ৫MB)
+            </p>
+          </div>
+
+          {/* Profile Form Column */}
+          <form onSubmit={handleSaveMyProfile} className="space-y-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="text-xs font-semibold text-primary-deep">
+                  আপনার প্রদর্শিত নাম (লাইভ চ্যাটে দেখাবে) *
+                </label>
+                <input
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="আপনার পূর্ণ নাম লিখুন"
+                  required
+                  className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-primary-deep">
+                  ইমেইল (লগইন আইডি)
+                </label>
+                <input
+                  value={user?.email || ""}
+                  disabled
+                  className="mt-1 w-full rounded-xl border border-border bg-muted px-3 py-2 text-sm text-muted-foreground"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-primary-deep">পদবি / দায়িত্ব</label>
+                <input
+                  value={designation}
+                  onChange={(e) => setDesignation(e.target.value)}
+                  placeholder="যেমন: মডারেটর / কাস্টমার সাপোর্ট"
+                  className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-primary-deep">মোবাইল নাম্বার</label>
+                <input
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="01XXXXXXXXX"
+                  className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+
+            {/* Live Chat Responder Preview */}
+            <div className="rounded-2xl border border-primary/20 bg-primary/5 p-3">
+              <p className="mb-2 text-[11px] font-bold text-primary-deep">
+                💬 লাইভ চ্যাটে গ্রাহকের কাছে আপনার উত্তর যেভাবে দেখাবে (প্রিভিউ):
+              </p>
+              <div className="flex items-start gap-2.5">
+                <img
+                  src={photoUrl || logo}
+                  alt={fullName}
+                  className="h-9 w-9 shrink-0 rounded-full border border-primary/30 bg-white object-cover"
+                />
+                <div className="rounded-2xl rounded-tl-sm border border-border bg-card px-3.5 py-2 text-xs shadow-sm">
+                  <div className="mb-0.5 flex items-center gap-1.5">
+                    <span className="font-bold text-primary-deep">
+                      {fullName || "আপনার নাম"}
+                    </span>
+                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-bold text-primary">
+                      {roleLabel}
+                    </span>
+                  </div>
+                  <p className="text-foreground">
+                    আসসালামু আলাইকুম! আমি আপনাকে কীভাবে সাহায্য করতে পারি?
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-1">
+              <p className="text-[11px] text-muted-foreground">
+                🔒 আপনার প্রোফাইল সম্পূর্ণ ব্যক্তিগত — অন্য কোনো এডমিন, এডিটর বা মোডারেটর এটি দেখতে পাবে না।
+              </p>
+              <button
+                type="submit"
+                disabled={saving}
+                className="flex items-center gap-1.5 rounded-full bg-gradient-hero px-5 py-2.5 text-xs font-bold text-primary-foreground shadow-elevated disabled:opacity-60"
+              >
+                {saving ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Save className="h-3.5 w-3.5" />
+                )}
+                প্রোফাইল সংরক্ষণ করুন
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Super Admin Only: View and manage ALL Staff Profiles */}
+      {isMainAdmin && (
+        <div className="rounded-3xl bg-card p-5 shadow-card">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <h3 className="flex items-center gap-2 font-display text-sm font-bold text-primary-deep">
+                <ShieldCheck className="h-4 w-4 text-primary" /> সকল এডমিন, এডিটর ও মোডারেটর প্রোফাইল (শুধু সুপার এডমিন দেখতে পান)
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                এডমিন, এডিটর ও মোডারেটররা কেউ কাউকে দেখতে পারে না — শুধুমাত্র আপনি (সুপার এডমিন) সবার প্রোফাইল ও ফটো দেখতে এবং পরিবর্তন করতে পারবেন।
+              </p>
+            </div>
+          </div>
+
+          <input
+            ref={staffTargetInputRef}
+            type="file"
+            accept="image/*"
+            onChange={onSuperAdminStaffPhotoChange}
+            className="hidden"
+          />
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            {allStaffItems.map((st) => (
+              <div
+                key={st.uid}
+                className="flex items-center gap-3 rounded-2xl border border-border bg-muted/20 p-3"
+              >
+                <img
+                  src={st.photo_url || logo}
+                  alt={st.full_name}
+                  className="h-12 w-12 shrink-0 rounded-full border border-primary/30 bg-white object-cover"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <p className="truncate text-sm font-bold text-primary-deep">{st.full_name}</p>
+                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                      {st.role_label}
+                    </span>
+                  </div>
+                  <p className="truncate text-[11px] text-muted-foreground">{st.email}</p>
+                  {st.designation && (
+                    <p className="truncate text-[10px] text-muted-foreground">{st.designation}</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTargetStaffUid(st.uid);
+                    staffTargetInputRef.current?.click();
+                  }}
+                  className="shrink-0 rounded-full bg-primary/10 px-2.5 py-1.5 text-[11px] font-bold text-primary-deep hover:bg-primary/20"
+                >
+                  <Camera className="mr-1 inline h-3 w-3" /> ফটো
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Super Admin: Direct Android (.APK) & iPhone (.IPA / iOS) App File Upload
+// No URL input — direct file upload & 1-click customer download!
+// ============================================================================
+function AppPackagesAdminPanel() {
+  const { packages, uploadAppBinary, updateAppMeta } = useAppPackages();
+  const { items: cloudLinks, update: updateCloudLink } = useAppLinks();
+  const [uploadingPlatform, setUploadingPlatform] = useState<"android" | "ios" | null>(null);
+  const [savingPlatform, setSavingPlatform] = useState<"android" | "ios" | null>(null);
+
+  const androidInputRef = useRef<HTMLInputElement>(null);
+  const iosInputRef = useRef<HTMLInputElement>(null);
+
+  const [drafts, setDrafts] = useState({
+    android: {
+      label: packages.android?.label || "Android অ্যাপ (.APK)",
+      version: packages.android?.version || "2.0.0",
+      releaseNotes:
+        packages.android?.releaseNotes ||
+        "স্মার্ট নোয়াখালী অফিশিয়াল অ্যান্ড্রয়েড অ্যাপ — এক ক্লিকে ডাউনলোড ও ইনস্টল করুন।",
+      visible: packages.android?.visible ?? true,
+    },
+    ios: {
+      label: packages.ios?.label || "iPhone অ্যাপ (iOS)",
+      version: packages.ios?.version || "2.0.0",
+      releaseNotes:
+        packages.ios?.releaseNotes ||
+        "স্মার্ট নোয়াখালী অফিশিয়াল আইফোন (iOS) অ্যাপ — এক ক্লিকে ডাউনলোড ও ইনস্টল করুন।",
+      visible: packages.ios?.visible ?? true,
+    },
+  });
+
+  useEffect(() => {
+    setDrafts({
+      android: {
+        label: packages.android?.label || "Android অ্যাপ (.APK)",
+        version: packages.android?.version || "2.0.0",
+        releaseNotes:
+          packages.android?.releaseNotes ||
+          "স্মার্ট নোয়াখালী অফিশিয়াল অ্যান্ড্রয়েড অ্যাপ — এক ক্লিকে ডাউনলোড ও ইনস্টল করুন।",
+        visible: packages.android?.visible ?? true,
+      },
+      ios: {
+        label: packages.ios?.label || "iPhone অ্যাপ (iOS)",
+        version: packages.ios?.version || "2.0.0",
+        releaseNotes:
+          packages.ios?.releaseNotes ||
+          "স্মার্ট নোয়াখালী অফিশিয়াল আইফোন (iOS) অ্যাপ — এক ক্লিকে ডাউনলোড ও ইনস্টল করুন।",
+        visible: packages.ios?.visible ?? true,
+      },
+    });
+  }, [packages.android, packages.ios]);
+
+  async function handleFileSelect(
+    platform: "android" | "ios",
+    e: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    setUploadingPlatform(platform);
+    try {
+      const draft = drafts[platform];
+      const pkg = await uploadAppBinary(platform, file, {
+        label: draft.label,
+        version: draft.version,
+        releaseNotes: draft.releaseNotes,
+        visible: draft.visible,
+      });
+
+      const row = cloudLinks.find((l) => l.platform === platform);
+      if (row) {
+        await updateCloudLink(row.id, {
+          label: draft.label,
+          url: pkg.embeddedDataUrl || pkg.downloadUrl || `/api/apps/download/${platform}`,
+          visible: draft.visible,
+        });
+      }
+
+      toast.success(
+        `${platform === "android" ? "Android (.APK)" : "iPhone (iOS)"} অ্যাপ ফাইল সফলভাবে আপলোড হয়েছে!`
+      );
+    } catch (err: any) {
+      toast.error(err?.message || "অ্যাপ আপলোড ব্যর্থ হয়েছে");
+    } finally {
+      setUploadingPlatform(null);
+    }
+  }
+
+  async function handleSaveMeta(platform: "android" | "ios") {
+    setSavingPlatform(platform);
+    try {
+      const draft = drafts[platform];
+      await updateAppMeta(platform, {
+        label: draft.label,
+        version: draft.version,
+        releaseNotes: draft.releaseNotes,
+        visible: draft.visible,
+      });
+      const row = cloudLinks.find((l) => l.platform === platform);
+      if (row) {
+        await updateCloudLink(row.id, {
+          label: draft.label,
+          visible: draft.visible,
+        });
+      }
+      toast.success("অ্যাপ তথ্য সংরক্ষিত হয়েছে");
+    } catch (err: any) {
+      toast.error(err?.message || "ত্রুটি");
+    } finally {
+      setSavingPlatform(null);
+    }
+  }
+
+  const renderPlatformCard = (platform: "android" | "ios") => {
+    const isIOS = platform === "ios";
+    const pkg = packages[platform];
+    const draft = drafts[platform];
+    const isUploading = uploadingPlatform === platform;
+    const isSaving = savingPlatform === platform;
+
+    return (
+      <div
+        key={platform}
+        className="space-y-3 rounded-3xl border border-border bg-card p-5 shadow-card"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div
+              className={`flex h-12 w-12 items-center justify-center rounded-2xl text-white shadow-md ${
+                isIOS
+                  ? "bg-gradient-to-br from-slate-800 to-slate-950"
+                  : "bg-gradient-to-br from-emerald-600 to-emerald-800"
+              }`}
+            >
+              {isIOS ? <Apple className="h-6 w-6" /> : <Smartphone className="h-6 w-6" />}
+            </div>
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                {isIOS ? "Apple iPhone / iOS Package" : "Android APK Package"}
+              </span>
+              <h3 className="font-display text-base font-bold text-primary-deep">
+                {isIOS ? "আইফোন অ্যাপ আপলোড (iOS)" : "অ্যান্ড্রয়েড অ্যাপ আপলোড (Android)"}
+              </h3>
+            </div>
+          </div>
+
+          <a
+            href={pkg?.downloadUrl || `/api/apps/download/${platform}`}
+            download={pkg?.fileName}
+            className="flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary-deep hover:bg-primary/20"
+          >
+            <Download className="h-3.5 w-3.5" /> টেস্ট ডাউনলোড
+          </a>
+        </div>
+
+        {/* Direct File Upload Dropzone */}
+        <div className="rounded-2xl border-2 border-dashed border-primary/30 bg-primary/5 p-4 text-center">
+          <input
+            ref={isIOS ? iosInputRef : androidInputRef}
+            type="file"
+            accept={
+              isIOS
+                ? ".ipa,.mobileconfig,.zip,application/octet-stream"
+                : ".apk,application/vnd.android.package-archive,application/octet-stream"
+            }
+            onChange={(e) => void handleFileSelect(platform, e)}
+            className="hidden"
+          />
+          <p className="text-xs font-bold text-primary-deep">
+            {pkg?.fileName ? `বর্তমান ফাইল: ${pkg.fileName}` : "সরাসরি অ্যাপ ফাইল আপলোড করুন"}
+          </p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            {pkg?.fileSize
+              ? `ফাইল সাইজ: ${(pkg.fileSize / 1024).toFixed(1)} KB • ভার্সন: v${pkg.version}`
+              : isIOS
+                ? "সমর্থিত ফাইল: .ipa, .mobileconfig"
+                : "সমর্থিত ফাইল: .apk"}
+          </p>
+          <button
+            type="button"
+            disabled={isUploading}
+            onClick={() =>
+              isIOS ? iosInputRef.current?.click() : androidInputRef.current?.click()
+            }
+            className="mx-auto mt-3 flex items-center justify-center gap-2 rounded-full bg-gradient-hero px-5 py-2.5 text-xs font-bold text-primary-foreground shadow-elevated disabled:opacity-60"
+          >
+            {isUploading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" /> আপলোড হচ্ছে...
+              </>
+            ) : (
+              <>
+                <Upload className="h-4 w-4" />{" "}
+                {isIOS
+                  ? "iPhone (.IPA / Profile) ফাইল আপলোড করুন"
+                  : "Android (.APK) ফাইল আপলোড করুন"}
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* App Label, Version & Release Notes */}
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+          <div>
+            <label className="text-[11px] font-semibold text-muted-foreground">
+              অ্যাপের নাম/লেবেল
+            </label>
+            <input
+              value={draft.label}
+              onChange={(e) =>
+                setDrafts({
+                  ...drafts,
+                  [platform]: { ...draft, label: e.target.value },
+                })
+              }
+              className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold"
+            />
+          </div>
+          <div>
+            <label className="text-[11px] font-semibold text-muted-foreground">
+              ভার্সন (Version)
+            </label>
+            <input
+              value={draft.version}
+              onChange={(e) =>
+                setDrafts({
+                  ...drafts,
+                  [platform]: { ...draft, version: e.target.value },
+                })
+              }
+              placeholder="2.0.0"
+              className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 font-mono text-sm"
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="text-[11px] font-semibold text-muted-foreground">
+              রিলিজ নোটস / সংক্ষিপ্ত বিবরণ
+            </label>
+            <input
+              value={draft.releaseNotes}
+              onChange={(e) =>
+                setDrafts({
+                  ...drafts,
+                  [platform]: { ...draft, releaseNotes: e.target.value },
+                })
+              }
+              className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between pt-1">
+          <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold">
+            <input
+              type="checkbox"
+              checked={draft.visible}
+              onChange={(e) =>
+                setDrafts({
+                  ...drafts,
+                  [platform]: { ...draft, visible: e.target.checked },
+                })
+              }
+            />
+            গ্রাহকদের জন্য ডাউনলোড পেজে দৃশ্যমান রাখুন
+          </label>
+          <button
+            type="button"
+            disabled={isSaving}
+            onClick={() => void handleSaveMeta(platform)}
+            className="flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-bold text-primary-foreground"
+          >
+            <Save className="h-3.5 w-3.5" /> {isSaving ? "সংরক্ষণ হচ্ছে..." : "সংরক্ষণ করুন"}
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4">
+        <p className="flex items-center gap-2 font-display text-sm font-bold text-primary-deep">
+          <Sparkles className="h-4 w-4 text-primary" /> সরাসরি অ্যান্ড্রয়েড ও আইফোন অ্যাপ আপলোড (শুধু সুপার এডমিন)
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          এখানে কোনো বাহ্যিক URL দেওয়ার প্রয়োজন নেই। আপনার ডিভাইস থেকে সরাসরি Android (.APK) এবং iPhone (.IPA / iOS Profile) ফাইল আপলোড করুন — গ্রাহকরা এক ক্লিকেই ডাউনলোড করতে পারবেন।
+        </p>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        {renderPlatformCard("android")}
+        {renderPlatformCard("ios")}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Super Admin: Full Category Manager (ক্যাটাগরি পরিবর্তন, নতুন যোগ, লুকানো/দেখানো, ক্রম)
+// ============================================================================
+function CategoriesEditor() {
+  const {
+    rawItems,
+    updateCategory,
+    addCategory,
+    deleteCategory,
+    moveCategory,
+    resetCategories,
+  } = useCategories();
+  const [search, setSearch] = useState("");
+  const [editingSlug, setEditingSlug] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<Partial<CategoryConfigItem>>({});
+  const [showAdd, setShowAdd] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [newCat, setNewCat] = useState({
+    slug: "",
+    bn: "",
+    en: "",
+    iconName: "Users",
+    tint: CATEGORY_TINTS[0].value,
+    description: "",
+    visible: true,
+  });
+
+  const filtered = rawItems.filter((c) =>
+    `${c.bn} ${c.en} ${c.slug} ${c.description}`.toLowerCase().includes(search.toLowerCase())
+  );
+
+  function startEdit(c: CategoryConfigItem) {
+    setEditingSlug(c.slug);
+    setEditDraft({ ...c });
+  }
+
+  async function saveEdit(slug: string) {
+    setBusy(true);
+    try {
+      await updateCategory(slug, editDraft);
+      setEditingSlug(null);
+      toast.success("ক্যাটাগরি আপডেট হয়েছে");
+    } catch (e) {
+      toast.error((e as Error).message || "আপডেট ব্যর্থ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleAddCategory() {
+    if (!newCat.slug.trim() || !newCat.bn.trim()) {
+      return toast.error("ক্যাটাগরির বাংলা নাম ও ইংরেজি স্লাগ আবশ্যক");
+    }
+    setBusy(true);
+    try {
+      await addCategory({
+        slug: newCat.slug.trim(),
+        bn: newCat.bn.trim(),
+        en: newCat.en.trim() || newCat.slug.trim(),
+        iconName: newCat.iconName,
+        tint: newCat.tint,
+        description: newCat.description.trim() || newCat.bn.trim(),
+        visible: newCat.visible,
+      });
+      toast.success("নতুন ক্যাটাগরি যোগ হয়েছে");
+      setNewCat({
+        slug: "",
+        bn: "",
+        en: "",
+        iconName: "Users",
+        tint: CATEGORY_TINTS[0].value,
+        description: "",
+        visible: true,
+      });
+      setShowAdd(false);
+    } catch (e) {
+      toast.error((e as Error).message || "যোগ করা যায়নি");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleReset() {
+    setBusy(true);
+    try {
+      await resetCategories();
+      toast.success("ক্যাটাগরি ডিফল্টে রিসেট হয়েছে");
+    } catch (e) {
+      toast.error((e as Error).message || "ত্রুটি");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-2xl bg-card p-4 shadow-card">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="flex items-center gap-2 font-display text-sm font-bold text-primary-deep">
+              <LayoutGrid className="h-4 w-4 text-primary" /> সকল ক্যাটাগরি পরিচালনা ({rawItems.length} টি)
+            </p>
+            <p className="text-xs text-muted-foreground">
+              সুপার এডমিন হিসেবে যেকোনো ক্যাটাগরির নাম, বিবরণ, আইকন, রঙ ও অবস্থান পরিবর্তন করুন
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => setShowAdd((v) => !v)}
+              className="flex items-center gap-1 rounded-full bg-gradient-hero px-3.5 py-1.5 text-xs font-bold text-primary-foreground shadow-card"
+            >
+              <Plus className="h-3.5 w-3.5" /> নতুন ক্যাটাগরি
+            </button>
+            <button
+              type="button"
+              onClick={handleReset}
+              title="ডিফল্ট রিসেট"
+              className="flex items-center gap-1 rounded-full bg-muted px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+            >
+              <RotateCcw className="h-3.5 w-3.5" /> ডিফল্ট
+            </button>
+          </div>
+        </div>
+
+        {showAdd && (
+          <div className="mt-4 space-y-2.5 rounded-2xl border border-primary/30 bg-primary/5 p-3.5">
+            <p className="font-display text-xs font-bold text-primary-deep">
+              নতুন ক্যাটাগরি তৈরি করুন
+            </p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <input
+                value={newCat.bn}
+                onChange={(e) => setNewCat({ ...newCat, bn: e.target.value })}
+                placeholder="বাংলা নাম * (যেমন: আইনজীবী)"
+                className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              />
+              <input
+                value={newCat.slug}
+                onChange={(e) => setNewCat({ ...newCat, slug: e.target.value })}
+                placeholder="ইংরেজি স্লাগ * (যেমন: lawyer)"
+                className="rounded-xl border border-border bg-background px-3 py-2 font-mono text-sm"
+              />
+              <input
+                value={newCat.en}
+                onChange={(e) => setNewCat({ ...newCat, en: e.target.value })}
+                placeholder="ইংরেজি নাম (যেমন: Lawyers)"
+                className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              />
+              <input
+                value={newCat.description}
+                onChange={(e) => setNewCat({ ...newCat, description: e.target.value })}
+                placeholder="সংক্ষিপ্ত বিবরণ (যেমন: জেলা জজ কোর্টের আইনজীবী)"
+                className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              />
+              <select
+                value={newCat.iconName}
+                onChange={(e) => setNewCat({ ...newCat, iconName: e.target.value })}
+                className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              >
+                {Object.keys(CATEGORY_ICONS).map((k) => (
+                  <option key={k} value={k}>
+                    আইকন: {k}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={newCat.tint}
+                onChange={(e) => setNewCat({ ...newCat, tint: e.target.value })}
+                className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              >
+                {CATEGORY_TINTS.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={handleAddCategory}
+                className="flex items-center gap-1 rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground"
+              >
+                <Save className="h-3.5 w-3.5" /> যোগ করুন
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAdd(false)}
+                className="rounded-full bg-muted px-3 py-1.5 text-xs font-semibold"
+              >
+                বাতিল
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="relative mt-3">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="ক্যাটাগরি খুঁজুন..."
+            className="w-full rounded-xl border border-border bg-background py-2 pl-9 pr-3 text-sm"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {filtered.map((c, idx) => {
+          const IconComp = CATEGORY_ICONS[c.iconName] || CATEGORY_ICONS.Users;
+          const isEditing = editingSlug === c.slug;
+
+          if (isEditing) {
+            return (
+              <div
+                key={c.slug}
+                className="space-y-2.5 rounded-2xl border border-primary/40 bg-card p-4 shadow-elevated"
+              >
+                <p className="text-xs font-bold text-primary-deep">
+                  ক্যাটাগরি সম্পাদনা: {c.slug}
+                </p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted-foreground">
+                      বাংলা নাম
+                    </label>
+                    <input
+                      value={editDraft.bn ?? ""}
+                      onChange={(e) => setEditDraft({ ...editDraft, bn: e.target.value })}
+                      className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted-foreground">
+                      ইংরেজি নাম
+                    </label>
+                    <input
+                      value={editDraft.en ?? ""}
+                      onChange={(e) => setEditDraft({ ...editDraft, en: e.target.value })}
+                      className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="text-[11px] font-semibold text-muted-foreground">
+                      বিবরণ (সাবটাইটেল)
+                    </label>
+                    <input
+                      value={editDraft.description ?? ""}
+                      onChange={(e) =>
+                        setEditDraft({ ...editDraft, description: e.target.value })
+                      }
+                      className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted-foreground">
+                      আইকন
+                    </label>
+                    <select
+                      value={editDraft.iconName ?? "Users"}
+                      onChange={(e) =>
+                        setEditDraft({ ...editDraft, iconName: e.target.value })
+                      }
+                      className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+                    >
+                      {Object.keys(CATEGORY_ICONS).map((k) => (
+                        <option key={k} value={k}>
+                          {k}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted-foreground">
+                      রঙ থিম
+                    </label>
+                    <select
+                      value={editDraft.tint ?? CATEGORY_TINTS[0].value}
+                      onChange={(e) => setEditDraft({ ...editDraft, tint: e.target.value })}
+                      className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+                    >
+                      {CATEGORY_TINTS.map((t) => (
+                        <option key={t.value} value={t.value}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 text-xs font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={editDraft.visible !== false}
+                    onChange={(e) =>
+                      setEditDraft({ ...editDraft, visible: e.target.checked })
+                    }
+                  />
+                  হোম পেজ ও মেনুতে দৃশ্যমান রাখুন
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void saveEdit(c.slug)}
+                    className="flex items-center gap-1 rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground"
+                  >
+                    <Save className="h-3.5 w-3.5" /> সংরক্ষণ করুন
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingSlug(null)}
+                    className="rounded-full bg-muted px-3.5 py-1.5 text-xs font-semibold"
+                  >
+                    বাতিল
+                  </button>
+                </div>
+              </div>
+            );
+          }
+
+          return (
+            <div
+              key={c.slug}
+              className={`flex items-center justify-between gap-3 rounded-2xl bg-card p-3.5 shadow-card transition ${
+                c.visible === false ? "opacity-55" : ""
+              }`}
+            >
+              <div className="flex min-w-0 flex-1 items-center gap-3">
+                <div
+                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${c.tint} text-primary-deep`}
+                >
+                  <IconComp className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <p className="font-semibold text-foreground">{c.bn}</p>
+                    <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                      {c.slug}
+                    </span>
+                    {c.visible === false && (
+                      <span className="rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-bold text-rose-700">
+                        লুকানো
+                      </span>
+                    )}
+                  </div>
+                  <p className="truncate text-xs text-muted-foreground">{c.description}</p>
+                </div>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => void moveCategory(c.slug, "up")}
+                  disabled={idx === 0}
+                  title="উপরে নিন"
+                  className="rounded-full bg-muted p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                >
+                  <ArrowUp className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void moveCategory(c.slug, "down")}
+                  disabled={idx === filtered.length - 1}
+                  title="নিচে নিন"
+                  className="rounded-full bg-muted p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                >
+                  <ArrowDown className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void updateCategory(c.slug, { visible: c.visible === false })}
+                  title={c.visible === false ? "দেখান" : "লুকান"}
+                  className="rounded-full bg-muted p-1.5 text-muted-foreground hover:text-foreground"
+                >
+                  {c.visible === false ? (
+                    <EyeOff className="h-3.5 w-3.5" />
+                  ) : (
+                    <Eye className="h-3.5 w-3.5" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => startEdit(c)}
+                  title="সম্পাদনা"
+                  className="flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary-deep hover:bg-primary/20"
+                >
+                  <Edit3 className="h-3 w-3" /> এডিট
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void deleteCategory(c.slug).then(() =>
+                      toast.success("ক্যাটাগরি মুছে ফেলা হয়েছে")
+                    );
+                  }}
+                  title="মুছুন"
+                  className="rounded-full bg-destructive/10 p-1.5 text-destructive hover:bg-destructive/20"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Submissions (তথ্য) Full CRUD + Category Filter
+// ============================================================================
+function SubmissionsAdminPanel({ subs }: { subs: ReturnType<typeof useCloudSubmissions> }) {
+  const { allCategories } = useCategories();
+  const [catFilter, setCatFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [query, setQuery] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [editingItem, setEditingItem] = useState<SubmissionRow | null>(null);
+  const [form, setForm] = useState({
+    category_slug: "janapratinidhi",
+    title: "",
+    contact: "",
+    address: "",
+    designation: "",
+    body: "",
+    image_url: "",
+  });
+
+  const directoryCats = allCategories.filter(
+    (c) =>
+      ![
+        "submit-info",
+        "admin",
+        "about",
+        "donation",
+        "blood-donor",
+        "chat",
+        "app-download",
+        "board-result",
+      ].includes(c.slug)
+  );
+
+  const filtered = subs.items.filter((s) => {
+    if (catFilter !== "all" && s.category_slug !== catFilter) return false;
+    if (statusFilter !== "all" && s.status !== statusFilter) return false;
+    if (query.trim()) {
+      const hay = `${s.title} ${s.contact ?? ""} ${s.address ?? ""} ${s.designation ?? ""} ${s.category_slug}`.toLowerCase();
+      if (!hay.includes(query.toLowerCase())) return false;
+    }
+    return true;
+  });
+
+  async function handleDirectAdd() {
+    if (!form.category_slug || !form.title.trim() || !form.contact.trim()) {
+      return toast.error("ক্যাটাগরি, নাম ও ফোন নম্বর আবশ্যক");
+    }
+    setBusy(true);
+    const res = await subs.add({
+      ...form,
+      title: form.title.trim(),
+      contact: form.contact.trim(),
+      address: form.address.trim(),
+      designation: form.designation.trim(),
+      body: form.body.trim(),
+      status: "approved",
+    });
+    setBusy(false);
+    if (!res.ok) return toast.error(res.error || "ত্রুটি");
+    toast.success("তথ্যটি সরাসরি অনুমোদিত অবস্থায় যোগ হয়েছে");
+    setForm({
+      category_slug: form.category_slug,
+      title: "",
+      contact: "",
+      address: "",
+      designation: "",
+      body: "",
+      image_url: "",
+    });
+    setShowAdd(false);
+  }
+
+  async function handleSaveEdit() {
+    if (!editingItem) return;
+    setBusy(true);
+    const { error } = await subs.update(editingItem.id, {
+      category_slug: editingItem.category_slug,
+      title: editingItem.title,
+      contact: editingItem.contact,
+      address: editingItem.address,
+      designation: editingItem.designation,
+      body: editingItem.body,
+      status: editingItem.status,
+    });
+    setBusy(false);
+    if (error) return toast.error(error.message);
+    toast.success("তথ্য আপডেট হয়েছে");
+    setEditingItem(null);
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-3 rounded-2xl bg-card p-4 shadow-card">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-display text-sm font-bold text-primary-deep">
+            সকল ক্যাটাগরির তথ্য পরিচালনা ({filtered.length} টি)
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowAdd((v) => !v)}
+            className="flex items-center gap-1 rounded-full bg-gradient-hero px-3.5 py-1.5 text-xs font-bold text-primary-foreground shadow-card"
+          >
+            <Plus className="h-3.5 w-3.5" /> সরাসরি নতুন তথ্য যোগ করুন
+          </button>
+        </div>
+
+        {showAdd && (
+          <div className="space-y-2 rounded-2xl border border-primary/30 bg-primary/5 p-3.5">
+            <p className="text-xs font-bold text-primary-deep">
+              যেকোনো ক্যাটাগরিতে সরাসরি তথ্য যোগ করুন
+            </p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <select
+                value={form.category_slug}
+                onChange={(e) => setForm({ ...form, category_slug: e.target.value })}
+                className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              >
+                {directoryCats.map((c) => (
+                  <option key={c.slug} value={c.slug}>
+                    {c.bn} ({c.slug})
+                  </option>
+                ))}
+              </select>
+              <input
+                value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+                placeholder="নাম / প্রতিষ্ঠানের নাম *"
+                className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              />
+              <input
+                value={form.contact}
+                onChange={(e) => setForm({ ...form, contact: e.target.value })}
+                placeholder="ফোন নম্বর *"
+                className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              />
+              <input
+                value={form.designation}
+                onChange={(e) => setForm({ ...form, designation: e.target.value })}
+                placeholder="পদবি / বিশেষজ্ঞতা (ঐচ্ছিক)"
+                className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              />
+              <input
+                value={form.address}
+                onChange={(e) => setForm({ ...form, address: e.target.value })}
+                placeholder="ঠিকানা"
+                className="rounded-xl border border-border bg-background px-3 py-2 text-sm sm:col-span-2"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={handleDirectAdd}
+                className="flex items-center gap-1 rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground"
+              >
+                <Save className="h-3.5 w-3.5" /> সংরক্ষণ করুন
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAdd(false)}
+                className="rounded-full bg-muted px-3 py-1.5 text-xs font-semibold"
+              >
+                বাতিল
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <select
+            value={catFilter}
+            onChange={(e) => setCatFilter(e.target.value)}
+            className="rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
+          >
+            <option value="all">সব ক্যাটাগরি</option>
+            {directoryCats.map((c) => (
+              <option key={c.slug} value={c.slug}>
+                {c.bn}
+              </option>
+            ))}
+          </select>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
+          >
+            <option value="all">সব অবস্থা</option>
+            <option value="pending">অপেক্ষমাণ (Pending)</option>
+            <option value="approved">অনুমোদিত (Approved)</option>
+            <option value="rejected">বাতিল (Rejected)</option>
+          </select>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="নাম বা ফোন খুঁজুন..."
+            className="rounded-xl border border-border bg-background px-3 py-2 text-xs"
+          />
+        </div>
+      </div>
+
+      <List empty="কোনো জমাকৃত তথ্য নেই" items={filtered}>
+        {(s) => {
+          const catObj = allCategories.find((c) => c.slug === s.category_slug);
+          return (
+            <div key={s.id} className="rounded-2xl bg-card p-4 shadow-card">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <p className="font-semibold">{s.title}</p>
+                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary-deep">
+                      {catObj?.bn ?? s.category_slug}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-muted-foreground">📞 {s.contact}</p>
+                  {s.address && (
+                    <p className="text-xs text-muted-foreground">
+                      📍 {s.address}
+                      {s.designation ? ` • ${s.designation}` : ""}
+                    </p>
+                  )}
+                  {s.body && <p className="mt-1 text-xs">{s.body}</p>}
+                  {s.image_url && (
+                    <img
+                      src={s.image_url}
+                      alt=""
+                      className="mt-2 h-20 w-20 rounded object-cover"
+                    />
+                  )}
+                </div>
+                <Status status={s.status} />
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Actions
+                  onApprove={() => subs.setStatus(s.id, "approved")}
+                  onReject={() => subs.setStatus(s.id, "rejected")}
+                  onDelete={() => subs.remove(s.id)}
+                  status={s.status}
+                  inline
+                />
+                <button
+                  type="button"
+                  onClick={() => setEditingItem({ ...s })}
+                  className="flex items-center gap-1 rounded-full bg-blue-500/15 px-3 py-1.5 text-xs font-semibold text-blue-800"
+                >
+                  <Edit3 className="h-3 w-3" /> সম্পাদনা
+                </button>
+              </div>
+            </div>
+          );
+        }}
+      </List>
+
+      {editingItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3"
+          onClick={() => setEditingItem(null)}
+        >
+          <div
+            className="w-full max-w-md space-y-2.5 rounded-2xl bg-card p-4 shadow-elevated"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="font-display text-sm font-bold text-primary-deep">
+              তথ্য সম্পাদনা ও ক্যাটাগরি পরিবর্তন
+            </p>
+            <select
+              value={editingItem.category_slug}
+              onChange={(e) =>
+                setEditingItem({ ...editingItem, category_slug: e.target.value })
+              }
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            >
+              {directoryCats.map((c) => (
+                <option key={c.slug} value={c.slug}>
+                  {c.bn} ({c.slug})
+                </option>
+              ))}
+            </select>
+            <input
+              value={editingItem.title}
+              onChange={(e) => setEditingItem({ ...editingItem, title: e.target.value })}
+              placeholder="নাম / শিরোনাম"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <input
+              value={editingItem.contact ?? ""}
+              onChange={(e) => setEditingItem({ ...editingItem, contact: e.target.value })}
+              placeholder="ফোন নম্বর"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <input
+              value={editingItem.designation ?? ""}
+              onChange={(e) =>
+                setEditingItem({ ...editingItem, designation: e.target.value })
+              }
+              placeholder="পদবি"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <input
+              value={editingItem.address ?? ""}
+              onChange={(e) => setEditingItem({ ...editingItem, address: e.target.value })}
+              placeholder="ঠিকানা"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <textarea
+              value={editingItem.body ?? ""}
+              onChange={(e) => setEditingItem({ ...editingItem, body: e.target.value })}
+              placeholder="বিস্তারিত"
+              rows={3}
+              className="w-full rounded-xl border border-border bg-background p-3 text-sm"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={handleSaveEdit}
+                className="flex items-center gap-1 rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground"
+              >
+                <Save className="h-3.5 w-3.5" /> সংরক্ষণ
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingItem(null)}
+                className="rounded-full bg-muted px-3.5 py-1.5 text-xs font-semibold"
+              >
+                বাতিল
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Super Admin: Donation Numbers Manager + Donations CRUD
+// ============================================================================
+function DonationNumbersManagerCard() {
+  const { config, saveDonationConfig } = useDonationConfig();
+  const [draft, setDraft] = useState<DonationConfig>(config);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDraft(config);
+  }, [config]);
+
+  async function save() {
+    setSaving(true);
+    try {
+      await saveDonationConfig(draft);
+      toast.success("অনুদানের নাম্বারসমূহ Firebase-এ সংরক্ষিত হয়েছে");
+    } catch (e) {
+      toast.error((e as Error).message || "ত্রুটি");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded-2xl bg-card p-4 shadow-card">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="flex items-center gap-2 font-display text-sm font-bold text-primary-deep">
+            <HandCoins className="h-4 w-4 text-primary" /> অনুদানের নাম্বারসমূহ পরিবর্তন (bKash / Nagad / Rocket)
+          </p>
+          <p className="text-xs text-muted-foreground">
+            সুপার এডমিন যেকোনো সময় অনুদানের নাম্বার ও লেবেল পরিবর্তন করতে পারবেন
+          </p>
+        </div>
+      </div>
+
+      <div>
+        <label className="text-[11px] font-semibold text-muted-foreground">
+          অনুদান পেজ সাবটাইটেল
+        </label>
+        <input
+          value={draft.subtitle}
+          onChange={(e) => setDraft({ ...draft, subtitle: e.target.value })}
+          className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+        />
+      </div>
+
+      <div className="space-y-2">
+        {draft.numbers.map((item, idx) => (
+          <div
+            key={item.id}
+            className="grid grid-cols-1 gap-2 rounded-xl border border-border bg-muted/30 p-3 sm:grid-cols-3"
+          >
+            <div>
+              <label className="text-[10px] font-semibold text-muted-foreground">
+                মাধ্যম ও ধরন
+              </label>
+              <input
+                value={item.label}
+                onChange={(e) => {
+                  const next = [...draft.numbers];
+                  next[idx] = { ...item, label: e.target.value };
+                  setDraft({ ...draft, numbers: next });
+                }}
+                placeholder="যেমন: bKash (Personal)"
+                className="mt-0.5 w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs font-semibold"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold text-muted-foreground">
+                মোবাইল নাম্বার
+              </label>
+              <input
+                value={item.number}
+                onChange={(e) => {
+                  const next = [...draft.numbers];
+                  next[idx] = { ...item, number: e.target.value };
+                  setDraft({ ...draft, numbers: next });
+                }}
+                placeholder="01850999178"
+                className="mt-0.5 w-full rounded-lg border border-border bg-background px-2.5 py-1.5 font-mono text-xs font-bold"
+              />
+            </div>
+            <div className="flex items-end pb-1">
+              <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold">
+                <input
+                  type="checkbox"
+                  checked={item.active}
+                  onChange={(e) => {
+                    const next = [...draft.numbers];
+                    next[idx] = { ...item, active: e.target.checked };
+                    setDraft({ ...draft, numbers: next });
+                  }}
+                />
+                অনুদান পেজে প্রদর্শন করুন
+              </label>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <button
+        type="button"
+        disabled={saving}
+        onClick={save}
+        className="flex items-center gap-1.5 rounded-full bg-gradient-hero px-4 py-2 text-xs font-bold text-primary-foreground shadow-card disabled:opacity-60"
+      >
+        <Save className="h-3.5 w-3.5" />{" "}
+        {saving ? "সংরক্ষণ হচ্ছে..." : "অনুদান নাম্বার সংরক্ষণ করুন"}
+      </button>
+    </div>
+  );
+}
+
+function DonationsAdminPanel({ dons }: { dons: ReturnType<typeof useCloudDonations> }) {
+  const [editing, setEditing] = useState<DonationRow | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function saveEdit() {
+    if (!editing) return;
+    setBusy(true);
+    const { error } = await dons.update(editing.id, {
+      sender_name: editing.sender_name,
+      sender_phone: editing.sender_phone,
+      amount: Number(editing.amount) || 1,
+      trx_id: editing.trx_id,
+      method: editing.method,
+      status: editing.status,
+    });
+    setBusy(false);
+    if (error) return toast.error(error.message);
+    toast.success("অনুদান আপডেট হয়েছে");
+    setEditing(null);
+  }
+
+  return (
+    <div className="space-y-4">
+      <DonationNumbersManagerCard />
+
+      <List empty="কোনো অনুদান নেই" items={dons.items}>
+        {(d) => (
+          <div key={d.id} className="rounded-2xl bg-card p-4 shadow-card">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold">
+                  {d.sender_name} —{" "}
+                  <span className="text-primary-deep">
+                    {Number(d.amount).toLocaleString("bn-BD")} টাকা
+                  </span>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {d.method} • {d.sender_phone} • TrxID:{" "}
+                  <span className="font-mono">{d.trx_id}</span>
+                </p>
+                {d.note && <p className="mt-1 text-xs text-muted-foreground">📝 {d.note}</p>}
+              </div>
+              <Status status={d.status} />
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Actions
+                onApprove={() => dons.setStatus(d.id, "approved")}
+                onReject={() => dons.setStatus(d.id, "rejected")}
+                onDelete={() => dons.remove(d.id)}
+                status={d.status}
+                inline
+              />
+              <button
+                type="button"
+                onClick={() => setEditing({ ...d })}
+                className="flex items-center gap-1 rounded-full bg-blue-500/15 px-3 py-1.5 text-xs font-semibold text-blue-800"
+              >
+                <Edit3 className="h-3 w-3" /> সম্পাদনা
+              </button>
+            </div>
+          </div>
+        )}
+      </List>
+
+      {editing && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3"
+          onClick={() => setEditing(null)}
+        >
+          <div
+            className="w-full max-w-sm space-y-2.5 rounded-2xl bg-card p-4 shadow-elevated"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="font-display text-sm font-bold text-primary-deep">
+              অনুদান তথ্য সম্পাদনা
+            </p>
+            <input
+              value={editing.sender_name}
+              onChange={(e) => setEditing({ ...editing, sender_name: e.target.value })}
+              placeholder="প্রেরকের নাম"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <input
+              value={editing.sender_phone ?? ""}
+              onChange={(e) => setEditing({ ...editing, sender_phone: e.target.value })}
+              placeholder="ফোন"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <input
+              type="number"
+              value={editing.amount}
+              onChange={(e) => setEditing({ ...editing, amount: Number(e.target.value) })}
+              placeholder="টাকার পরিমাণ"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <input
+              value={editing.trx_id}
+              onChange={(e) => setEditing({ ...editing, trx_id: e.target.value })}
+              placeholder="TrxID"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={saveEdit}
+                className="flex items-center gap-1 rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground"
+              >
+                <Save className="h-3 w-3" /> সংরক্ষণ
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditing(null)}
+                className="rounded-full bg-muted px-3 py-1.5 text-xs"
+              >
+                বাতিল
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Blood Donors CRUD
+// ============================================================================
+function DonorsAdminPanel({ donors }: { donors: ReturnType<typeof useCloudDonors> }) {
+  const [editing, setEditing] = useState<DonorRow | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function saveEdit() {
+    if (!editing) return;
+    setBusy(true);
+    const { error } = await donors.update(editing.id, {
+      full_name: editing.full_name,
+      phone: editing.phone,
+      blood_group: editing.blood_group,
+      address: editing.address,
+      total_donations: Number(editing.total_donations) || 0,
+      last_donation_date: editing.last_donation_date,
+    });
+    setBusy(false);
+    if (error) return toast.error(error.message);
+    toast.success("রক্তদাতার তথ্য আপডেট হয়েছে");
+    setEditing(null);
+  }
+
+  return (
+    <div className="space-y-3">
+      <List empty="কোনো দাতা নেই" items={donors.items}>
+        {(d) => (
+          <div key={d.id} className="rounded-2xl bg-card p-4 shadow-card">
+            <div className="flex items-start gap-3">
+              {d.photo_url && (
+                <img src={d.photo_url} alt="" className="h-12 w-12 rounded-full object-cover" />
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold">
+                  {d.full_name}{" "}
+                  <span className="ml-1 rounded bg-rose-500/10 px-1.5 py-0.5 text-[11px] font-bold text-rose-600">
+                    {d.blood_group}
+                  </span>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {d.phone} • মোট দান: {d.total_donations}
+                </p>
+                {d.address && <p className="text-xs text-muted-foreground">{d.address}</p>}
+              </div>
+              <Status status={d.status} />
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Actions
+                onApprove={() => donors.setStatus(d.id, "approved")}
+                onReject={() => donors.setStatus(d.id, "rejected")}
+                onDelete={() => donors.remove(d.id)}
+                status={d.status}
+                inline
+              />
+              <button
+                type="button"
+                onClick={() => setEditing({ ...d })}
+                className="flex items-center gap-1 rounded-full bg-blue-500/15 px-3 py-1.5 text-xs font-semibold text-blue-800"
+              >
+                <Edit3 className="h-3 w-3" /> সম্পাদনা
+              </button>
+            </div>
+          </div>
+        )}
+      </List>
+
+      {editing && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3"
+          onClick={() => setEditing(null)}
+        >
+          <div
+            className="w-full max-w-sm space-y-2.5 rounded-2xl bg-card p-4 shadow-elevated"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="font-display text-sm font-bold text-primary-deep">রক্তদাতা সম্পাদনা</p>
+            <input
+              value={editing.full_name}
+              onChange={(e) => setEditing({ ...editing, full_name: e.target.value })}
+              placeholder="পূর্ণ নাম"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <input
+              value={editing.phone}
+              onChange={(e) => setEditing({ ...editing, phone: e.target.value })}
+              placeholder="ফোন নম্বর"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <select
+              value={editing.blood_group}
+              onChange={(e) =>
+                setEditing({ ...editing, blood_group: e.target.value as DonorRow["blood_group"] })
+              }
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-bold text-rose-600"
+            >
+              {["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"].map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
+            <input
+              value={editing.address ?? ""}
+              onChange={(e) => setEditing({ ...editing, address: e.target.value })}
+              placeholder="ঠিকানা"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <input
+              type="number"
+              value={editing.total_donations}
+              onChange={(e) =>
+                setEditing({ ...editing, total_donations: Number(e.target.value) })
+              }
+              placeholder="মোট রক্তদান সংখ্যা"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={saveEdit}
+                className="flex items-center gap-1 rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground"
+              >
+                <Save className="h-3 w-3" /> সংরক্ষণ
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditing(null)}
+                className="rounded-full bg-muted px-3 py-1.5 text-xs"
+              >
+                বাতিল
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EventsAdminPanel({
+  events,
+  donors,
+}: {
+  events: ReturnType<typeof useCloudDonorEvents>;
+  donors: ReturnType<typeof useCloudDonors>;
+}) {
+  const [editing, setEditing] = useState<DonorEventRow | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function saveEdit() {
+    if (!editing) return;
+    setBusy(true);
+    const { error } = await events.update(editing.id, {
+      event_date: editing.event_date,
+      place: editing.place,
+      note: editing.note,
+      status: editing.status,
+    });
+    setBusy(false);
+    if (error) return toast.error(error.message);
+    toast.success("রক্তদান লগ আপডেট হয়েছে");
+    setEditing(null);
+  }
+
+  return (
+    <div className="space-y-3">
+      <List empty="কোনো রক্তদান লগ নেই" items={events.items}>
+        {(e) => {
+          const donor = donors.items.find((x) => x.id === e.donor_id);
+          return (
+            <div key={e.id} className="rounded-2xl bg-card p-4 shadow-card">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold">
+                    {donor?.full_name ?? "—"}{" "}
+                    <span className="ml-1 rounded bg-rose-500/10 px-1.5 py-0.5 text-[11px] font-bold text-rose-600">
+                      {donor?.blood_group}
+                    </span>
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    তারিখ: {e.event_date}
+                    {e.place ? ` • স্থান: ${e.place}` : ""}
+                  </p>
+                  {e.note && <p className="mt-1 text-xs">📝 {e.note}</p>}
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {e.form_image_url && (
+                      <a
+                        href={e.form_image_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block"
+                      >
+                        {/\.(png|jpe?g|gif|webp)$/i.test(e.form_image_url) ||
+                        e.form_image_url.startsWith("data:image") ? (
+                          <img
+                            src={e.form_image_url}
+                            alt="form"
+                            className="h-20 w-20 rounded-lg border object-cover"
+                          />
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded border bg-muted px-2 py-1 text-[11px]">
+                            <FileText className="h-3 w-3" /> ফর্ম
+                          </span>
+                        )}
+                      </a>
+                    )}
+                    {e.photo_url && (
+                      <a href={e.photo_url} target="_blank" rel="noreferrer">
+                        <img
+                          src={e.photo_url}
+                          alt="photo"
+                          className="h-20 w-20 rounded-lg border object-cover"
+                        />
+                      </a>
+                    )}
+                  </div>
+                </div>
+                <Status status={e.status} />
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Actions
+                  onApprove={() => events.setStatus(e.id, "approved")}
+                  onReject={() => events.setStatus(e.id, "rejected")}
+                  onDelete={() => events.remove(e.id)}
+                  status={e.status}
+                  inline
+                />
+                <button
+                  type="button"
+                  onClick={() => setEditing({ ...e })}
+                  className="flex items-center gap-1 rounded-full bg-blue-500/15 px-3 py-1.5 text-xs font-semibold text-blue-800"
+                >
+                  <Edit3 className="h-3 w-3" /> সম্পাদনা
+                </button>
+              </div>
+            </div>
+          );
+        }}
+      </List>
+
+      {editing && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3"
+          onClick={() => setEditing(null)}
+        >
+          <div
+            className="w-full max-w-sm space-y-2.5 rounded-2xl bg-card p-4 shadow-elevated"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <p className="font-display text-sm font-bold text-primary-deep">
+              রক্তদান লগ সম্পাদনা
+            </p>
+            <input
+              type="date"
+              value={editing.event_date}
+              onChange={(ev) => setEditing({ ...editing, event_date: ev.target.value })}
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <input
+              value={editing.place ?? ""}
+              onChange={(ev) => setEditing({ ...editing, place: ev.target.value })}
+              placeholder="রক্তদানের স্থান / হাসপাতাল"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <textarea
+              value={editing.note ?? ""}
+              onChange={(ev) => setEditing({ ...editing, note: ev.target.value })}
+              rows={2}
+              placeholder="নোট"
+              className="w-full rounded-xl border border-border bg-background p-3 text-sm"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={saveEdit}
+                className="flex items-center gap-1 rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground"
+              >
+                <Save className="h-3 w-3" /> সংরক্ষণ
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditing(null)}
+                className="rounded-full bg-muted px-3 py-1.5 text-xs"
+              >
+                বাতিল
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmergencyEditor() {
+  const { items, add, setStatus, update, remove } = useEmergencyRequests();
+  const [form, setForm] = useState({
+    patient_name: "",
+    phone: "",
+    blood_group: "",
+    hospital: "",
+    message: "",
+  });
+  const [editing, setEditing] = useState<EmergencyReqRow | null>(null);
+  const [busy, setBusy] = useState(false);
+  const { isMainAdmin, isAdmin } = useAuth();
+  const canManage = isMainAdmin || isAdmin;
+
+  async function submit() {
+    if (!form.patient_name || !form.phone || !form.blood_group)
+      return toast.error("নাম, ফোন ও গ্রুপ আবশ্যক");
+    setBusy(true);
+    const res = await add(form);
+    setBusy(false);
+    if (!res.ok) return toast.error(res.error || "ত্রুটি");
+    toast.success("যোগ হয়েছে — অনুমোদন দিন");
+    setForm({ patient_name: "", phone: "", blood_group: "", hospital: "", message: "" });
+  }
+
+  async function saveEdit() {
+    if (!editing) return;
+    setBusy(true);
+    const { error } = await update(editing.id, {
+      patient_name: editing.patient_name,
+      phone: editing.phone,
+      blood_group: editing.blood_group,
+      hospital: editing.hospital,
+      message: editing.message,
+      status: editing.status,
+    });
+    setBusy(false);
+    if (error) return toast.error(error.message);
+    toast.success("জরুরী রক্তের আবেদন আপডেট হয়েছে");
+    setEditing(null);
+  }
+
+  return (
+    <div className="space-y-3">
+      {canManage && (
+        <div className="space-y-2 rounded-2xl bg-card p-4 shadow-card">
+          <p className="flex items-center gap-2 font-display font-bold text-primary-deep">
+            <AlertCircle className="h-4 w-4" /> নতুন জরুরী রক্ত অনুরোধ
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              value={form.patient_name}
+              onChange={(e) => setForm({ ...form, patient_name: e.target.value })}
+              placeholder="রোগীর নাম *"
+              className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <input
+              value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              placeholder="ফোন *"
+              className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <select
+              value={form.blood_group}
+              onChange={(e) => setForm({ ...form, blood_group: e.target.value })}
+              className="rounded-xl border border-border bg-background px-3 py-2 text-sm font-bold text-rose-600"
+            >
+              <option value="">গ্রুপ *</option>
+              {["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"].map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
+            <input
+              value={form.hospital}
+              onChange={(e) => setForm({ ...form, hospital: e.target.value })}
+              placeholder="হাসপাতাল"
+              className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+          </div>
+          <textarea
+            value={form.message}
+            onChange={(e) => setForm({ ...form, message: e.target.value })}
+            rows={2}
+            placeholder="বার্তা (ঐচ্ছিক)"
+            className="w-full rounded-xl border border-border bg-background p-3 text-sm"
+          />
+          <button
+            disabled={busy}
+            onClick={submit}
+            className="flex items-center gap-1 rounded-full bg-gradient-hero px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+          >
+            <Plus className="h-3.5 w-3.5" /> যোগ করুন
+          </button>
+        </div>
+      )}
+      <List empty="কোনো জরুরী অনুরোধ নেই" items={items}>
+        {(e) => (
+          <div key={e.id} className="rounded-2xl bg-card p-4 shadow-card">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold">
+                  {e.patient_name}{" "}
+                  <span className="ml-1 rounded bg-rose-500/10 px-1.5 py-0.5 text-[11px] font-bold text-rose-600">
+                    {e.blood_group}
+                  </span>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {e.phone}
+                  {e.hospital ? ` • ${e.hospital}` : ""}
+                </p>
+                {e.message && <p className="mt-1 text-xs">{e.message}</p>}
+              </div>
+              <Status status={e.status} />
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Actions
+                onApprove={() => setStatus(e.id, "approved")}
+                onReject={() => setStatus(e.id, "rejected")}
+                onDelete={() => remove(e.id)}
+                status={e.status}
+                inline
+              />
+              <button
+                type="button"
+                onClick={() => setEditing({ ...e })}
+                className="flex items-center gap-1 rounded-full bg-blue-500/15 px-3 py-1.5 text-xs font-semibold text-blue-800"
+              >
+                <Edit3 className="h-3 w-3" /> সম্পাদনা
+              </button>
+            </div>
+          </div>
+        )}
+      </List>
+
+      {editing && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3"
+          onClick={() => setEditing(null)}
+        >
+          <div
+            className="w-full max-w-sm space-y-2.5 rounded-2xl bg-card p-4 shadow-elevated"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <p className="font-display text-sm font-bold text-primary-deep">
+              জরুরী রক্তের আবেদন সম্পাদনা
+            </p>
+            <input
+              value={editing.patient_name}
+              onChange={(ev) => setEditing({ ...editing, patient_name: ev.target.value })}
+              placeholder="রোগীর নাম"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <input
+              value={editing.phone}
+              onChange={(ev) => setEditing({ ...editing, phone: ev.target.value })}
+              placeholder="ফোন নম্বর"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <select
+              value={editing.blood_group}
+              onChange={(ev) => setEditing({ ...editing, blood_group: ev.target.value })}
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-bold text-rose-600"
+            >
+              {["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"].map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
+            <input
+              value={editing.hospital ?? ""}
+              onChange={(ev) => setEditing({ ...editing, hospital: ev.target.value })}
+              placeholder="হাসপাতাল"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <textarea
+              value={editing.message ?? ""}
+              onChange={(ev) => setEditing({ ...editing, message: ev.target.value })}
+              rows={2}
+              placeholder="বার্তা"
+              className="w-full rounded-xl border border-border bg-background p-3 text-sm"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={saveEdit}
+                className="flex items-center gap-1 rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground"
+              >
+                <Save className="h-3 w-3" /> সংরক্ষণ
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditing(null)}
+                className="rounded-full bg-muted px-3 py-1.5 text-xs"
+              >
+                বাতিল
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Super Admin: All Users + Passwords + Full Info + Profile Photo Management
+// ============================================================================
+function UsersEditor() {
+  const [users, setUsers] = useState<AdminUserRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [roleFilter, setRoleFilter] = useState<
+    "all" | "admin" | "editor" | "moderator" | "user"
+  >("all");
+  const [search, setSearch] = useState("");
+  const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
+  const [editingPwUser, setEditingPwUser] = useState<AdminUserRecord | null>(null);
+  const [newPasswordInput, setNewPasswordInput] = useState("");
+  const [form, setForm] = useState({
+    email: "",
+    password: "",
+    full_name: "",
+    phone: "",
+    designation: "",
+    role: "user" as "admin" | "moderator" | "editor" | "user",
+  });
+  const [busy, setBusy] = useState(false);
+  const [detailsUser, setDetailsUser] = useState<AdminUserRecord | null>(null);
+  const { logo } = useLogo();
+  const { upsertStaffProfile } = useStaffProfiles();
+  const avatarUploadRef = useRef<HTMLInputElement>(null);
+  const [avatarTargetUser, setAvatarTargetUser] = useState<AdminUserRecord | null>(null);
+
+  async function refresh() {
+    setLoading(true);
+    try {
+      const list = await listUsers();
+      setUsers(list);
+    } catch (e) {
+      toast.error((e as Error).message ?? "ত্রুটি");
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function add() {
+    if (!form.email || form.password.length < 6)
+      return toast.error("ইমেইল ও পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর) দিন");
+    setBusy(true);
+    try {
+      await createUser({ data: form });
+      toast.success("নতুন ইউজার ও পাসওয়ার্ড তৈরি হয়েছে");
+      setForm({
+        email: "",
+        password: "",
+        full_name: "",
+        phone: "",
+        designation: "",
+        role: "user",
+      });
+      await refresh();
+    } catch (e) {
+      toast.error((e as Error).message ?? "ত্রুটি");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleRole(
+    uid: string,
+    role: "admin" | "moderator" | "editor",
+    enable: boolean
+  ) {
+    try {
+      await setUserRole({ data: { user_id: uid, role, enable } });
+      toast.success(`রোল আপডেট হয়েছে (${role})`);
+      await refresh();
+    } catch (e) {
+      toast.error((e as Error).message ?? "ত্রুটি");
+    }
+  }
+
+  async function del(u: AdminUserRecord) {
+    try {
+      setUsers((prev) =>
+        prev.filter(
+          (item) =>
+            item.id !== u.id &&
+            (!u.email || item.email.toLowerCase() !== u.email.toLowerCase())
+        )
+      );
+      await deleteUser({ data: { user_id: u.id, email: u.email } });
+      toast.success("ইউজার সফলভাবে মুছে ফেলা হয়েছে");
+      await refresh();
+    } catch (e) {
+      toast.error((e as Error).message ?? "ত্রুটি");
+      await refresh();
+    }
+  }
+
+  async function toggleSuspend(u: AdminUserRecord) {
+    const next = !(u.profile?.suspended || u.banned_until);
+    try {
+      await suspendUser({ data: { user_id: u.id, suspend: next } });
+      toast.success(next ? "ইউজার স্থগিত করা হয়েছে" : "ইউজার সক্রিয় করা হয়েছে");
+      await refresh();
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
+
+  async function handleSaveCustomPassword() {
+    if (!editingPwUser) return;
+    if (newPasswordInput.trim().length < 6) {
+      return toast.error("নতুন পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে");
+    }
+    setBusy(true);
+    try {
+      await resetUserPassword({
+        data: {
+          user_id: editingPwUser.id,
+          email: editingPwUser.email,
+          new_password: newPasswordInput.trim(),
+        },
+      });
+      toast.success(`${editingPwUser.email}-এর পাসওয়ার্ড আপডেট হয়েছে`);
+      setEditingPwUser(null);
+      setNewPasswordInput("");
+      await refresh();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleAvatarUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !avatarTargetUser) return;
+    const compressed = await uploadPublicImage(file, `staff_avatars/${avatarTargetUser.id}`);
+    if (!compressed) return toast.error("ছবি আপলোড ব্যর্থ");
+    try {
+      await updateUserProfile({
+        data: {
+          user_id: avatarTargetUser.id,
+          email: avatarTargetUser.email,
+          photo_url: compressed,
+        },
+      });
+      const roleLabel = isProtectedMainSuperAdmin({
+        id: avatarTargetUser.id,
+        email: avatarTargetUser.email,
+      })
+        ? "সুপার এডমিন"
+        : avatarTargetUser.roles.includes("admin")
+          ? "এডমিন"
+          : avatarTargetUser.roles.includes("editor")
+            ? "এডিটর"
+            : avatarTargetUser.roles.includes("moderator")
+              ? "মোডারেটর"
+              : "ইউজার";
+      await upsertStaffProfile({
+        uid: avatarTargetUser.id,
+        email: avatarTargetUser.email,
+        full_name: avatarTargetUser.profile?.full_name || avatarTargetUser.email.split("@")[0],
+        role_label: roleLabel,
+        photo_url: compressed,
+        phone: avatarTargetUser.profile?.phone || "",
+        designation: avatarTargetUser.profile?.designation || roleLabel,
+      });
+      toast.success("প্রোফাইল ফটো আপডেট হয়েছে");
+      await refresh();
+    } catch (err: any) {
+      toast.error(err?.message || "ত্রুটি");
+    } finally {
+      setAvatarTargetUser(null);
+    }
+  }
+
+  const filteredUsers = users.filter((u) => {
+    if (roleFilter === "admin" && !u.roles.includes("admin")) return false;
+    if (roleFilter === "editor" && !u.roles.includes("editor")) return false;
+    if (roleFilter === "moderator" && !u.roles.includes("moderator")) return false;
+    if (
+      roleFilter === "user" &&
+      (u.roles.includes("admin") || u.roles.includes("editor") || u.roles.includes("moderator"))
+    )
+      return false;
+
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      const hay = `${u.email} ${u.profile?.full_name ?? ""} ${u.profile?.phone ?? ""} ${u.profile?.username ?? ""} ${u.id}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  return (
+    <div className="space-y-4">
+      <input
+        ref={avatarUploadRef}
+        type="file"
+        accept="image/*"
+        onChange={handleAvatarUpload}
+        className="hidden"
+      />
+
+      {/* Info Banner */}
+      <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-950">
+        <p className="flex items-center gap-1.5 font-bold">
+          <ShieldCheck className="h-4 w-4 text-amber-700" /> সুপার এডমিন মাস্টার ইউজার ও পাসওয়ার্ড ভল্ট
+        </p>
+        <p className="mt-0.5 text-[11px] opacity-90">
+          শুধুমাত্র সুপার এডমিন ({SUPER_ADMIN_EMAIL}) এডমিন, এডিটর, মোডারেটর ও সাধারণ ইউজারসহ সকলের পাসওয়ার্ড এবং সকল তথ্য দেখতে, পরিবর্তন করতে ও প্রোফাইল ফটো যুক্ত করতে পারবেন।{" "}
+          <strong>mr.bear444plus@gmail.com</strong> এখন শুধু সাধারণ এডমিন (সুপার এডমিন নয়)।
+        </p>
+      </div>
+
+      {/* Add User Form */}
+      <div className="space-y-2.5 rounded-2xl bg-card p-4 shadow-card">
+        <p className="flex items-center gap-2 font-display text-sm font-bold text-primary-deep">
+          <UsersIcon className="h-4 w-4 text-primary" /> নতুন এডমিন / স্টাফ / ইউজার তৈরি করুন
+        </p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <input
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            placeholder="ইমেইল *"
+            className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+          />
+          <input
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
+            type="text"
+            placeholder="পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর) *"
+            className="rounded-xl border border-border bg-background px-3 py-2 font-mono text-sm"
+          />
+          <input
+            value={form.full_name}
+            onChange={(e) => setForm({ ...form, full_name: e.target.value })}
+            placeholder="পূর্ণ নাম"
+            className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+          />
+          <input
+            value={form.phone}
+            onChange={(e) => setForm({ ...form, phone: e.target.value })}
+            placeholder="ফোন নম্বর"
+            className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+          />
+          <input
+            value={form.designation}
+            onChange={(e) => setForm({ ...form, designation: e.target.value })}
+            placeholder="পদবি (যেমন: এডমিন / মডারেটর)"
+            className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+          />
+          <select
+            value={form.role}
+            onChange={(e) =>
+              setForm({
+                ...form,
+                role: e.target.value as "admin" | "moderator" | "editor" | "user",
+              })
+            }
+            className="rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold"
+          >
+            <option value="user">সাধারণ ইউজার (User)</option>
+            <option value="editor">এডিটর (Editor)</option>
+            <option value="moderator">মোডারেটর (Moderator)</option>
+            <option value="admin">এডমিন (Admin — সুপার এডমিন নয়)</option>
+          </select>
+        </div>
+        <button
+          disabled={busy}
+          onClick={add}
+          className="flex items-center gap-1.5 rounded-full bg-gradient-hero px-4 py-2 text-xs font-bold text-primary-foreground shadow-card disabled:opacity-60"
+        >
+          {busy ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Plus className="h-3.5 w-3.5" />
+          )}
+          ইউজার তৈরি করুন
+        </button>
+      </div>
+
+      {/* Filter & Search Bar */}
+      <div className="space-y-2 rounded-2xl bg-card p-3.5 shadow-card">
+        <div className="flex flex-wrap gap-1.5">
+          {[
+            { key: "all", label: `সবাই (${users.length})` },
+            {
+              key: "admin",
+              label: `এডমিন (${users.filter((u) => u.roles.includes("admin")).length})`,
+            },
+            {
+              key: "editor",
+              label: `এডিটর (${users.filter((u) => u.roles.includes("editor")).length})`,
+            },
+            {
+              key: "moderator",
+              label: `মোডারেটর (${users.filter((u) => u.roles.includes("moderator")).length})`,
+            },
+            {
+              key: "user",
+              label: `সাধারণ ইউজার (${
+                users.filter(
+                  (u) =>
+                    !u.roles.includes("admin") &&
+                    !u.roles.includes("editor") &&
+                    !u.roles.includes("moderator")
+                ).length
+              })`,
+            },
+          ].map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setRoleFilter(t.key as any)}
+              className={`rounded-full px-3 py-1 text-xs font-bold transition ${
+                roleFilter === t.key
+                  ? "bg-gradient-hero text-primary-foreground shadow-sm"
+                  : "bg-muted text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="নাম, ইমেইল, ফোন বা আইডি দিয়ে খুঁজুন..."
+            className="w-full rounded-xl border border-border bg-background py-2 pl-9 pr-3 text-xs"
+          />
+        </div>
+      </div>
+
+      {/* Users List */}
+      {loading ? (
+        <div className="rounded-2xl bg-card/50 p-8 text-center text-sm text-muted-foreground">
+          <Loader2 className="mx-auto h-5 w-5 animate-spin text-primary" />
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {filteredUsers.map((u) => {
+            const isProtectedSuper = isProtectedMainSuperAdmin({
+              id: u.id,
+              email: u.email,
+              username: u.profile?.username,
+            });
+            const showPw = !!visiblePasswords[u.id];
+            const pwValue = u.password || "লগইনের পর সিঙ্ক হবে / সেট করুন";
+            const hasRealPw = Boolean(u.password);
+
+            return (
+              <div
+                key={u.id}
+                className={`rounded-2xl bg-card p-4 shadow-card transition ${
+                  isProtectedSuper ? "ring-2 ring-gold/70" : "border border-border/60"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 flex-1 items-start gap-3">
+                    {/* User / Staff Avatar with upload button */}
+                    <div className="relative shrink-0">
+                      <img
+                        src={u.profile?.photo_url || u.photo_url || logo}
+                        alt={u.profile?.full_name || u.email}
+                        className="h-12 w-12 rounded-full border-2 border-primary/25 bg-white object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAvatarTargetUser(u);
+                          avatarUploadRef.current?.click();
+                        }}
+                        title="প্রোফাইল ফটো পরিবর্তন করুন"
+                        className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-white shadow"
+                      >
+                        <Camera className="h-3 w-3" />
+                      </button>
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <button
+                        type="button"
+                        onClick={() => setDetailsUser(u)}
+                        className="text-left hover:underline"
+                      >
+                        <p className="truncate text-sm font-bold text-primary-deep">
+                          {u.profile?.full_name || u.email}
+                        </p>
+                      </button>
+                      <p className="truncate text-xs text-muted-foreground">{u.email}</p>
+                      <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                        {u.profile?.phone && <span>📞 {u.profile.phone}</span>}
+                        {(u.profile?.designation || u.designation) && (
+                          <span>🏷️ {u.profile?.designation || u.designation}</span>
+                        )}
+                      </div>
+
+                      {/* Role Badges */}
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        {isProtectedSuper && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-500 to-orange-600 px-2.5 py-0.5 text-[10px] font-extrabold text-white shadow-sm">
+                            <ShieldCheck className="h-3 w-3" /> মেইন সুপার এডমিন (অপরিবর্তনীয়)
+                          </span>
+                        )}
+                        {u.roles.includes("admin") && !isProtectedSuper && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-800 ring-1 ring-amber-500/30">
+                            <ShieldCheck className="h-3 w-3" /> শুধু এডমিন (সুপার এডমিন নয়)
+                          </span>
+                        )}
+                        {u.roles.includes("editor") && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-purple-500/15 px-2 py-0.5 text-[10px] font-bold text-purple-700 ring-1 ring-purple-500/30">
+                            <Edit3 className="h-3 w-3" /> Editor
+                          </span>
+                        )}
+                        {u.roles.includes("moderator") && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-bold text-blue-700 ring-1 ring-blue-500/30">
+                            <ShieldAlert className="h-3 w-3" /> Moderator
+                          </span>
+                        )}
+                        {!isProtectedSuper &&
+                          !u.roles.includes("admin") &&
+                          !u.roles.includes("editor") &&
+                          !u.roles.includes("moderator") && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                              সাধারণ ইউজার
+                            </span>
+                          )}
+                        {(u.profile?.suspended || u.banned_until) && !isProtectedSuper && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-bold text-rose-700 ring-1 ring-rose-500/30">
+                            <ShieldOff className="h-3 w-3" /> স্থগিত
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setDetailsUser(u)}
+                      className="rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary-deep hover:bg-primary/20"
+                    >
+                      সকল তথ্য
+                    </button>
+                    {!isProtectedSuper && (
+                      <button
+                        type="button"
+                        onClick={() => void del(u)}
+                        className="rounded-full bg-destructive/10 p-1.5 text-destructive transition hover:bg-destructive hover:text-white"
+                        title="ইউজার মুছুন"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Super Admin Password Vault Bar */}
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <KeyRound className="h-3.5 w-3.5 text-primary" />
+                    <span className="font-semibold text-muted-foreground">পাসওয়ার্ড:</span>
+                    <span className="rounded bg-background px-2 py-0.5 font-mono text-xs font-bold text-primary-deep">
+                      {hasRealPw ? (showPw ? pwValue : "••••••••••") : pwValue}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {hasRealPw && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setVisiblePasswords((p) => ({ ...p, [u.id]: !p[u.id] }))
+                          }
+                          className="rounded-lg bg-background px-2 py-1 text-[11px] font-semibold hover:bg-muted"
+                        >
+                          {showPw ? (
+                            <>
+                              <EyeOff className="mr-1 inline h-3 w-3" /> লুকান
+                            </>
+                          ) : (
+                            <>
+                              <Eye className="mr-1 inline h-3 w-3" /> দেখুন
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard?.writeText(pwValue);
+                            toast.success("পাসওয়ার্ড কপি হয়েছে");
+                          }}
+                          className="rounded-lg bg-background px-2 py-1 text-[11px] font-semibold hover:bg-muted"
+                        >
+                          <Copy className="mr-1 inline h-3 w-3" /> কপি
+                        </button>
+                      </>
+                    )}
+                    {!isProtectedSuper && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingPwUser(u);
+                          setNewPasswordInput(u.password || "");
+                        }}
+                        className="rounded-lg bg-primary/15 px-2.5 py-1 text-[11px] font-bold text-primary-deep hover:bg-primary/25"
+                      >
+                        পাসওয়ার্ড সেট/পরিবর্তন
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Role & Account Actions */}
+                {isProtectedSuper ? (
+                  <p className="mt-2 rounded-xl bg-amber-500/10 px-3 py-1.5 text-[11px] font-semibold text-amber-900">
+                    🔒 মেইন সুপার এডমিন ({SUPER_ADMIN_EMAIL}) স্থায়ীভাবে সুরক্ষিত — কেউ রিমোভ, স্থগিত বা বাদ দিতে পারবে না।
+                  </p>
+                ) : (
+                  <div className="mt-2.5 flex flex-wrap gap-1.5">
+                    <RoleToggle
+                      active={u.roles.includes("admin")}
+                      onClick={() => toggleRole(u.id, "admin", !u.roles.includes("admin"))}
+                      label="Admin"
+                    />
+                    <RoleToggle
+                      active={u.roles.includes("editor")}
+                      onClick={() => toggleRole(u.id, "editor", !u.roles.includes("editor"))}
+                      label="Editor"
+                    />
+                    <RoleToggle
+                      active={u.roles.includes("moderator")}
+                      onClick={() =>
+                        toggleRole(u.id, "moderator", !u.roles.includes("moderator"))
+                      }
+                      label="Moderator"
+                    />
+                    <button
+                      onClick={() => toggleSuspend(u)}
+                      className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                        u.profile?.suspended || u.banned_until
+                          ? "bg-emerald-500/15 text-emerald-700"
+                          : "bg-rose-500/15 text-rose-700"
+                      }`}
+                    >
+                      {u.profile?.suspended || u.banned_until ? (
+                        <>
+                          <ShieldCheck className="h-3 w-3" /> সক্রিয় করুন
+                        </>
+                      ) : (
+                        <>
+                          <ShieldOff className="h-3 w-3" /> স্থগিত করুন
+                        </>
+                      )}
+                    </button>
+                    <EditProfileBtn u={u} onSaved={refresh} />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Set Password Modal */}
+      {editingPwUser && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3"
+          onClick={() => setEditingPwUser(null)}
+        >
+          <div
+            className="w-full max-w-sm space-y-3 rounded-2xl bg-card p-4 shadow-elevated"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="font-display text-sm font-bold text-primary-deep">
+              পাসওয়ার্ড পরিবর্তন / সেট করুন
+            </p>
+            <p className="text-xs text-muted-foreground">
+              ইউজার: <span className="font-bold text-foreground">{editingPwUser.email}</span>
+            </p>
+            <input
+              type="text"
+              value={newPasswordInput}
+              onChange={(e) => setNewPasswordInput(e.target.value)}
+              placeholder="নতুন পাসওয়ার্ড লিখুন (কমপক্ষে ৬ অক্ষর)"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 font-mono text-sm"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={handleSaveCustomPassword}
+                className="flex items-center gap-1 rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground"
+              >
+                <Save className="h-3.5 w-3.5" /> পাসওয়ার্ড সংরক্ষণ
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingPwUser(null)}
+                className="rounded-full bg-muted px-3 py-1.5 text-xs font-semibold"
+              >
+                বাতিল
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {detailsUser && (
+        <UserDetailsModal user={detailsUser} onClose={() => setDetailsUser(null)} />
+      )}
+    </div>
+  );
+}
+
+function UserDetailsModal({
+  user,
+  onClose,
+}: {
+  user: AdminUserRecord;
+  onClose: () => void;
+}) {
+  const { allCategories } = useCategories();
+  const { logo } = useLogo();
+  const [subCount, setSubCount] = useState<{
+    pending: number;
+    approved: number;
+    rejected: number;
+  } | null>(null);
+  const [access, setAccess] = useState<string[]>([]);
+  const isSuper = isProtectedMainSuperAdmin({
+    id: user.id,
+    email: user.email,
+    username: user.profile?.username,
+  });
+
+  useEffect(() => {
+    (async () => {
+      const res = await getUserSubmissionCounts(user.profile?.phone ?? "", user.id);
+      setSubCount(res.subCount);
+      setAccess(res.access);
+    })();
+  }, [user.id, user.profile?.phone]);
+
+  const fmt = (d?: string | null) => (d ? new Date(d).toLocaleString("bn-BD") : "—");
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[90dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-3xl bg-card p-5 shadow-elevated"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-3">
+            <img
+              src={user.profile?.photo_url || user.photo_url || logo}
+              alt=""
+              className="h-14 w-14 rounded-full border-2 border-primary/30 bg-white object-cover"
+            />
+            <div>
+              <p className="font-display text-base font-bold text-primary-deep">
+                {user.profile?.full_name || user.email}
+              </p>
+              <p className="text-xs text-muted-foreground">{user.email}</p>
+              <p className="font-mono text-[10px] text-muted-foreground">UID: {user.id}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="rounded-full bg-muted p-1.5">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Password & Auth Box */}
+        <div className="rounded-2xl border border-primary/25 bg-primary/5 p-3">
+          <p className="text-[11px] font-bold text-primary-deep">🔐 লগইন ও পাসওয়ার্ড তথ্য</p>
+          <div className="mt-1.5 flex items-center justify-between gap-2">
+            <div>
+              <p className="text-[10px] text-muted-foreground">পাসওয়ার্ড:</p>
+              <p className="font-mono text-sm font-bold text-primary-deep">
+                {user.password || "এখনো সিঙ্ক হয়নি"}
+              </p>
+            </div>
+            {user.password && (
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard?.writeText(user.password || "");
+                  toast.success("পাসওয়ার্ড কপি হয়েছে");
+                }}
+                className="rounded-full bg-primary px-3 py-1 text-[11px] font-bold text-primary-foreground"
+              >
+                <Copy className="mr-1 inline h-3 w-3" /> কপি
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <Info label="পূর্ণ নাম" val={user.profile?.full_name || "—"} />
+          <Info label="ইউজারনেম" val={user.profile?.username || "—"} />
+          <Info label="ফোন নম্বর" val={user.profile?.phone || "—"} />
+          <Info label="পদবি" val={user.profile?.designation || user.designation || "—"} />
+          <Info label="একাউন্ট তৈরি" val={fmt(user.created_at)} />
+          <Info label="শেষ লগইন" val={fmt(user.last_sign_in_at)} />
+          <Info
+            label="অবস্থা"
+            val={
+              isSuper
+                ? "স্থায়ী সুপার এডমিন"
+                : user.profile?.suspended || user.banned_until
+                  ? "স্থগিত"
+                  : "সক্রিয়"
+            }
+          />
+          <Info
+            label="রোল / ভূমিকা"
+            val={
+              isSuper
+                ? "Super Admin (All Access)"
+                : user.roles.length
+                  ? user.roles.join(", ")
+                  : "user"
+            }
+          />
+        </div>
+
+        <div className="rounded-xl bg-muted/40 p-3">
+          <p className="mb-1.5 text-[11px] font-bold text-primary-deep">📝 সাবমিশন স্ট্যাটাস</p>
+          {subCount ? (
+            <div className="flex gap-2 text-[11px]">
+              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 font-semibold text-amber-700">
+                অপেক্ষমাণ: {subCount.pending}
+              </span>
+              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 font-semibold text-emerald-700">
+                অনুমোদিত: {subCount.approved}
+              </span>
+              <span className="rounded-full bg-rose-500/15 px-2 py-0.5 font-semibold text-rose-700">
+                বাতিল: {subCount.rejected}
+              </span>
+            </div>
+          ) : (
+            <p className="text-[11px] text-muted-foreground">লোড হচ্ছে...</p>
+          )}
+        </div>
+
+        <div className="rounded-xl bg-muted/40 p-3">
+          <p className="mb-1.5 text-[11px] font-bold text-primary-deep">🔑 ক্যাটাগরি অ্যাকসেস</p>
+          {isSuper ? (
+            <p className="text-xs font-bold text-emerald-700">
+              ✓ সুপার এডমিন হিসেবে সকল ক্যাটাগরিতে পূর্ণ অ্যাকসেস রয়েছে ({allCategories.length} টি)
+            </p>
+          ) : access.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground">কোনো নির্দিষ্ট অ্যাকসেস নেই</p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {access.map((s) => {
+                const c = allCategories.find((x) => x.slug === s);
+                return (
+                  <span
+                    key={s}
+                    className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary-deep"
+                  >
+                    {c?.bn ?? s}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Info({ label, val }: { label: string; val: string }) {
+  return (
+    <div className="rounded-lg bg-muted/40 p-2">
+      <p className="text-[10px] text-muted-foreground">{label}</p>
+      <p className="truncate text-xs font-semibold text-primary-deep">{val}</p>
+    </div>
+  );
+}
+
+function EditProfileBtn({
+  u,
+  onSaved,
+}: {
+  u: AdminUserRecord;
+  onSaved: () => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({
+    full_name: u.profile?.full_name ?? "",
+    username: u.profile?.username ?? "",
+    phone: u.profile?.phone ?? "",
+    designation: u.profile?.designation ?? u.designation ?? "",
+  });
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    setBusy(true);
+    try {
+      await updateUserProfile({
+        data: { user_id: u.id, email: u.email, ...form },
+      });
+      toast.success("প্রোফাইল সংরক্ষিত");
+      setOpen(false);
+      await onSaved();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-1 rounded-full bg-blue-500/15 px-2.5 py-1 text-[11px] font-semibold text-blue-800"
+      >
+        <Edit3 className="h-3 w-3" /> তথ্য সম্পাদনা
+      </button>
+      {open && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3"
+          onClick={() => setOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm space-y-2 rounded-2xl bg-card p-4 shadow-elevated"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="font-display text-sm font-bold text-primary-deep">
+              প্রোফাইল সম্পাদনা ({u.email})
+            </p>
+            <input
+              value={form.full_name}
+              onChange={(e) => setForm({ ...form, full_name: e.target.value })}
+              placeholder="পূর্ণ নাম"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <input
+              value={form.username}
+              onChange={(e) => setForm({ ...form, username: e.target.value })}
+              placeholder="ইউজারনেম"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <input
+              value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              placeholder="ফোন নম্বর"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <input
+              value={form.designation}
+              onChange={(e) => setForm({ ...form, designation: e.target.value })}
+              placeholder="পদবি"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <div className="flex gap-2">
+              <button
+                disabled={busy}
+                onClick={save}
+                className="flex items-center gap-1 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"
+              >
+                <Save className="h-3 w-3" /> সংরক্ষণ
+              </button>
+              <button
+                onClick={() => setOpen(false)}
+                className="rounded-full bg-muted px-3 py-1.5 text-xs"
+              >
+                বাতিল
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function RoleToggle({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${
+        active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+      }`}
+    >
+      {active ? "✓ " : "+ "}
+      {label}
+    </button>
+  );
+}
+
+function AccessEditor() {
+  const { items, grant, revoke } = useCategoryAccess();
+  const { allCategories } = useCategories();
+  const [users, setUsers] = useState<AdminUserRecord[]>([]);
+  const [uid, setUid] = useState("");
+  const [slug, setSlug] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setUsers(await listUsers());
+      } catch {
+        /* */
+      }
+    })();
+  }, []);
+
+  async function add() {
+    if (!uid || !slug) return toast.error("ইউজার ও ক্যাটাগরি নির্বাচন করুন");
+    const { error } = await grant(uid, slug);
+    if (error) toast.error(error.message);
+    else {
+      toast.success("অ্যাকসেস দেওয়া হয়েছে");
+      setSlug("");
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-900">
+        <p className="flex items-center gap-1.5 font-bold">
+          <ShieldCheck className="h-4 w-4 text-amber-700" /> মেইন সুপার এডমিন ({SUPER_ADMIN_EMAIL})
+        </p>
+        <p className="mt-0.5">
+          সুপার এডমিনের জন্য সকল ক্যাটাগরি ({allCategories.length} টি), অনুদান, ইউজার ও সেটিংস স্বয়ংক্রিয়ভাবে উন্মুক্ত। নিচে অন্য এডমিন বা এডিটরদের নির্দিষ্ট ক্যাটাগরির অ্যাকসেস দিতে পারবেন।
+        </p>
+      </div>
+
+      <div className="space-y-2 rounded-2xl bg-card p-4 shadow-card">
+        <p className="flex items-center gap-2 font-display font-bold text-primary-deep">
+          <KeyRound className="h-4 w-4" /> ক্যাটাগরি অ্যাকসেস বরাদ্দ
+        </p>
+        <select
+          value={uid}
+          onChange={(e) => setUid(e.target.value)}
+          className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+        >
+          <option value="">ইউজার নির্বাচন</option>
+          {users.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.profile?.full_name || u.email} ({u.email})
+            </option>
+          ))}
+        </select>
+        <select
+          value={slug}
+          onChange={(e) => setSlug(e.target.value)}
+          className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+        >
+          <option value="">ক্যাটাগরি নির্বাচন</option>
+          {allCategories.map((c) => (
+            <option key={c.slug} value={c.slug}>
+              {c.bn}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={add}
+          className="rounded-full bg-gradient-hero px-4 py-2 text-sm font-semibold text-primary-foreground"
+        >
+          + যোগ করুন
+        </button>
+      </div>
+      <div className="space-y-2">
+        {items.length === 0 && (
+          <p className="rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+            কোনো অ্যাকসেস বরাদ্দ নেই
+          </p>
+        )}
+        {items.map((a) => {
+          const u = users.find((x) => x.id === a.user_id);
+          const c = allCategories.find((x) => x.slug === a.category_slug);
+          return (
+            <div
+              key={a.id}
+              className="flex items-center justify-between rounded-2xl bg-card p-3 shadow-card"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold">
+                  {u?.profile?.full_name || u?.email || a.user_id.slice(0, 8)}
+                </p>
+                <p className="text-xs text-muted-foreground">{c?.bn || a.category_slug}</p>
+              </div>
+              <button
+                onClick={() => revoke(a.id)}
+                className="rounded-full bg-destructive/10 p-1.5 text-destructive"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Super Admin: Advanced Site Settings & Full Data Backup
+// ============================================================================
+function SettingsAdminPanel() {
+  const { logo, customLogo, setLogo } = useLogo();
+  const { meta, saveSiteMeta } = useSiteMetaConfig();
+  const { categories } = useCategories();
+  const subs = useCloudSubmissions();
+  const dons = useCloudDonations();
+  const donors = useCloudDonors();
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const [draft, setDraft] = useState<SiteMetaConfig>(meta);
+  const [savingMeta, setSavingMeta] = useState(false);
+
+  useEffect(() => {
+    setDraft(meta);
+  }, [meta]);
+
+  async function onLogoFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) return toast.error("শুধু ছবি নির্বাচন করুন");
+    if (file.size > 3 * 1024 * 1024) return toast.error("3MB এর কম হতে হবে");
+    const compressed = await uploadPublicImage(file, "logo");
+    if (!compressed) return toast.error("লোগো প্রসেস করা যায়নি");
+    try {
+      await setLogo(compressed);
+      toast.success("লোগো Firebase-এ আপডেট হয়েছে");
+    } catch (err) {
+      toast.error((err as Error).message || "ত্রুটি");
+    }
+  }
+
+  async function handleSaveMeta(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingMeta(true);
+    try {
+      await saveSiteMeta(draft);
+      toast.success("সাইট সেটিংস ও কনফিগারেশন সংরক্ষিত হয়েছে!");
+    } catch (err: any) {
+      toast.error(err?.message || "ত্রুটি");
+    } finally {
+      setSavingMeta(false);
+    }
+  }
+
+  function exportFullBackup() {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      platform: "Smart Noakhali",
+      meta: draft,
+      categoriesCount: categories.length,
+      submissionsCount: subs.items.length,
+      donationsCount: dons.items.length,
+      donorsCount: donors.items.length,
+      submissions: subs.items,
+      donations: dons.items,
+      donors: donors.items,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `smart-noakhali-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("সম্পূর্ণ ডাটাবেইজ ব্যাকআপ ডাউনলোড হয়েছে");
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Logo Settings */}
+      <div className="rounded-3xl bg-card p-5 shadow-card">
+        <p className="mb-3 flex items-center gap-2 font-display text-sm font-bold text-primary-deep">
+          <ImageIcon className="h-4 w-4 text-primary" /> ব্র্যান্ড ও লোগো সেটিংস (Firebase Cloud Sync)
+        </p>
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-primary/20 bg-white p-1 shadow-card">
+            <img
+              src={logo}
+              alt="Smart Noakhali Logo"
+              className="h-full w-full rounded-full object-contain"
+            />
+          </div>
+          <div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              onChange={onLogoFile}
+              className="hidden"
+            />
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="flex items-center gap-1.5 rounded-full bg-gradient-hero px-4 py-2 text-xs font-semibold text-primary-foreground shadow-card"
+            >
+              <Upload className="h-3.5 w-3.5" /> নতুন লোগো আপলোড
+            </button>
+            {customLogo && (
+              <button
+                onClick={() => void setLogo(null)}
+                className="mt-2 block text-xs font-semibold text-destructive"
+              >
+                ডিফল্ট লোগো ফিরাও
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Advanced Site Meta & Feature Switches */}
+      <form onSubmit={handleSaveMeta} className="space-y-4 rounded-3xl bg-card p-5 shadow-card">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="flex items-center gap-2 font-display text-sm font-bold text-primary-deep">
+              <Settings className="h-4 w-4 text-primary" /> উন্নত সিস্টেম ও প্ল্যাটফর্ম কনফিগারেশন
+            </p>
+            <p className="text-xs text-muted-foreground">
+              সাইটের নাম, হেল্পলাইন, এআই লাইভ চ্যাট এবং সিস্টেম ফিচার নিয়ন্ত্রণ করুন
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <label className="text-[11px] font-semibold text-muted-foreground">সাইটের নাম</label>
+            <input
+              value={draft.siteTitle}
+              onChange={(e) => setDraft({ ...draft, siteTitle: e.target.value })}
+              className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold"
+            />
+          </div>
+          <div>
+            <label className="text-[11px] font-semibold text-muted-foreground">
+              ট্যাগলাইন / স্লোগান
+            </label>
+            <input
+              value={draft.tagline}
+              onChange={(e) => setDraft({ ...draft, tagline: e.target.value })}
+              className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="text-[11px] font-semibold text-muted-foreground">
+              হেল্পলাইন নাম্বার
+            </label>
+            <input
+              value={draft.helplinePhone}
+              onChange={(e) => setDraft({ ...draft, helplinePhone: e.target.value })}
+              className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 font-mono text-sm"
+            />
+          </div>
+          <div>
+            <label className="text-[11px] font-semibold text-muted-foreground">
+              সেশন টাইমআউট (মিনিট)
+            </label>
+            <input
+              type="number"
+              value={draft.sessionTimeoutMinutes}
+              onChange={(e) =>
+                setDraft({ ...draft, sessionTimeoutMinutes: Number(e.target.value) || 30 })
+              }
+              className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="text-[11px] font-semibold text-muted-foreground">
+              জরুরি নোটিশ টেক্সট (হোম/হেডার বার্তা)
+            </label>
+            <input
+              value={draft.emergencyNotice}
+              onChange={(e) => setDraft({ ...draft, emergencyNotice: e.target.value })}
+              placeholder="কোনো বিশেষ ঘোষণা থাকলে লিখুন..."
+              className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="text-[11px] font-semibold text-muted-foreground">
+              এআই (AI) স্বাগতম বার্তা
+            </label>
+            <input
+              value={draft.aiWelcomeMessage}
+              onChange={(e) => setDraft({ ...draft, aiWelcomeMessage: e.target.value })}
+              className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+          </div>
+        </div>
+
+        {/* Feature Toggles */}
+        <div className="grid grid-cols-1 gap-2 rounded-2xl bg-muted/40 p-3.5 sm:grid-cols-2">
+          <label className="flex cursor-pointer items-center gap-2.5 text-xs font-semibold">
+            <input
+              type="checkbox"
+              checked={draft.aiChatEnabled}
+              onChange={(e) => setDraft({ ...draft, aiChatEnabled: e.target.checked })}
+            />
+            লাইভ চ্যাটে সরাসরি এআই (AI) সার্চ অ্যাসিস্ট্যান্ট সক্রিয়
+          </label>
+          <label className="flex cursor-pointer items-center gap-2.5 text-xs font-semibold">
+            <input
+              type="checkbox"
+              checked={draft.strictSecurityMode}
+              onChange={(e) => setDraft({ ...draft, strictSecurityMode: e.target.checked })}
+            />
+            কঠোর এডমিন প্যানেল সিকিউরিটি শিল্ড (Strict Security Mode)
+          </label>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <button
+            type="submit"
+            disabled={savingMeta}
+            className="flex items-center gap-1.5 rounded-full bg-gradient-hero px-5 py-2.5 text-xs font-bold text-primary-foreground shadow-elevated disabled:opacity-60"
+          >
+            <Save className="h-3.5 w-3.5" />{" "}
+            {savingMeta ? "সংরক্ষণ হচ্ছে..." : "সিস্টেম সেটিংস সংরক্ষণ করুন"}
+          </button>
+
+          <button
+            type="button"
+            onClick={exportFullBackup}
+            className="flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-4 py-2 text-xs font-bold text-primary-deep hover:bg-primary/20"
+          >
+            <Database className="h-3.5 w-3.5" /> সম্পূর্ণ ডাটাবেইজ ব্যাকআপ (JSON)
+          </button>
+        </div>
+      </form>
+
+      <OtpGatewayConfigCard />
+
+      <DonationNumbersManagerCard />
+    </div>
+  );
+}
+
+function OtpGatewayConfigCard() {
+  const [cfg, setCfg] = useState({
+    smtpHost: "smtp.gmail.com",
+    smtpPort: 465,
+    smtpUser: "",
+    smtpPass: "",
+    smtpFromName: "স্মার্ট নোয়াখালী (Smart Noakhali)",
+    resendApiKey: "",
+    bulksmsApiKey: "",
+    bulksmsSenderId: "8809617611000",
+    greenwebToken: "",
+    customSmsUrl: "",
+  });
+  const [activeSessions, setActiveSessions] = useState<
+    Array<{ target: string; channel: "email" | "phone"; code: string; expiresAt: number }>
+  >([]);
+  const [saving, setSaving] = useState(false);
+
+  async function loadConfig() {
+    try {
+      const r = await fetch("/api/admin/otp-config");
+      const data = await r.json();
+      if (data?.config) {
+        setCfg((prev) => ({ ...prev, ...data.config }));
+      }
+      if (Array.isArray(data?.activeSessions)) {
+        setActiveSessions(data.activeSessions);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  useEffect(() => {
+    void loadConfig();
+    const t = setInterval(loadConfig, 5000);
+    return () => clearInterval(t);
+  }, []);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const r = await fetch("/api/admin/otp-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(cfg),
+      });
+      if (!r.ok) throw new Error("সংরক্ষণ ব্যর্থ");
+      toast.success("৬-ডিজিট ওটিপি (OTP) ইমেইল ও এসএমএস গেটওয়ে সংরক্ষিত হয়েছে!");
+      await loadConfig();
+    } catch (err: any) {
+      toast.error(err?.message || "ত্রুটি");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={save} className="space-y-4 rounded-3xl bg-card p-5 shadow-card">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="flex items-center gap-2 font-display text-sm font-bold text-primary-deep">
+            <KeyRound className="h-4 w-4 text-primary" /> ৬-ডিজিট ওটিপি (OTP) ইমেইল ও এসএমএস গেটওয়ে সেটিংস
+          </p>
+          <p className="text-xs text-muted-foreground">
+            ইমেইল ও মোবাইলে সরাসরি ৬ সংখ্যার ভেরিফিকেশন কোড পাঠানোর জন্য SMTP (Gmail App Password) বা SMS API কনফিগার করুন
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void loadConfig()}
+          className="rounded-full bg-muted px-3 py-1 text-xs font-semibold text-primary-deep"
+        >
+          রিফ্রেশ
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div>
+          <label className="text-[11px] font-semibold text-muted-foreground">
+            প্রেরকের ইমেইল (Gmail / SMTP User)
+          </label>
+          <input
+            value={cfg.smtpUser}
+            onChange={(e) => setCfg({ ...cfg, smtpUser: e.target.value })}
+            placeholder="your-email@gmail.com"
+            className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs"
+          />
+        </div>
+        <div>
+          <label className="text-[11px] font-semibold text-muted-foreground">
+            Gmail App Password / SMTP পাসওয়ার্ড
+          </label>
+          <input
+            type="password"
+            value={cfg.smtpPass}
+            onChange={(e) => setCfg({ ...cfg, smtpPass: e.target.value })}
+            placeholder="১৬ অক্ষরের অ্যাপ পাসওয়ার্ড"
+            className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs"
+          />
+        </div>
+        <div>
+          <label className="text-[11px] font-semibold text-muted-foreground">
+            BulkSMSBD API Key (মোবাইল SMS কোডের জন্য)
+          </label>
+          <input
+            value={cfg.bulksmsApiKey}
+            onChange={(e) => setCfg({ ...cfg, bulksmsApiKey: e.target.value })}
+            placeholder="BulkSMSBD API Key"
+            className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs"
+          />
+        </div>
+        <div>
+          <label className="text-[11px] font-semibold text-muted-foreground">
+            GreenWeb BD SMS Token (বিকল্প SMS গেটওয়ে)
+          </label>
+          <input
+            value={cfg.greenwebToken}
+            onChange={(e) => setCfg({ ...cfg, greenwebToken: e.target.value })}
+            placeholder="GreenWeb Token"
+            className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs"
+          />
+        </div>
+      </div>
+
+      {activeSessions.length > 0 && (
+        <div className="rounded-2xl border border-primary/20 bg-primary/5 p-3">
+          <p className="mb-2 text-xs font-bold text-primary-deep">
+            সক্রিয় ওটিপি সেশন মনিটর (শুধুমাত্র সুপার এডমিনের জন্য দৃশ্যমান):
+          </p>
+          <div className="space-y-1.5">
+            {activeSessions.map((s) => (
+              <div
+                key={`${s.channel}:${s.target}`}
+                className="flex items-center justify-between rounded-xl bg-white px-3 py-1.5 text-xs shadow-sm"
+              >
+                <span>
+                  <strong>{s.channel === "email" ? "📧 ইমেইল" : "📱 মোবাইল"}:</strong> {s.target}
+                </span>
+                <span className="rounded-lg bg-emerald-500/15 px-2.5 py-0.5 font-mono text-sm font-extrabold text-emerald-800">
+                  {s.code}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <button
+        type="submit"
+        disabled={saving}
+        className="flex items-center gap-1.5 rounded-full bg-gradient-hero px-5 py-2.5 text-xs font-bold text-primary-foreground shadow-elevated disabled:opacity-60"
+      >
+        <Save className="h-3.5 w-3.5" />{" "}
+        {saving ? "সংরক্ষণ হচ্ছে..." : "ওটিপি গেটওয়ে সেটিংস সংরক্ষণ করুন"}
+      </button>
+    </form>
+  );
+}
+
+function List<T>({
+  items,
+  empty,
+  children,
+}: {
+  items: T[];
+  empty: string;
+  children: (item: T) => React.ReactNode;
+}) {
+  if (items.length === 0)
+    return (
+      <div className="rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center text-sm text-muted-foreground">
+        {empty}
+      </div>
+    );
+  return <div className="space-y-3">{items.map(children)}</div>;
+}
+
+function Actions({
+  onApprove,
+  onReject,
+  onDelete,
+  status,
+  inline,
+  canDelete,
+}: {
+  onApprove: () => Promise<unknown> | unknown;
+  onReject: () => Promise<unknown> | unknown;
+  onDelete: () => Promise<unknown> | unknown;
+  status: string;
+  inline?: boolean;
+  canDelete?: boolean;
+}) {
+  const [busy, setBusy] = useState<null | "a" | "r" | "d">(null);
+  const { isMainAdmin, isAdmin } = useAuth();
+  const allowDelete = canDelete ?? (isMainAdmin || isAdmin);
+  async function run(key: "a" | "r" | "d", fn: () => Promise<unknown> | unknown, ok: string) {
+    if (busy) return;
+    setBusy(key);
+    try {
+      const res = (await fn()) as { error?: { message: string } } | undefined;
+      if (res && res.error) toast.error(res.error.message);
+      else toast.success(ok);
+    } catch (e) {
+      toast.error((e as Error).message ?? "ত্রুটি");
+    } finally {
+      setBusy(null);
+    }
+  }
+  return (
+    <div className={inline ? "flex flex-wrap gap-2" : "mt-3 flex flex-wrap gap-2"}>
+      {status !== "approved" && (
+        <button
+          disabled={!!busy}
+          onClick={() => run("a", onApprove, "অনুমোদিত হয়েছে")}
+          className="flex items-center gap-1 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground disabled:opacity-60"
+        >
+          {busy === "a" ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <Check className="h-3 w-3" />
+          )}{" "}
+          অনুমোদন
+        </button>
+      )}
+      {status !== "rejected" && (
+        <button
+          disabled={!!busy}
+          onClick={() => run("r", onReject, "বাতিল করা হয়েছে")}
+          className="flex items-center gap-1 rounded-full bg-muted px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
+        >
+          {busy === "r" ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <X className="h-3 w-3" />
+          )}{" "}
+          বাতিল
+        </button>
+      )}
+      {allowDelete && (
+        <button
+          disabled={!!busy}
+          onClick={() => {
+            void run("d", onDelete, "মুছে ফেলা হয়েছে");
+          }}
+          className="flex items-center gap-1 rounded-full bg-destructive/10 px-3 py-1.5 text-xs font-semibold text-destructive disabled:opacity-60"
+        >
+          {busy === "d" ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <Trash2 className="h-3 w-3" />
+          )}{" "}
+          মুছুন
+        </button>
+      )}
+    </div>
+  );
+}
+
+function Status({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    pending: "bg-amber-500/15 text-amber-700",
+    approved: "bg-emerald-500/15 text-emerald-700",
+    rejected: "bg-rose-500/15 text-rose-700",
+  };
+  const label: Record<string, string> = {
+    pending: "অপেক্ষমাণ",
+    approved: "অনুমোদিত",
+    rejected: "বাতিল",
+  };
+  return (
+    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${map[status]}`}>
+      {label[status]}
+    </span>
+  );
+}
+
+function TabBtn({
+  active,
+  onClick,
+  children,
+  badge,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+  badge?: number;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`relative shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+        active
+          ? "bg-card text-primary-deep shadow-card"
+          : "text-muted-foreground hover:text-primary-deep"
+      }`}
+    >
+      {children}
+      {badge !== undefined && badge > 0 && (
+        <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[9px] font-bold text-white shadow-sm">
+          {badge}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function Stat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div
+      className={`rounded-2xl p-3 shadow-card transition ${
+        accent
+          ? "bg-gradient-to-br from-rose-50 to-amber-50 ring-1 ring-rose-200/60"
+          : "bg-gradient-card"
+      }`}
+    >
+      <p className="text-[11px] text-muted-foreground">{label}</p>
+      <p
+        className={`mt-0.5 font-display text-lg font-bold ${
+          accent ? "text-rose-700" : "text-primary-deep"
+        }`}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function OverviewPanel({
+  onJump,
+  isMainAdmin,
+  pendingSubs,
+  pendingDons,
+  pendingDonors,
+  pendingEvents,
+  pendingEmerg,
+  activeBanners,
+  allSubs,
+  recentSubs,
+  recentDons,
+  auditLogs = [],
+}: {
+  onJump: (t: Tab) => void;
+  isMainAdmin: boolean;
+  pendingSubs: number;
+  pendingDons: number;
+  pendingDonors: number;
+  pendingEvents: number;
+  pendingEmerg: number;
+  activeBanners: number;
+  allSubs: SubmissionRow[];
+  recentSubs: Array<{ id: string; title: string; category_slug: string; status: string }>;
+  recentDons: Array<{ id: string; sender_name: string; amount: number; status: string }>;
+  auditLogs?: StaffActivityLogEntry[];
+}) {
+  const { allCategories } = useCategories();
+  const { logo } = useLogo();
+
+  // Compute top categories by submission count
+  const catCounts = allCategories
+    .map((c) => ({
+      slug: c.slug,
+      bn: c.bn,
+      count: allSubs.filter((s) => s.category_slug === c.slug).length,
+    }))
+    .filter((x) => x.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
+  const queue: Array<{ key: Tab; label: string; count: number; tone: string }> = [
+    {
+      key: "info",
+      label: "অপেক্ষমাণ তথ্য",
+      count: pendingSubs,
+      tone: "bg-amber-500/15 text-amber-700",
+    },
+    ...(isMainAdmin
+      ? [
+          {
+            key: "donation" as Tab,
+            label: "অপেক্ষমাণ অনুদান",
+            count: pendingDons,
+            tone: "bg-emerald-500/15 text-emerald-700",
+          },
+        ]
+      : []),
+    {
+      key: "donors",
+      label: "অপেক্ষমাণ দাতা",
+      count: pendingDonors,
+      tone: "bg-rose-500/15 text-rose-700",
+    },
+    {
+      key: "events",
+      label: "অপেক্ষমাণ রক্তদান",
+      count: pendingEvents,
+      tone: "bg-pink-500/15 text-pink-700",
+    },
+    {
+      key: "emergency",
+      label: "অপেক্ষমাণ জরুরী",
+      count: pendingEmerg,
+      tone: "bg-red-500/15 text-red-700",
+    },
+  ];
+
+  const recentDeletedLogs = auditLogs.filter((l) => l.action_type === "delete").slice(0, 4);
+  const recentStaffLogs = auditLogs.slice(0, 5);
+
+  return (
+    <div className="space-y-3">
+      {/* Quick Actions */}
+      <div className="rounded-2xl bg-card p-4 shadow-card">
+        <p className="mb-3 font-display text-sm font-bold text-primary-deep">
+          ⚡ দ্রুত অ্যাকশন ও শর্টকাট
+        </p>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <QuickAction
+            onClick={() => onJump("profile")}
+            icon={<UserCircle2 className="h-4 w-4" />}
+            label="আমার প্রোফাইল ও ফটো"
+          />
+          {isMainAdmin && (
+            <QuickAction
+              onClick={() => onJump("activity")}
+              icon={<Activity className="h-4 w-4" />}
+              label="স্টাফ অ্যাক্টিভিটি ও ডিলিট"
+            />
+          )}
+          {isMainAdmin && (
+            <QuickAction
+              onClick={() => onJump("users")}
+              icon={<UsersIcon className="h-4 w-4" />}
+              label="ইউজার ও পাসওয়ার্ড"
+            />
+          )}
+          {isMainAdmin && (
+            <QuickAction
+              onClick={() => onJump("apps")}
+              icon={<Smartphone className="h-4 w-4" />}
+              label="অ্যাপ ফাইল আপলোড"
+            />
+          )}
+          {isMainAdmin && (
+            <QuickAction
+              onClick={() => onJump("categories")}
+              icon={<LayoutGrid className="h-4 w-4" />}
+              label="ক্যাটাগরি এডিট"
+            />
+          )}
+          {isMainAdmin && (
+            <QuickAction
+              onClick={() => onJump("donation")}
+              icon={<HandCoins className="h-4 w-4" />}
+              label="অনুদান নাম্বার"
+            />
+          )}
+          <QuickAction
+            onClick={() => onJump("info")}
+            icon={<Plus className="h-4 w-4" />}
+            label="তথ্য যোগ/এডিট"
+          />
+          <QuickAction
+            onClick={() => onJump("chat")}
+            icon={<MessageCircle className="h-4 w-4" />}
+            label="লাইভ চ্যাট উত্তর"
+          />
+          <QuickAction
+            onClick={() => onJump("security")}
+            icon={<ShieldCheck className="h-4 w-4" />}
+            label="সিকিউরিটি ও পিন"
+          />
+        </div>
+      </div>
+
+      {/* Super Admin Exclusive: Live Staff Activity & Deletion Monitor */}
+      {isMainAdmin && (
+        <div className="rounded-3xl border border-primary/25 bg-card p-4 shadow-card">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="flex items-center gap-1.5 font-display text-sm font-bold text-primary-deep">
+                <Activity className="h-4 w-4 text-primary" /> 🕵️ এডমিন, এডিটর ও মডারেটর অ্যাক্টিভিটি ও ডিলিট মনিটর
+              </p>
+              <p className="text-xs text-muted-foreground">
+                কে কখন কোন তথ্য অনুমোদন, এডিট বা ডিলিট করেছে তার লাইভ তালিকা (শুধু সুপার এডমিন দেখতে পান)
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onJump("activity")}
+              className="rounded-full bg-gradient-hero px-3.5 py-1.5 text-xs font-bold text-primary-foreground shadow-card"
+            >
+              সব লগ ও ডিলিট তথ্য দেখুন ({auditLogs.length})
+            </button>
+          </div>
+
+          {recentDeletedLogs.length > 0 && (
+            <div className="mt-3 rounded-2xl border border-rose-500/30 bg-rose-500/5 p-3">
+              <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-rose-700">
+                <Trash2 className="h-3.5 w-3.5" /> সাম্প্রতিক ডিলিট করা তথ্য ({recentDeletedLogs.length} টি)
+              </p>
+              <div className="space-y-1.5">
+                {recentDeletedLogs.map((dl) => (
+                  <div
+                    key={dl.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white/90 px-3 py-2 text-xs shadow-sm"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-bold text-rose-800">
+                        🗑️ {dl.target_title}{" "}
+                        <span className="font-normal text-muted-foreground">
+                          ({dl.module_label})
+                        </span>
+                      </p>
+                      <p className="truncate text-[11px] text-muted-foreground">
+                        ডিলিট করেছেন: <strong className="text-foreground">{dl.actor_name}</strong>{" "}
+                        <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary-deep">
+                          {dl.actor_role_bn}
+                        </span>{" "}
+                        • {new Date(dl.created_at).toLocaleString("bn-BD")}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onJump("activity")}
+                      className="rounded-full bg-rose-600 px-2.5 py-1 text-[10px] font-bold text-white"
+                    >
+                      বিস্তারিত / পুনরুদ্ধার
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {recentStaffLogs.length === 0 ? (
+            <p className="mt-3 rounded-xl border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
+              এখনো কোনো এডমিন, এডিটর বা মডারেটরের অ্যাক্টিভিটি রেকর্ড হয়নি। তারা কোনো কাজ বা ডিলিট করলেই এখানে সাথে সাথে দেখা যাবে।
+            </p>
+          ) : (
+            <div className="mt-3 space-y-1.5">
+              {recentStaffLogs.map((log) => (
+                <div
+                  key={log.id}
+                  className="flex items-center justify-between gap-2 rounded-xl bg-muted/40 px-3 py-2 text-xs"
+                >
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <img
+                      src={log.actor_photo || logo}
+                      alt={log.actor_name}
+                      className="h-8 w-8 shrink-0 rounded-full border border-primary/30 bg-white object-cover"
+                    />
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-foreground">
+                        <span>{log.actor_name}</span>{" "}
+                        <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary-deep">
+                          {log.actor_role_bn}
+                        </span>{" "}
+                        —{" "}
+                        <span
+                          className={
+                            log.action_type === "delete"
+                              ? "font-bold text-rose-600"
+                              : "font-bold text-primary-deep"
+                          }
+                        >
+                          {log.action_label}
+                        </span>
+                      </p>
+                      <p className="truncate text-[11px] text-muted-foreground">
+                        {log.module_label}: <strong>{log.target_title}</strong>
+                        {log.target_detail ? ` • ${log.target_detail}` : ""}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                    {new Date(log.created_at).toLocaleTimeString("bn-BD", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* System Health & Security Status */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-2xl bg-card p-4 shadow-card">
+          <p className="mb-2.5 flex items-center gap-1.5 font-display text-sm font-bold text-primary-deep">
+            <Activity className="h-4 w-4 text-emerald-600" /> সিস্টেম ও সিকিউরিটি স্ট্যাটাস
+          </p>
+          <div className="space-y-2 text-xs">
+            <div className="flex items-center justify-between rounded-xl bg-emerald-500/10 px-3 py-2 text-emerald-900">
+              <span className="flex items-center gap-1.5 font-semibold">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> Firebase রিয়েলটাইম ডাটাবেইজ
+              </span>
+              <span className="font-bold">সক্রিয়</span>
+            </div>
+            <div className="flex items-center justify-between rounded-xl bg-primary/10 px-3 py-2 text-primary-deep">
+              <span className="flex items-center gap-1.5 font-semibold">
+                <Sparkles className="h-3.5 w-3.5 text-primary" /> এআই (AI) লাইভ চ্যাট সার্চ
+              </span>
+              <span className="font-bold">সক্রিয়</span>
+            </div>
+            <div className="flex items-center justify-between rounded-xl bg-amber-500/10 px-3 py-2 text-amber-900">
+              <span className="flex items-center gap-1.5 font-semibold">
+                <ShieldCheck className="h-3.5 w-3.5 text-amber-700" /> রোল ও প্রোফাইল আইসোলেশন
+              </span>
+              <span className="font-bold">সুরক্ষিত</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Pending Queue */}
+        <div className="rounded-2xl bg-card p-4 shadow-card">
+          <p className="mb-2.5 font-display text-sm font-bold text-primary-deep">
+            📋 অপেক্ষমাণ অনুমোদন কিউ
+          </p>
+          <div className="space-y-1.5">
+            {queue.map((q) => (
+              <button
+                key={q.key}
+                onClick={() => onJump(q.key)}
+                className="flex w-full items-center justify-between rounded-xl border border-border bg-background px-3 py-1.5 text-left transition hover:border-primary"
+              >
+                <span className="text-xs font-medium">{q.label}</span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                    q.count > 0 ? q.tone : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {q.count}
+                </span>
+              </button>
+            ))}
+            <div className="flex items-center justify-between rounded-xl border border-dashed border-border bg-background px-3 py-1.5">
+              <span className="text-xs">সক্রিয় জরুরী ব্যানার</span>
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                  activeBanners > 0
+                    ? "bg-emerald-500/15 text-emerald-700"
+                    : "bg-muted text-muted-foreground"
+                }`}
+              >
+                {activeBanners}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Category Distribution Analytics */}
+      {catCounts.length > 0 && (
+        <div className="rounded-2xl bg-card p-4 shadow-card">
+          <p className="mb-2.5 font-display text-sm font-bold text-primary-deep">
+            📊 শীর্ষ ক্যাটাগরি তথ্য পরিসংখ্যান
+          </p>
+          <div className="space-y-2">
+            {catCounts.map((c) => {
+              const pct = Math.min(
+                100,
+                Math.round((c.count / Math.max(1, allSubs.length)) * 100)
+              );
+              return (
+                <div key={c.slug} className="space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span className="font-semibold">{c.bn}</span>
+                    <span className="text-muted-foreground">
+                      {c.count} টি তথ্য ({pct}%)
+                    </span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-gradient-hero"
+                      style={{ width: `${Math.max(8, pct)}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {recentSubs.length > 0 && (
+        <div className="rounded-2xl bg-card p-4 shadow-card">
+          <p className="mb-2 font-display text-sm font-bold text-primary-deep">
+            🕒 সাম্প্রতিক তথ্য জমা
+          </p>
+          <div className="space-y-1.5">
+            {recentSubs.map((s) => (
+              <div
+                key={s.id}
+                className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2 text-xs"
+              >
+                <span className="truncate">
+                  {s.title} <span className="text-muted-foreground">• {s.category_slug}</span>
+                </span>
+                <Status status={s.status} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {isMainAdmin && recentDons.length > 0 && (
+        <div className="rounded-2xl bg-card p-4 shadow-card">
+          <p className="mb-2 font-display text-sm font-bold text-primary-deep">
+            💰 সাম্প্রতিক অনুদান
+          </p>
+          <div className="space-y-1.5">
+            {recentDons.map((d) => (
+              <div
+                key={d.id}
+                className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2 text-xs"
+              >
+                <span className="truncate">
+                  {d.sender_name} •{" "}
+                  <span className="font-bold text-primary-deep">
+                    {Number(d.amount).toLocaleString("bn-BD")}৳
+                  </span>
+                </span>
+                <Status status={d.status} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QuickAction({
+  onClick,
+  icon,
+  label,
+}: {
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex flex-col items-center gap-1.5 rounded-xl border border-border bg-background p-3 transition hover:border-primary hover:shadow-card active:scale-95"
+    >
+      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-hero text-primary-foreground">
+        {icon}
+      </span>
+      <span className="text-[11px] font-semibold text-primary-deep">{label}</span>
+    </button>
+  );
+}
+
+// ============= Emergency banners CRUD =============
+function BannersEditor() {
+  const { items, add, update, remove } = useEmergencyBanners();
+  const [form, setForm] = useState({
+    title: "জরুরী রক্তের প্রয়োজন",
+    message: "",
+    blood_group: "",
+    hospital: "",
+    phone: "",
+    visible: true,
+  });
+  const [busy, setBusy] = useState(false);
+  const { isMainAdmin, isAdmin } = useAuth();
+  const canManageBanners = isMainAdmin || isAdmin;
+
+  async function create() {
+    if (!form.message.trim()) return toast.error("বার্তা আবশ্যক");
+    setBusy(true);
+    const res = await add(form);
+    setBusy(false);
+    if (!res.ok) return toast.error(res.error || "ত্রুটি");
+    toast.success("ব্যানার যোগ হয়েছে");
+    setForm({
+      title: "জরুরী রক্তের প্রয়োজন",
+      message: "",
+      blood_group: "",
+      hospital: "",
+      phone: "",
+      visible: true,
+    });
+  }
+
+  return (
+    <div className="space-y-3">
+      {canManageBanners && (
+        <div className="space-y-2 rounded-2xl bg-card p-4 shadow-card">
+          <p className="flex items-center gap-2 font-display font-bold text-primary-deep">
+            <Bell className="h-4 w-4" /> নতুন জরুরী ব্যানার
+          </p>
+          <input
+            value={form.title}
+            onChange={(e) => setForm({ ...form, title: e.target.value })}
+            placeholder="শিরোনাম"
+            className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+          />
+          <textarea
+            value={form.message}
+            onChange={(e) => setForm({ ...form, message: e.target.value })}
+            rows={3}
+            placeholder="বার্তা * (যেমন: O+ রক্তদাতা প্রয়োজন — নোয়াখালী জেনারেল হাসপাতাল)"
+            className="w-full rounded-xl border border-border bg-background p-3 text-sm"
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              value={form.blood_group}
+              onChange={(e) => setForm({ ...form, blood_group: e.target.value })}
+              placeholder="রক্তের গ্রুপ (যেমন O+)"
+              className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+            <input
+              value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              placeholder="যোগাযোগ ফোন"
+              className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+          </div>
+          <input
+            value={form.hospital}
+            onChange={(e) => setForm({ ...form, hospital: e.target.value })}
+            placeholder="হাসপাতাল (ঐচ্ছিক)"
+            className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+          />
+          <div className="flex items-center justify-between">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={form.visible}
+                onChange={(e) => setForm({ ...form, visible: e.target.checked })}
+              />{" "}
+              দৃশ্যমান
+            </label>
+            <button
+              disabled={busy}
+              onClick={create}
+              className="flex items-center gap-1 rounded-full bg-gradient-hero px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+            >
+              {busy ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Plus className="h-3.5 w-3.5" />
+              )}{" "}
+              যোগ করুন
+            </button>
+          </div>
+        </div>
+      )}
+      {items.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center text-sm text-muted-foreground">
+          কোনো ব্যানার নেই
+        </div>
+      ) : (
+        items.map((b) => <BannerRowEdit key={b.id} b={b} update={update} remove={remove} />)
+      )}
+    </div>
+  );
+}
+
+function BannerRowEdit({
+  b,
+  update,
+  remove,
+}: {
+  b: BannerRow;
+  update: (id: string, p: Partial<BannerRow>) => unknown;
+  remove: (id: string) => unknown;
+}) {
+  const [edit, setEdit] = useState(false);
+  const [form, setForm] = useState({
+    title: b.title,
+    message: b.message,
+    blood_group: b.blood_group ?? "",
+    hospital: b.hospital ?? "",
+    phone: b.phone ?? "",
+    visible: b.visible,
+  });
+  const { isMainAdmin, isAdmin } = useAuth();
+  const canManageBanners = isMainAdmin || isAdmin;
+
+  async function save() {
+    const { error } = (await update(b.id, form)) as { error?: { message: string } };
+    if (error) toast.error(error.message);
+    else {
+      toast.success("সংরক্ষিত");
+      setEdit(false);
+    }
+  }
+  async function toggle() {
+    const { error } = (await update(b.id, { visible: !b.visible })) as {
+      error?: { message: string };
+    };
+    if (error) toast.error(error.message);
+  }
+  async function del() {
+    const { error } = (await remove(b.id)) as { error?: { message: string } };
+    if (error) toast.error(error.message);
+    else toast.success("মুছে ফেলা হয়েছে");
+  }
+
+  if (!edit) {
+    return (
+      <div className={`rounded-2xl bg-card p-4 shadow-card ${b.visible ? "" : "opacity-60"}`}>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="font-semibold text-rose-700">{b.title}</p>
+              {b.blood_group && (
+                <span className="rounded bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                  {b.blood_group}
+                </span>
+              )}
+              <span
+                className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                  b.visible
+                    ? "bg-emerald-500/15 text-emerald-700"
+                    : "bg-muted text-muted-foreground"
+                }`}
+              >
+                {b.visible ? "দৃশ্যমান" : "লুকানো"}
+              </span>
+            </div>
+            <p className="mt-1 text-sm">{b.message}</p>
+            {b.hospital && <p className="text-xs text-muted-foreground">🏥 {b.hospital}</p>}
+            {b.phone && <p className="text-xs text-muted-foreground">📞 {b.phone}</p>}
+          </div>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            onClick={toggle}
+            className="flex items-center gap-1 rounded-full bg-muted px-3 py-1.5 text-xs font-semibold"
+          >
+            <Eye className="h-3 w-3" /> {b.visible ? "লুকান" : "দেখান"}
+          </button>
+          {canManageBanners && (
+            <button
+              onClick={() => setEdit(true)}
+              className="flex items-center gap-1 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"
+            >
+              <Edit3 className="h-3 w-3" /> সম্পাদনা
+            </button>
+          )}
+          {canManageBanners && (
+            <button
+              onClick={del}
+              className="flex items-center gap-1 rounded-full bg-destructive/10 px-3 py-1.5 text-xs font-semibold text-destructive"
+            >
+              <Trash2 className="h-3 w-3" /> মুছুন
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2 rounded-2xl bg-card p-4 shadow-card">
+      <input
+        value={form.title}
+        onChange={(e) => setForm({ ...form, title: e.target.value })}
+        className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+      />
+      <textarea
+        value={form.message}
+        onChange={(e) => setForm({ ...form, message: e.target.value })}
+        rows={3}
+        className="w-full rounded-xl border border-border bg-background p-3 text-sm"
+      />
+      <div className="grid grid-cols-2 gap-2">
+        <input
+          value={form.blood_group}
+          onChange={(e) => setForm({ ...form, blood_group: e.target.value })}
+          placeholder="গ্রুপ"
+          className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+        />
+        <input
+          value={form.phone}
+          onChange={(e) => setForm({ ...form, phone: e.target.value })}
+          placeholder="ফোন"
+          className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+        />
+      </div>
+      <input
+        value={form.hospital}
+        onChange={(e) => setForm({ ...form, hospital: e.target.value })}
+        placeholder="হাসপাতাল"
+        className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+      />
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={form.visible}
+          onChange={(e) => setForm({ ...form, visible: e.target.checked })}
+        />{" "}
+        দৃশ্যমান
+      </label>
+      <div className="flex gap-2">
+        <button
+          onClick={save}
+          className="flex items-center gap-1 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"
+        >
+          <Save className="h-3 w-3" /> সংরক্ষণ
+        </button>
+        <button
+          onClick={() => setEdit(false)}
+          className="rounded-full bg-muted px-3 py-1.5 text-xs font-semibold"
+        >
+          বাতিল
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Admin Private Live Chat Panel — Super Easy 1-Click & Inline Reply for All Staff
+// Ensures responder's Name & Profile Photo are synced and shown to customer,
+// while isolating non-Super-Admin staff from seeing other staff's identities.
+// ============================================================================
+type ThreadView = ChatThreadRow & {
+  profile: { full_name: string | null; username: string | null; phone: string | null } | null;
+  email: string;
+};
+
+const QUICK_STAFF_REPLIES = [
+  "আসসালামু আলাইকুম! স্মার্ট নোয়াখালীতে আপনাকে স্বাগতম। কিভাবে সাহায্য করতে পারি?",
+  "ধন্যবাদ, আমরা আপনার মেসেজটি পেয়েছি এবং বিষয়টি দেখছি।",
+  "অনুগ্রহ করে আপনার পূর্ণ নাম ও মোবাইল নাম্বারটি দিন।",
+  "আপনার তথ্যটি সফলভাবে নোট করা হয়েছে। ধন্যবাদ!",
+  "জরুরী রক্ত বা অ্যাম্বুলেন্সের জন্য আমাদের জরুরী সেকশন দেখুন অথবা ৯৯৯-এ কল করুন।",
+];
+
+function ChatThreadsAdmin() {
+  const [threads, setThreads] = useState<ThreadView[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [active, setActive] = useState<ThreadView | null>(null);
+  const [search, setSearch] = useState("");
+  const [filterMode, setFilterMode] = useState<"all" | "unread" | "replied">("all");
+  const [inlineDrafts, setInlineDrafts] = useState<Record<string, string>>({});
+  const [sendingThreadId, setSendingThreadId] = useState<string | null>(null);
+
+  const { user, isMainAdmin, isAdmin, isEditor, isModerator } = useAuth();
+  const { getStaffProfile, upsertStaffProfile } = useStaffProfiles();
+  const { logo } = useLogo();
+  const liveThreads = useChatThreads();
+
+  const me = user?.id || (isMainAdmin ? "super_admin_mahmudul" : "staff_member");
+  const myStaff = getStaffProfile(me) || getStaffProfile(user?.email);
+  const myRoleLabel = isMainAdmin
+    ? "সুপার এডমিন"
+    : isAdmin
+      ? "এডমিন"
+      : isEditor
+        ? "এডিটর"
+        : isModerator
+          ? "মোডারেটর"
+          : "স্টাফ";
+  const myName =
+    myStaff?.full_name ||
+    user?.displayName ||
+    (isMainAdmin ? "মেইন সুপার এডমিন" : user?.email?.split("@")[0] || myRoleLabel);
+  const myPhoto = myStaff?.photo_url || logo;
+
+  async function refresh() {
+    try {
+      const list = (await listThreadsWithUsers()) as ThreadView[];
+      setThreads(list);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+    const timer = setInterval(refresh, 3000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [liveThreads.items.length, liveThreads.items.map((t) => t.last_message_at).join(",")]);
+
+  async function sendQuickInlineReply(thread: ThreadView, customText?: string) {
+    const replyBody = (customText ?? inlineDrafts[thread.id] ?? "").trim();
+    if (!replyBody) {
+      toast.error("উত্তর লিখুন অথবা উপরের রেডি উত্তর বাটনে ক্লিক করুন");
+      return;
+    }
+
+    setSendingThreadId(thread.id);
+    try {
+      // Sync responder profile so customer sees their Name, Role & Photo
+      await upsertStaffProfile({
+        uid: me,
+        email: user?.email || "",
+        full_name: myName,
+        role_label: myRoleLabel,
+        photo_url: myStaff?.photo_url || "",
+        phone: myStaff?.phone || user?.phone || "",
+        designation: myStaff?.designation || myRoleLabel,
+      }).catch(() => {});
+
+      const resp = await fetch("/api/chat/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          thread_id: thread.id,
+          user_id: thread.user_id,
+          user_name: thread.profile?.full_name || undefined,
+          user_email: thread.email || undefined,
+          user_phone: thread.profile?.phone || undefined,
+          sender_id: me,
+          sender_role: "staff",
+          sender_name: myName,
+          sender_photo: myPhoto,
+          sender_role_label: myRoleLabel,
+          body: replyBody,
+        }),
+      });
+
+      if (!resp.ok) {
+        throw new Error("উত্তর পাঠানো যায়নি");
+      }
+
+      void recordStaffActivity({
+        action_type: "reply",
+        action_label: "গ্রাহকের লাইভ চ্যাটে দ্রুত উত্তর দিয়েছে",
+        module: "chat",
+        module_label: "লাইভ চ্যাট",
+        target_id: thread.id,
+        target_title: thread.profile?.full_name || thread.email || `গ্রাহক (${thread.id.slice(0, 10)})`,
+        target_detail: `উত্তর: "${replyBody}"`,
+      });
+
+      setInlineDrafts((prev) => ({ ...prev, [thread.id]: "" }));
+      toast.success(`${thread.profile?.full_name || "গ্রাহক"}-কে উত্তর পাঠানো হয়েছে!`);
+      await refresh();
+    } catch (err: any) {
+      toast.error(err?.message || "উত্তর পাঠানো ব্যর্থ হয়েছে");
+    } finally {
+      setSendingThreadId(null);
+    }
+  }
+
+  async function handleDeleteThread(thread: ThreadView) {
+    if (!isMainAdmin) return;
+    const { error } = await liveThreads.remove(thread.id);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    setThreads((prev) => prev.filter((x) => x.id !== thread.id));
+    if (active?.id === thread.id) {
+      setActive(null);
+    }
+    toast.success(`${thread.profile?.full_name || "গ্রাহক"}-এর লাইভ চ্যাট ডিলিট করা হয়েছে`);
+  }
+
+  async function handleDeleteAllThreads() {
+    if (!isMainAdmin || threads.length === 0) return;
+    const { error } = await liveThreads.removeAll();
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    setThreads([]);
+    setActive(null);
+    toast.success("সকল লাইভ চ্যাট ডিলিট করা হয়েছে");
+  }
+
+  const unreadTotal = threads.filter((t) => Number(t.staff_unread) > 0).length;
+
+  const filtered = threads.filter((t) => {
+    if (filterMode === "unread" && !(Number(t.staff_unread) > 0)) return false;
+    if (filterMode === "replied" && Number(t.staff_unread) > 0) return false;
+
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return [t.email, t.profile?.full_name, t.profile?.username, t.profile?.phone, t.last_message_preview]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(q);
+  });
+
+  if (active) {
+    return (
+      <AdminChatPanel
+        thread={active}
+        onBack={() => {
+          setActive(null);
+          void refresh();
+        }}
+        onDeleteThread={() => void handleDeleteThread(active)}
+        me={me}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Easy Responder Identity Banner */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/25 bg-gradient-card p-3.5 shadow-card">
+        <div className="flex items-center gap-3">
+          <img
+            src={myPhoto}
+            alt={myName}
+            className="h-11 w-11 shrink-0 rounded-full border-2 border-gold bg-white object-cover shadow-sm"
+          />
+          <div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <p className="text-xs font-bold text-primary-deep">
+                আপনি উত্তর দিচ্ছেন: <span className="text-primary">{myName}</span>
+              </p>
+              <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary-deep">
+                {myRoleLabel}
+              </span>
+            </div>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              নিচের যেকোনো মেসেজ কার্ডে সরাসরি উত্তর লিখুন বা ১-ক্লিকে রেডি উত্তর পাঠান — গ্রাহক আপনার নাম ও ছবি দেখতে পাবেন।
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {isMainAdmin && threads.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void handleDeleteAllThreads()}
+              className="inline-flex items-center gap-1.5 rounded-full bg-destructive/15 px-3 py-1.5 text-xs font-bold text-destructive transition hover:bg-destructive hover:text-white"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> সব চ্যাট ডিলিট ({threads.length})
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-xs font-semibold text-primary-deep hover:bg-primary/10"
+          >
+            <RefreshCcw className="h-3.5 w-3.5" /> রিফ্রেশ
+          </button>
+        </div>
+      </div>
+
+      {/* Filter Pills & Search */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            onClick={() => setFilterMode("all")}
+            className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
+              filterMode === "all"
+                ? "bg-gradient-hero text-white shadow-card"
+                : "bg-card text-muted-foreground border border-border"
+            }`}
+          >
+            সব মেসেজ ({threads.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setFilterMode("unread")}
+            className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
+              filterMode === "unread"
+                ? "bg-rose-600 text-white shadow-card"
+                : "bg-card text-rose-700 border border-rose-200"
+            }`}
+          >
+            উত্তর বাকি ({unreadTotal})
+          </button>
+          <button
+            type="button"
+            onClick={() => setFilterMode("replied")}
+            className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
+              filterMode === "replied"
+                ? "bg-emerald-600 text-white shadow-card"
+                : "bg-card text-emerald-800 border border-emerald-200"
+            }`}
+          >
+            উত্তর দেওয়া হয়েছে ({Math.max(0, threads.length - unreadTotal)})
+          </button>
+        </div>
+
+        <div className="relative flex-1 sm:max-w-xs">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="গ্রাহকের নাম, ফোন বা মেসেজ খুঁজুন..."
+            className="w-full rounded-full border border-border bg-card py-1.5 pl-8 pr-3 text-xs shadow-sm outline-none focus:border-primary"
+          />
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="rounded-2xl bg-card/50 p-8 text-center">
+          <Loader2 className="mx-auto h-5 w-5 animate-spin text-primary" />
+          <p className="mt-2 text-xs text-muted-foreground">চ্যাট মেসেজ লোড হচ্ছে...</p>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center text-sm text-muted-foreground">
+          <MessageCircle className="mx-auto mb-2 h-8 w-8 text-muted-foreground/50" />
+          <p className="font-semibold text-foreground">এই মুহূর্তে কোনো লাইভ চ্যাট মেসেজ নেই</p>
+          <p className="mt-1 text-xs">
+            গ্রাহকরা ফ্লোটিং লাইভ চ্যাটে মেসেজ পাঠালেই এখানে তাৎক্ষণিকভাবে দেখা যাবে এবং সরাসরি উত্তর দিতে পারবেন।
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filtered.map((t) => {
+            const customerName =
+              t.profile?.full_name || t.email?.split("@")[0] || `গ্রাহক #${t.user_id.slice(0, 6)}`;
+            const isUnread = Number(t.staff_unread) > 0;
+            const draft = inlineDrafts[t.id] || "";
+            const isSending = sendingThreadId === t.id;
+
+            return (
+              <div
+                key={t.id}
+                className={`rounded-3xl border p-4 shadow-card transition ${
+                  isUnread
+                    ? "border-rose-300 bg-gradient-to-br from-rose-50/60 to-card"
+                    : "border-border bg-card"
+                }`}
+              >
+                {/* Customer Info & Open Chat / Delete Buttons */}
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <div
+                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full font-bold ${
+                        isUnread
+                          ? "bg-rose-600 text-white shadow-sm"
+                          : "bg-emerald-500/15 text-emerald-700"
+                      }`}
+                    >
+                      <MessageCircle className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <p className="font-display text-sm font-bold text-primary-deep">
+                          {customerName}
+                        </p>
+                        {isUnread ? (
+                          <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                            {t.staff_unread} টি নতুন মেসেজ
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                            ✓ উত্তর দেওয়া হয়েছে
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        {t.profile?.phone ? `📞 ${t.profile.phone} • ` : ""}
+                        {t.email || ""} •{" "}
+                        {new Date(t.last_message_at).toLocaleString("bn-BD", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          day: "2-digit",
+                          month: "2-digit",
+                        })}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setActive(t)}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary-deep transition hover:bg-primary hover:text-white"
+                    >
+                      <MessageCircle className="h-3.5 w-3.5" /> সম্পূর্ণ চ্যাট ও ফাইল/ভয়েস ({isUnread ? "উত্তর দিন" : "খুলুন"})
+                    </button>
+                    {isMainAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteThread(t)}
+                        className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-3 py-1.5 text-xs font-bold text-destructive transition hover:bg-destructive hover:text-white"
+                        title="এই লাইভ চ্যাট ডিলিট করুন"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" /> ডিলিট
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Latest Message Preview Bubble */}
+                <div
+                  onClick={() => setActive(t)}
+                  className="mt-3 cursor-pointer rounded-2xl border border-border/80 bg-background/90 px-3.5 py-2.5 text-xs transition hover:border-primary/40"
+                >
+                  <span className="font-bold text-muted-foreground">সর্বশেষ বার্তা: </span>
+                  <span className="font-medium text-foreground">
+                    {t.last_message_preview || "কোনো টেক্সট নেই — ক্লিক করে চ্যাট খুলুন"}
+                  </span>
+                </div>
+
+                {/* 1-Click Quick Reply Pills */}
+                <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] font-bold text-muted-foreground">⚡ ১-ক্লিক উত্তর:</span>
+                  {QUICK_STAFF_REPLIES.slice(0, 3).map((qr, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      disabled={isSending}
+                      onClick={() => void sendQuickInlineReply(t, qr)}
+                      className="rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-[10px] font-semibold text-primary-deep transition hover:bg-primary hover:text-white disabled:opacity-50"
+                    >
+                      {qr.length > 34 ? `${qr.slice(0, 34)}...` : qr}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Direct Inline Reply Input Box */}
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void sendQuickInlineReply(t);
+                  }}
+                  className="mt-2.5 flex items-center gap-2"
+                >
+                  <input
+                    value={draft}
+                    onChange={(e) =>
+                      setInlineDrafts((prev) => ({ ...prev, [t.id]: e.target.value }))
+                    }
+                    placeholder={`${customerName}-কে সরাসরি এখানেই উত্তর লিখুন...`}
+                    className="min-w-0 flex-1 rounded-full border border-border bg-background px-3.5 py-2 text-xs outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isSending}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-gradient-hero px-4 py-2 text-xs font-bold text-primary-foreground shadow-card transition active:scale-95 disabled:opacity-60"
+                  >
+                    {isSending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Send className="h-3.5 w-3.5" />
+                    )}
+                    উত্তর পাঠান
+                  </button>
+                </form>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminChatPanel({
+  thread,
+  onBack,
+  onDeleteThread,
+  me,
+}: {
+  thread: ThreadView;
+  onBack: () => void;
+  onDeleteThread: () => void;
+  me: string;
+}) {
+  const { items, send, remove } = useThreadMessages(thread.id);
+  const { user, isMainAdmin, isAdmin, isEditor, isModerator } = useAuth();
+  const { getStaffProfile, upsertStaffProfile } = useStaffProfiles();
+  const { logo } = useLogo();
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const endRef = useRef<HTMLDivElement>(null);
+
+  const myStaff = getStaffProfile(me) || getStaffProfile(user?.email);
+  const myRoleLabel = isMainAdmin
+    ? "সুপার এডমিন"
+    : isAdmin
+      ? "এডমিন"
+      : isEditor
+        ? "এডিটর"
+        : isModerator
+          ? "মোডারেটর"
+          : "স্টাফ";
+  const myName =
+    myStaff?.full_name ||
+    user?.displayName ||
+    (isMainAdmin ? "মেইন সুপার এডমিন" : user?.email?.split("@")[0] || myRoleLabel);
+  const myPhoto = myStaff?.photo_url || logo;
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [items.length]);
+
+  useEffect(() => {
+    void markThreadRead(thread.id, "staff");
+  }, [thread.id, items.length]);
+
+  async function syncResponderIdentity() {
+    if (!me) return;
+    try {
+      await upsertStaffProfile({
+        uid: me,
+        email: user?.email || "",
+        full_name: myName,
+        role_label: myRoleLabel,
+        photo_url: myStaff?.photo_url || "",
+        phone: myStaff?.phone || user?.phone || "",
+        designation: myStaff?.designation || myRoleLabel,
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function sendReplyMessage(bodyText: string, attachmentUrl?: string | null) {
+    const clean = bodyText.trim();
+    if (!clean && !attachmentUrl) return;
+    void syncResponderIdentity();
+    const { error } = await send(me, "staff", clean, attachmentUrl, {
+      sender_name: myName,
+      sender_photo: myPhoto,
+      sender_role_label: myRoleLabel,
+      user_name: thread.profile?.full_name || undefined,
+      user_email: thread.email || undefined,
+      user_phone: thread.profile?.phone || undefined,
+    });
+    if (error) toast.error(error.message);
+  }
+
+  async function onSend(e: React.FormEvent) {
+    e.preventDefault();
+    const t = text.trim();
+    if (!t || !me) return;
+    setText("");
+    await sendReplyMessage(t);
+  }
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f || !me) return;
+    if (f.size > 5 * 1024 * 1024) return toast.error("৫MB এর বেশি না");
+    setBusy(true);
+    const url = await uploadPublicImage(f, `chat/${thread.id}`);
+    setBusy(false);
+    if (!url) return toast.error("আপলোড ব্যর্থ");
+    await sendReplyMessage("", url);
+  }
+
+  async function onVoice(blob: Blob) {
+    if (!me) return;
+    setBusy(true);
+    const file = new File([blob], `voice-${Date.now()}.webm`, { type: "audio/webm" });
+    const url = await uploadPublicImage(file, `chat/${thread.id}`);
+    setBusy(false);
+    if (!url) return toast.error("আপলোড ব্যর্থ");
+    await sendReplyMessage("", url);
+  }
+
+  return (
+    <div className="flex h-[75dvh] flex-col">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-card p-3 shadow-card">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onBack}
+            className="rounded-full bg-muted px-3 py-1.5 text-xs font-semibold hover:bg-primary/10"
+          >
+            <ArrowLeft className="inline h-3.5 w-3.5" /> তালিকায় ফেরত
+          </button>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-bold text-primary-deep">
+              {thread.profile?.full_name || thread.email || "গ্রাহক"}
+            </p>
+            <p className="truncate text-[11px] text-muted-foreground">
+              {thread.profile?.phone ? `📞 ${thread.profile.phone} • ` : ""}
+              {thread.email}
+            </p>
+          </div>
+        </div>
+        {/* Responder Identity Indicator + Super Admin Delete Thread Button */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2 rounded-full bg-primary/10 px-2.5 py-1">
+            <img
+              src={myPhoto}
+              alt={myName}
+              className="h-6 w-6 rounded-full border border-primary/30 bg-white object-cover"
+            />
+            <span className="text-[11px] font-bold text-primary-deep">
+              উত্তরদাতা: {myName} ({myRoleLabel})
+            </span>
+          </div>
+          {isMainAdmin && (
+            <button
+              type="button"
+              onClick={onDeleteThread}
+              className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-3 py-1.5 text-xs font-bold text-destructive transition hover:bg-destructive hover:text-white"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> এই চ্যাট ডিলিট করুন
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 space-y-2.5 overflow-y-auto rounded-2xl border border-border bg-card/40 p-3">
+        {items.length === 0 && (
+          <p className="py-12 text-center text-xs text-muted-foreground">
+            এখনো কোনো বার্তা নেই — নিচের যেকোনো রেডি বাটনে ক্লিক করে কথোপকথন শুরু করুন।
+          </p>
+        )}
+        {items.map((m) => {
+          const isStaffMsg = m.sender_role === "staff";
+          const isMyMsg = m.sender_id === me;
+          const staffSender = isStaffMsg ? getStaffProfile(m.sender_id) : null;
+
+          // Staff Isolation: Super Admin sees exact responder name & photo for all staff;
+          // Non-Super-Admin only sees their own name & photo, while other staff are masked as "সাপোর্ট টিম"
+          const displaySenderName = !isStaffMsg
+            ? m.sender_name || thread.profile?.full_name || "গ্রাহক"
+            : isMyMsg
+              ? `${myName} (আপনি)`
+              : isMainAdmin
+                ? `${m.sender_name || staffSender?.full_name || "স্টাফ"} (${
+                    m.sender_role_label || staffSender?.role_label || "Staff"
+                  })`
+                : "সাপোর্ট টিম";
+
+          const displayAvatar = !isStaffMsg
+            ? null
+            : isMyMsg
+              ? myPhoto
+              : isMainAdmin
+                ? m.sender_photo || staffSender?.photo_url || logo
+                : logo;
+
+          return (
+            <div
+              key={m.id}
+              className={`flex items-end gap-2 ${
+                isStaffMsg ? "justify-end" : "justify-start"
+              }`}
+            >
+              <div
+                className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm shadow-sm ${
+                  isStaffMsg
+                    ? "bg-gradient-hero text-primary-foreground"
+                    : "border border-border bg-card"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p
+                    className={`text-[10px] font-bold ${
+                      isStaffMsg ? "text-gold" : "text-primary"
+                    }`}
+                  >
+                    {displaySenderName}
+                  </p>
+                  {isMainAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void remove(m.id);
+                        toast.success("মেসেজ মুছে ফেলা হয়েছে");
+                      }}
+                      className={`rounded p-0.5 transition ${
+                        isStaffMsg
+                          ? "text-white/70 hover:bg-white/20 hover:text-white"
+                          : "text-destructive/70 hover:bg-destructive/15 hover:text-destructive"
+                      }`}
+                      title="এই মেসেজ ডিলিট করুন"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+                {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
+                {m.attachment_url && <AttachmentView url={m.attachment_url} />}
+                <p
+                  className={`mt-0.5 text-[9px] ${
+                    isStaffMsg ? "opacity-75" : "text-muted-foreground"
+                  }`}
+                >
+                  {new Date(m.created_at).toLocaleTimeString("bn-BD", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </p>
+              </div>
+              {isStaffMsg && displayAvatar && (
+                <img
+                  src={displayAvatar}
+                  alt={displaySenderName}
+                  className="h-7 w-7 shrink-0 rounded-full border border-gold bg-white object-cover shadow-sm"
+                />
+              )}
+            </div>
+          );
+        })}
+        <div ref={endRef} />
+      </div>
+
+      {/* 1-Click Ready Reply Bar */}
+      <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1">
+        {QUICK_STAFF_REPLIES.map((qr, idx) => (
+          <button
+            key={idx}
+            type="button"
+            onClick={() => void sendReplyMessage(qr)}
+            className="shrink-0 rounded-full border border-primary/25 bg-card px-3 py-1 text-[11px] font-semibold text-primary-deep shadow-sm transition hover:bg-primary hover:text-white"
+          >
+            ⚡ {qr}
+          </button>
+        ))}
+      </div>
+
+      <form onSubmit={onSend} className="mt-1.5 flex items-center gap-2">
+        <label
+          title="ছবি বা ফাইল পাঠান"
+          className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-card text-primary shadow-card"
+        >
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+          <input
+            type="file"
+            accept="image/*,audio/*,application/pdf"
+            className="hidden"
+            onChange={onFile}
+          />
+        </label>
+        <VoiceRecorderButton onRecorded={onVoice} disabled={busy} />
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={`${myName} হিসেবে উত্তর লিখুন...`}
+          className="min-w-0 flex-1 rounded-full border border-border bg-card px-4 py-2.5 text-sm outline-none focus:border-primary"
+        />
+        <button
+          type="submit"
+          className="flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-full bg-gradient-hero px-4 text-xs font-bold text-primary-foreground shadow-elevated"
+        >
+          <Send className="h-4 w-4" /> পাঠান
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// ============================================================================
+// Super Admin Exclusive: Staff Activity & Deletion Audit Panel
+// ("এডমিন, এডিটর, মডারেটর কে কি কাজ করছে কি ডিলিট করলো সব সুপার এডমিন দেখতে পারবে")
+// ============================================================================
+function StaffActivityAuditPanel({
+  auditHook,
+}: {
+  auditHook: ReturnType<typeof useStaffAuditLogs>;
+}) {
+  const { logs, loading, refresh } = auditHook;
+  const { logo } = useLogo();
+  const [roleFilter, setRoleFilter] = useState<
+    "all" | "deletions_only" | "admin" | "editor" | "moderator" | "super_admin"
+  >("all");
+  const [actionFilter, setActionFilter] = useState<string>("all");
+  const [moduleFilter, setModuleFilter] = useState<string>("all");
+  const [search, setSearch] = useState("");
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+
+  const totalActions = logs.length;
+  const totalDeletions = logs.filter((l) => l.action_type === "delete").length;
+  const totalApprovals = logs.filter((l) => l.action_type === "approve").length;
+  const totalEdits = logs.filter((l) => l.action_type === "edit" || l.action_type === "create").length;
+
+  // Group summary by staff member
+  const staffSummary = Object.values(
+    logs.reduce<
+      Record<
+        string,
+        {
+          key: string;
+          name: string;
+          email: string;
+          role_bn: string;
+          role: string;
+          photo: string;
+          total: number;
+          deleted: number;
+          approved: number;
+          edited: number;
+          replied: number;
+        }
+      >
+    >((acc, l) => {
+      const k = l.actor_email || l.actor_id || "staff";
+      if (!acc[k]) {
+        acc[k] = {
+          key: k,
+          name: l.actor_name || "স্টাফ",
+          email: l.actor_email || "",
+          role_bn: l.actor_role_bn || "স্টাফ",
+          role: l.actor_role || "staff",
+          photo: l.actor_photo || "",
+          total: 0,
+          deleted: 0,
+          approved: 0,
+          edited: 0,
+          replied: 0,
+        };
+      }
+      acc[k].total += 1;
+      if (l.action_type === "delete") acc[k].deleted += 1;
+      if (l.action_type === "approve") acc[k].approved += 1;
+      if (l.action_type === "edit" || l.action_type === "create") acc[k].edited += 1;
+      if (l.action_type === "reply") acc[k].replied += 1;
+      return acc;
+    }, {})
+  );
+
+  const filteredLogs = logs.filter((l) => {
+    if (roleFilter === "deletions_only" && l.action_type !== "delete") return false;
+    if (roleFilter === "admin" && l.actor_role !== "admin") return false;
+    if (roleFilter === "editor" && l.actor_role !== "editor") return false;
+    if (roleFilter === "moderator" && l.actor_role !== "moderator") return false;
+    if (roleFilter === "super_admin" && l.actor_role !== "super_admin") return false;
+
+    if (actionFilter !== "all" && l.action_type !== actionFilter) return false;
+    if (moduleFilter !== "all" && l.module !== moduleFilter) return false;
+
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      const hay = [
+        l.actor_name,
+        l.actor_email,
+        l.actor_role_bn,
+        l.action_label,
+        l.module_label,
+        l.target_title,
+        l.target_detail,
+        l.deleted_snapshot ? JSON.stringify(l.deleted_snapshot) : "",
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  async function handleRestore(entry: StaffActivityLogEntry) {
+    setRestoringId(entry.id);
+    try {
+      const res = await restoreDeletedAuditItem(entry);
+      if (!res.ok) {
+        toast.error(res.error || "পুনরুদ্ধার করা যায়নি");
+      } else {
+        toast.success(`"${entry.target_title}" সফলভাবে ডাটাবেইজে পুনরুদ্ধার (Restore) করা হয়েছে!`);
+        await refresh();
+      }
+    } finally {
+      setRestoringId(null);
+    }
+  }
+
+  function getActionBadgeStyle(type: StaffActivityLogEntry["action_type"]) {
+    switch (type) {
+      case "delete":
+        return "bg-rose-600 text-white shadow-sm";
+      case "approve":
+        return "bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-500/30";
+      case "reject":
+        return "bg-amber-500/15 text-amber-800 ring-1 ring-amber-500/30";
+      case "edit":
+        return "bg-blue-500/15 text-blue-800 ring-1 ring-blue-500/30";
+      case "create":
+        return "bg-teal-500/15 text-teal-800 ring-1 ring-teal-500/30";
+      case "reply":
+        return "bg-violet-500/15 text-violet-800 ring-1 ring-violet-500/30";
+      default:
+        return "bg-primary/15 text-primary-deep";
+    }
+  }
+
+  function getRoleBadgeStyle(role: string) {
+    if (role === "super_admin") return "bg-amber-500/20 text-amber-900 ring-1 ring-amber-500/40";
+    if (role === "admin") return "bg-emerald-500/15 text-emerald-800 ring-1 ring-emerald-500/30";
+    if (role === "editor") return "bg-blue-500/15 text-blue-800 ring-1 ring-blue-500/30";
+    if (role === "moderator") return "bg-purple-500/15 text-purple-800 ring-1 ring-purple-500/30";
+    return "bg-muted text-muted-foreground";
+  }
+
+  const SNAPSHOT_LABELS: Record<string, string> = {
+    title: "শিরোনাম / নাম",
+    full_name: "রক্তদাতার নাম",
+    patient_name: "রোগীর নাম",
+    sender_name: "অনুদানকারীর নাম",
+    contact: "ফোন নম্বর",
+    phone: "ফোন নম্বর",
+    sender_phone: "প্রেরকের ফোন",
+    category_slug: "ক্যাটাগরি",
+    blood_group: "রক্তের গ্রুপ",
+    address: "ঠিকানা",
+    hospital: "হাসপাতাল",
+    designation: "পদবি / পরিচয়",
+    body: "বিস্তারিত / মেসেজ",
+    message: "বার্তা",
+    note: "নোট",
+    amount: "টাকার পরিমাণ",
+    trx_id: "TrxID",
+    method: "মাধ্যম",
+    event_date: "রক্তদানের তারিখ",
+    place: "স্থান",
+    status: "স্ট্যাটাস",
+    email: "ইমেইল",
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Header Banner */}
+      <div className="rounded-3xl border border-primary/25 bg-gradient-card p-5 shadow-card">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-hero text-white shadow-card">
+                <Activity className="h-4 w-4" />
+              </span>
+              <div>
+                <h2 className="font-display text-base font-bold text-primary-deep">
+                  এডমিন, এডিটর ও মডারেটর অ্যাক্টিভিটি এবং ডিলিট অডিট লগ
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  কে কখন কোন তথ্য অনুমোদন, এডিট, চ্যাট বা ডিলিট করেছে তার সম্পূর্ণ বিস্তারিত ও ডিলিট হওয়া তথ্য পুনরুদ্ধার প্যানেল
+                </p>
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3.5 py-1.5 text-xs font-bold text-primary-deep transition hover:bg-primary/20"
+          >
+            <RefreshCcw className="h-3.5 w-3.5" /> লাইভ রিফ্রেশ
+          </button>
+        </div>
+
+        {/* Summary KPI Grid */}
+        <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+          <div className="rounded-2xl bg-card p-3 shadow-sm ring-1 ring-border">
+            <p className="text-[11px] text-muted-foreground">মোট স্টাফ অ্যাক্টিভিটি</p>
+            <p className="mt-0.5 font-display text-xl font-bold text-primary-deep">
+              {totalActions}
+            </p>
+          </div>
+          <div className="rounded-2xl bg-rose-500/10 p-3 shadow-sm ring-1 ring-rose-500/30">
+            <p className="text-[11px] font-semibold text-rose-700">🗑️ মোট ডিলিট করা তথ্য</p>
+            <p className="mt-0.5 font-display text-xl font-bold text-rose-700">
+              {totalDeletions}
+            </p>
+          </div>
+          <div className="rounded-2xl bg-emerald-500/10 p-3 shadow-sm ring-1 ring-emerald-500/30">
+            <p className="text-[11px] font-semibold text-emerald-800">✓ মোট অনুমোদন (Approve)</p>
+            <p className="mt-0.5 font-display text-xl font-bold text-emerald-700">
+              {totalApprovals}
+            </p>
+          </div>
+          <div className="rounded-2xl bg-blue-500/10 p-3 shadow-sm ring-1 ring-blue-500/30">
+            <p className="text-[11px] font-semibold text-blue-800">✏️ এডিট ও নতুন যোগ</p>
+            <p className="mt-0.5 font-display text-xl font-bold text-blue-700">
+              {totalEdits}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Staff Member Wise Breakdown */}
+      {staffSummary.length > 0 && (
+        <div className="rounded-2xl bg-card p-4 shadow-card">
+          <p className="mb-2.5 font-display text-xs font-bold text-primary-deep">
+            👥 স্টাফ সদস্যভিত্তিক কাজের সারসংক্ষেপ (কে কতটি কাজ ও ডিলিট করেছে)
+          </p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {staffSummary.map((st) => (
+              <div
+                key={st.key}
+                onClick={() => setSearch(st.email || st.name)}
+                className="flex cursor-pointer items-center justify-between gap-2.5 rounded-2xl border border-border bg-muted/30 p-3 transition hover:border-primary"
+              >
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <img
+                    src={st.photo || logo}
+                    alt={st.name}
+                    className="h-10 w-10 shrink-0 rounded-full border border-primary/30 bg-white object-cover"
+                  />
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1">
+                      <p className="truncate text-xs font-bold text-foreground">{st.name}</p>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[9px] font-bold ${getRoleBadgeStyle(
+                          st.role
+                        )}`}
+                      >
+                        {st.role_bn}
+                      </span>
+                    </div>
+                    <p className="truncate text-[10px] text-muted-foreground">{st.email}</p>
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5 text-[10px] font-bold">
+                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-primary-deep">
+                    মোট: {st.total}
+                  </span>
+                  {st.deleted > 0 && (
+                    <span className="rounded-full bg-rose-600 px-2 py-0.5 text-white">
+                      ডিলিট: {st.deleted}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Role & Action Filter Bar */}
+      <div className="space-y-3 rounded-2xl bg-card p-4 shadow-card">
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            onClick={() => setRoleFilter("all")}
+            className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
+              roleFilter === "all"
+                ? "bg-gradient-hero text-white shadow-card"
+                : "bg-muted text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            সব রোল ({logs.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setRoleFilter("deletions_only")}
+            className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
+              roleFilter === "deletions_only"
+                ? "bg-rose-600 text-white shadow-card"
+                : "bg-rose-500/10 text-rose-700 hover:bg-rose-500/20"
+            }`}
+          >
+            🗑️ শুধু ডিলিট লগ ({totalDeletions})
+          </button>
+          <button
+            type="button"
+            onClick={() => setRoleFilter("admin")}
+            className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
+              roleFilter === "admin"
+                ? "bg-gradient-hero text-white shadow-card"
+                : "bg-muted text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            এডমিন (Admin)
+          </button>
+          <button
+            type="button"
+            onClick={() => setRoleFilter("editor")}
+            className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
+              roleFilter === "editor"
+                ? "bg-gradient-hero text-white shadow-card"
+                : "bg-muted text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            এডিটর (Editor)
+          </button>
+          <button
+            type="button"
+            onClick={() => setRoleFilter("moderator")}
+            className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
+              roleFilter === "moderator"
+                ? "bg-gradient-hero text-white shadow-card"
+                : "bg-muted text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            মোডারেটর (Moderator)
+          </button>
+          <button
+            type="button"
+            onClick={() => setRoleFilter("super_admin")}
+            className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
+              roleFilter === "super_admin"
+                ? "bg-gradient-hero text-white shadow-card"
+                : "bg-muted text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            সুপার এডমিন
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <select
+            value={actionFilter}
+            onChange={(e) => setActionFilter(e.target.value)}
+            className="rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
+          >
+            <option value="all">সব কাজের ধরন (All Actions)</option>
+            <option value="delete">🗑️ ডিলিট করা তথ্য (Deleted)</option>
+            <option value="approve">✓ অনুমোদন (Approved)</option>
+            <option value="reject">✕ বাতিল (Rejected)</option>
+            <option value="edit">✏️ সম্পাদনা (Edited)</option>
+            <option value="create">➕ নতুন যোগ (Created)</option>
+            <option value="reply">💬 লাইভ চ্যাট উত্তর (Chat Reply)</option>
+            <option value="user">👤 ইউজার/রোল পরিবর্তন</option>
+          </select>
+
+          <select
+            value={moduleFilter}
+            onChange={(e) => setModuleFilter(e.target.value)}
+            className="rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
+          >
+            <option value="all">সব সেকশন (All Sections)</option>
+            <option value="info">তথ্য ডিরেক্টরি</option>
+            <option value="donors">রক্তদাতা</option>
+            <option value="events">রক্তদান লগ</option>
+            <option value="emergency">জরুরী রক্ত অনুরোধ</option>
+            <option value="banners">জরুরী ব্যানার</option>
+            <option value="chat">লাইভ চ্যাট</option>
+            <option value="donation">অনুদান</option>
+            <option value="users">ইউজার ম্যানেজমেন্ট</option>
+            <option value="profile">প্রোফাইল</option>
+          </select>
+
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="স্টাফের নাম, ইমেইল বা ডিলিট তথ্য খুঁজুন..."
+              className="w-full rounded-xl border border-border bg-background py-2 pl-8 pr-3 text-xs"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Activity & Deletion Cards List */}
+      {loading && filteredLogs.length === 0 ? (
+        <div className="flex justify-center p-10">
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        </div>
+      ) : filteredLogs.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-border bg-card/60 p-8 text-center text-sm text-muted-foreground">
+          এই ফিল্টারে কোনো স্টাফ অ্যাক্টিভিটি বা ডিলিট লগ পাওয়া যায়নি।
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filteredLogs.map((log) => {
+            const isDelete = log.action_type === "delete";
+            const snapEntries = log.deleted_snapshot
+              ? Object.entries(log.deleted_snapshot).filter(
+                  ([k, v]) =>
+                    v !== null &&
+                    v !== undefined &&
+                    v !== "" &&
+                    k !== "id" &&
+                    k !== "author_id" &&
+                    k !== "created_at" &&
+                    k !== "updated_at"
+                )
+              : [];
+
+            return (
+              <div
+                key={log.id}
+                className={`rounded-2xl bg-card p-4 shadow-card transition ${
+                  isDelete
+                    ? "border-2 border-rose-500/35 bg-gradient-to-br from-rose-500/[0.03] to-card"
+                    : "border border-border"
+                }`}
+              >
+                {/* Actor & Timestamp Header */}
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <img
+                      src={log.actor_photo || logo}
+                      alt={log.actor_name}
+                      className="h-11 w-11 shrink-0 rounded-full border-2 border-primary/30 bg-white object-cover shadow-sm"
+                    />
+                    <div>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <p className="font-display text-sm font-bold text-foreground">
+                          {log.actor_name}
+                        </p>
+                        <span
+                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${getRoleBadgeStyle(
+                            log.actor_role
+                          )}`}
+                        >
+                          {log.actor_role_bn}
+                        </span>
+                        <span
+                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${getActionBadgeStyle(
+                            log.action_type
+                          )}`}
+                        >
+                          {log.action_label}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                        ইমেইল: <span className="font-mono">{log.actor_email}</span> • সেকশন:{" "}
+                        <strong className="text-primary-deep">{log.module_label}</strong>
+                      </p>
+                    </div>
+                  </div>
+
+                  <span className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-semibold text-muted-foreground">
+                    🕒 {new Date(log.created_at).toLocaleString("bn-BD")}
+                  </span>
+                </div>
+
+                {/* Target Item Details */}
+                <div className="mt-3 rounded-xl bg-muted/40 p-3">
+                  <p className="text-xs font-bold text-primary-deep">
+                    {isDelete ? "🗑️ যে তথ্যটি ডিলিট করা হয়েছে:" : "📌 কাজের বিবরণ:"}{" "}
+                    <span className={isDelete ? "text-rose-700" : "text-foreground"}>
+                      {log.target_title}
+                    </span>
+                  </p>
+                  {log.target_detail && (
+                    <p className="mt-1 text-xs text-muted-foreground">{log.target_detail}</p>
+                  )}
+                </div>
+
+                {/* Full Deleted Item Snapshot + 1-Click Restore */}
+                {isDelete && snapEntries.length > 0 && (
+                  <div className="mt-2.5 rounded-2xl border border-rose-500/30 bg-rose-500/5 p-3">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-[11px] font-bold text-rose-800">
+                        🔍 ডিলিট হওয়া তথ্যের সম্পূর্ণ রেকর্ড (Deleted Data Snapshot):
+                      </p>
+                      {log.collection_name && (
+                        <div>
+                          {log.restored ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] font-bold text-emerald-700">
+                              <CheckCircle2 className="h-3.5 w-3.5" /> পুনরুদ্ধার করা হয়েছে
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={restoringId === log.id}
+                              onClick={() => void handleRestore(log)}
+                              className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-[11px] font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
+                            >
+                              {restoringId === log.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <RotateCcw className="h-3 w-3" />
+                              )}
+                              ডিলিট হওয়া তথ্য পুনরুদ্ধার করুন (Restore)
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 gap-1.5 text-xs sm:grid-cols-2">
+                      {snapEntries.map(([k, v]) => (
+                        <div
+                          key={k}
+                          className="rounded-lg bg-white/80 px-2.5 py-1.5 shadow-2xs"
+                        >
+                          <span className="text-[10px] font-semibold text-muted-foreground">
+                            {SNAPSHOT_LABELS[k] || k}:{" "}
+                          </span>
+                          <span className="font-semibold text-foreground break-words">
+                            {String(v)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+

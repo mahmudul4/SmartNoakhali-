@@ -1,0 +1,795 @@
+{
+  "entities": {
+    "Admin": {
+      "title": "Admin",
+      "description": "Trusted administrator record keyed by Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the administrator."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 254,
+          "description": "Verified email address of the administrator."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of admin creation."
+        }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "User": {
+      "title": "User",
+      "description": "User profile and role assignment record isolated to owner and admin.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the user."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 254,
+          "description": "User email address."
+        },
+        "full_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Full display name of the user."
+        },
+        "username": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Unique username handle."
+        },
+        "phone": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 30,
+          "description": "Contact phone number."
+        },
+        "roles": {
+          "type": "array",
+          "description": "Bounded role list assigned to the user."
+        },
+        "suspended": {
+          "type": "boolean",
+          "description": "Whether the account is suspended."
+        },
+        "must_change_password": {
+          "type": "boolean",
+          "description": "Whether the user must change password on next login."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": ["uid", "email", "full_name", "username", "phone", "roles", "suspended", "must_change_password", "createdAt", "updatedAt"]
+    },
+    "SecurityEvent": {
+      "title": "SecurityEvent",
+      "description": "Audit log entry for a specific user account.",
+      "type": "object",
+      "properties": {
+        "user_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Owner user UID."
+        },
+        "event": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Event type identifier."
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500,
+          "description": "Optional event context."
+        },
+        "user_agent": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300,
+          "description": "Client user agent string."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        }
+      },
+      "required": ["user_id", "event", "detail", "user_agent", "createdAt"]
+    },
+    "Donation": {
+      "title": "Donation",
+      "description": "Community financial contribution record moderated by admin.",
+      "type": "object",
+      "properties": {
+        "author_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the user who submitted the donation."
+        },
+        "sender_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Name of the donor."
+        },
+        "sender_phone": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 30,
+          "description": "Masked or contact phone of the donor."
+        },
+        "method": {
+          "type": "string",
+          "enum": ["bkash", "nagad"],
+          "minLength": 5,
+          "maxLength": 10,
+          "description": "Mobile financial service used."
+        },
+        "trx_id": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64,
+          "description": "Transaction ID reference."
+        },
+        "amount": {
+          "type": "number",
+          "description": "Donation amount in BDT."
+        },
+        "note": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500,
+          "description": "Optional note from donor."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"],
+          "minLength": 7,
+          "maxLength": 10,
+          "description": "Moderation status."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": ["author_id", "sender_name", "sender_phone", "method", "trx_id", "amount", "note", "status", "createdAt", "updatedAt"]
+    },
+    "Submission": {
+      "title": "Submission",
+      "description": "Directory information listing submitted for a category.",
+      "type": "object",
+      "properties": {
+        "author_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the submitting user."
+        },
+        "category_slug": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Category identifier slug."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Listing title or person name."
+        },
+        "body": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000,
+          "description": "Detailed description."
+        },
+        "contact": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 100,
+          "description": "Phone or contact information."
+        },
+        "image_url": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200000,
+          "description": "Image URL or data URL."
+        },
+        "address": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300,
+          "description": "Location address."
+        },
+        "designation": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 150,
+          "description": "Role, specialty, or designation."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"],
+          "minLength": 7,
+          "maxLength": 10,
+          "description": "Moderation status."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": ["author_id", "category_slug", "title", "body", "contact", "image_url", "address", "designation", "status", "createdAt", "updatedAt"]
+    },
+    "BloodDonor": {
+      "title": "BloodDonor",
+      "description": "Registered volunteer blood donor profile.",
+      "type": "object",
+      "properties": {
+        "author_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the user registering the donor."
+        },
+        "full_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Donor full name."
+        },
+        "phone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 30,
+          "description": "Donor contact phone number."
+        },
+        "blood_group": {
+          "type": "string",
+          "enum": ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"],
+          "minLength": 2,
+          "maxLength": 3,
+          "description": "ABO/Rh blood group."
+        },
+        "address": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300,
+          "description": "Donor area or union."
+        },
+        "age": {
+          "type": "number",
+          "description": "Donor age in years."
+        },
+        "last_donation_date": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 40,
+          "description": "ISO date of last blood donation."
+        },
+        "photo_url": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200000,
+          "description": "Donor avatar URL or data URL."
+        },
+        "total_donations": {
+          "type": "number",
+          "description": "Total number of blood donations completed."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"],
+          "minLength": 7,
+          "maxLength": 10,
+          "description": "Moderation status."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": ["author_id", "full_name", "phone", "blood_group", "address", "age", "last_donation_date", "photo_url", "total_donations", "status", "createdAt", "updatedAt"]
+    },
+    "DonationEvent": {
+      "title": "DonationEvent",
+      "description": "Verified blood donation event log linked to an existing blood donor.",
+      "type": "object",
+      "properties": {
+        "author_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the user logging the event."
+        },
+        "donor_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Referenced blood_donors document ID."
+        },
+        "event_date": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "description": "Date of blood donation."
+        },
+        "place": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200,
+          "description": "Hospital or clinic location."
+        },
+        "form_image_url": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200000,
+          "description": "Medical form image URL."
+        },
+        "photo_url": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200000,
+          "description": "Event photo URL."
+        },
+        "note": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500,
+          "description": "Additional notes."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"],
+          "minLength": 7,
+          "maxLength": 10,
+          "description": "Moderation status."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": ["author_id", "donor_id", "event_date", "place", "form_image_url", "photo_url", "note", "status", "createdAt", "updatedAt"]
+    },
+    "EmergencyBanner": {
+      "title": "EmergencyBanner",
+      "description": "High-priority emergency alert banner managed by administrators.",
+      "type": "object",
+      "properties": {
+        "author_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Admin UID who created the banner."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 150,
+          "description": "Banner headline."
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "Banner alert message."
+        },
+        "blood_group": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 10,
+          "description": "Requested blood group if applicable."
+        },
+        "hospital": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200,
+          "description": "Hospital name."
+        },
+        "phone": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 30,
+          "description": "Emergency contact number."
+        },
+        "visible": {
+          "type": "boolean",
+          "description": "Whether the banner is publicly visible."
+        },
+        "sort_order": {
+          "type": "number",
+          "description": "Display sort order."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": ["author_id", "title", "message", "blood_group", "hospital", "phone", "visible", "sort_order", "createdAt", "updatedAt"]
+    },
+    "AppLink": {
+      "title": "AppLink",
+      "description": "Mobile app download link configuration.",
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "description": "Platform identifier (android, ios)."
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Button label."
+        },
+        "url": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300000,
+          "description": "Download target URL or embedded package data URL."
+        },
+        "visible": {
+          "type": "boolean",
+          "description": "Whether link is shown publicly."
+        },
+        "sort_order": {
+          "type": "number",
+          "description": "Display order."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": ["platform", "label", "url", "visible", "sort_order", "createdAt", "updatedAt"]
+    },
+    "EmergencyRequest": {
+      "title": "EmergencyRequest",
+      "description": "Urgent patient blood request submitted by users.",
+      "type": "object",
+      "properties": {
+        "author_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Submitting user UID."
+        },
+        "patient_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Patient name."
+        },
+        "phone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 30,
+          "description": "Emergency contact number."
+        },
+        "blood_group": {
+          "type": "string",
+          "enum": ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"],
+          "minLength": 2,
+          "maxLength": 3,
+          "description": "Required blood group."
+        },
+        "hospital": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200,
+          "description": "Hospital name."
+        },
+        "message": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1000,
+          "description": "Additional urgency details."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"],
+          "minLength": 7,
+          "maxLength": 10,
+          "description": "Moderation status."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": ["author_id", "patient_name", "phone", "blood_group", "hospital", "message", "status", "createdAt", "updatedAt"]
+    },
+    "CategoryAccess": {
+      "title": "CategoryAccess",
+      "description": "Category-level moderation permission granted to a user.",
+      "type": "object",
+      "properties": {
+        "user_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Target user UID."
+        },
+        "category_slug": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Granted category slug."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        }
+      },
+      "required": ["user_id", "category_slug", "createdAt"]
+    },
+    "ChatThread": {
+      "title": "ChatThread",
+      "description": "Private support chat thread between a user and staff.",
+      "type": "object",
+      "properties": {
+        "user_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Owner user UID."
+        },
+        "last_message_at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50,
+          "description": "ISO timestamp of most recent message."
+        },
+        "last_message_preview": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300,
+          "description": "Preview text of last message."
+        },
+        "user_unread": {
+          "type": "number",
+          "description": "Unread count for the user."
+        },
+        "staff_unread": {
+          "type": "number",
+          "description": "Unread count for staff."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": ["user_id", "last_message_at", "last_message_preview", "user_unread", "staff_unread", "createdAt", "updatedAt"]
+    },
+    "PrivateMessage": {
+      "title": "PrivateMessage",
+      "description": "Message inside a private support chat thread.",
+      "type": "object",
+      "properties": {
+        "thread_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Parent chat_threads document ID."
+        },
+        "sender_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the message sender."
+        },
+        "sender_role": {
+          "type": "string",
+          "enum": ["user", "staff"],
+          "minLength": 4,
+          "maxLength": 5,
+          "description": "Role of the sender."
+        },
+        "body": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000,
+          "description": "Message text content."
+        },
+        "attachment_url": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300000,
+          "description": "Optional image or audio attachment URL/data URL."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        }
+      },
+      "required": ["thread_id", "sender_id", "sender_role", "body", "attachment_url", "createdAt"]
+    },
+    "SiteSetting": {
+      "title": "SiteSetting",
+      "description": "Global site configuration including custom logo stored in Firestore.",
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Setting document key."
+        },
+        "logo_url": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300000,
+          "description": "Custom site logo URL or data URL."
+        },
+        "visible": {
+          "type": "boolean",
+          "description": "Whether the setting is publicly readable."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": ["key", "logo_url", "visible", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/settings/{settingId}": {
+      "schema": "SiteSetting",
+      "description": "Global site settings such as logo configuration."
+    },
+    "/admins/{adminId}": {
+      "schema": "Admin",
+      "description": "Administrator registry keyed by user UID."
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and RBAC roles isolated to owner and admin."
+    },
+    "/users/{userId}/security_events/{eventId}": {
+      "schema": "SecurityEvent",
+      "description": "Per-user security audit log subcollection."
+    },
+    "/donations/{donationId}": {
+      "schema": "Donation",
+      "description": "Community donations moderated by admin."
+    },
+    "/submissions/{submissionId}": {
+      "schema": "Submission",
+      "description": "Directory listings across Noakhali categories."
+    },
+    "/blood_donors/{donorId}": {
+      "schema": "BloodDonor",
+      "description": "Volunteer blood donor directory."
+    },
+    "/donation_events/{eventId}": {
+      "schema": "DonationEvent",
+      "description": "Verified blood donation history logs."
+    },
+    "/emergency_banners/{bannerId}": {
+      "schema": "EmergencyBanner",
+      "description": "Site-wide emergency alert banners."
+    },
+    "/app_links/{linkId}": {
+      "schema": "AppLink",
+      "description": "Mobile application download links."
+    },
+    "/emergency_blood_requests/{requestId}": {
+      "schema": "EmergencyRequest",
+      "description": "Urgent patient blood requests."
+    },
+    "/category_access/{accessId}": {
+      "schema": "CategoryAccess",
+      "description": "Category-specific editor access assignments."
+    },
+    "/chat_threads/{threadId}": {
+      "schema": "ChatThread",
+      "description": "Private support chat threads."
+    },
+    "/chat_threads/{threadId}/messages/{messageId}": {
+      "schema": "PrivateMessage",
+      "description": "Messages belonging to a specific support chat thread."
+    }
+  }
+}

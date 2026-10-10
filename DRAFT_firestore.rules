@@ -1,0 +1,546 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================
+    // Global Hardened Primitives
+    // =========================================================
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Main Super Admin (Immutable & Exclusive)
+    function isSuperAdmin() {
+      return isVerifiedUser() && request.auth.token.email == "mdmahmudulhashan0@gmail.com";
+    }
+
+    // Bootstrapped Admin/Staff (No DB read - safe for list queries)
+    function isBootstrappedAdmin() {
+      return isSuperAdmin() || (
+        isVerifiedUser() && request.auth.token.email == "mr.bear444plus@gmail.com"
+      );
+    }
+
+    // Full Admin Check (Bootstrapped Admin OR document in /admins/{uid})
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Staff Check (Super Admin, Admin, Editor, or Moderator)
+    function isStaff() {
+      return isAdmin() || (
+        isVerifiedUser() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
+          'admin' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles ||
+          'editor' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles ||
+          'moderator' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles
+        )
+      );
+    }
+
+    // =========================================================
+    // Validation Blueprints (Verbatim synced with firebase-blueprint.json)
+    // =========================================================
+    function isValidAdmin(data) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'createdAt']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 254 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'full_name', 'username', 'phone', 'roles', 'suspended', 'must_change_password', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'full_name', 'username', 'phone', 'roles', 'suspended', 'must_change_password', 'createdAt', 'updatedAt']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 254 &&
+        data.full_name is string && data.full_name.size() >= 1 && data.full_name.size() <= 120 &&
+        data.username is string && data.username.size() >= 1 && data.username.size() <= 60 &&
+        data.phone is string && data.phone.size() >= 0 && data.phone.size() <= 30 &&
+        data.roles is list && data.roles.size() >= 1 && data.roles.size() <= 4 &&
+        data.roles[0] is string && data.roles[0].size() >= 4 && data.roles[0].size() <= 10 &&
+        data.roles.hasOnly(['user', 'editor', 'moderator', 'admin']) &&
+        data.suspended is bool &&
+        data.must_change_password is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSecurityEvent(data) {
+      return data.keys().hasAll(['user_id', 'event', 'detail', 'user_agent', 'createdAt']) &&
+        data.keys().hasOnly(['user_id', 'event', 'detail', 'user_agent', 'createdAt']) &&
+        data.user_id is string && data.user_id.size() >= 1 && data.user_id.size() <= 128 && data.user_id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.event is string && data.event.size() >= 1 && data.event.size() <= 80 &&
+        data.detail is string && data.detail.size() >= 0 && data.detail.size() <= 500 &&
+        data.user_agent is string && data.user_agent.size() >= 0 && data.user_agent.size() <= 300 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidDonation(data) {
+      return data.keys().hasAll(['author_id', 'sender_name', 'sender_phone', 'method', 'trx_id', 'amount', 'note', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['author_id', 'sender_name', 'sender_phone', 'method', 'trx_id', 'amount', 'note', 'status', 'createdAt', 'updatedAt']) &&
+        data.author_id is string && data.author_id.size() >= 1 && data.author_id.size() <= 128 && data.author_id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.sender_name is string && data.sender_name.size() >= 1 && data.sender_name.size() <= 120 &&
+        data.sender_phone is string && data.sender_phone.size() >= 0 && data.sender_phone.size() <= 30 &&
+        data.method is string && data.method.size() >= 5 && data.method.size() <= 10 && (data.method == 'bkash' || data.method == 'nagad') &&
+        data.trx_id is string && data.trx_id.size() >= 2 && data.trx_id.size() <= 64 &&
+        data.amount is number && data.amount > 0 && data.amount <= 10000000 &&
+        data.note is string && data.note.size() >= 0 && data.note.size() <= 500 &&
+        data.status is string && data.status.size() >= 7 && data.status.size() <= 10 && (data.status == 'pending' || data.status == 'approved' || data.status == 'rejected') &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSubmission(data) {
+      return data.keys().hasAll(['author_id', 'category_slug', 'title', 'body', 'contact', 'image_url', 'address', 'designation', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['author_id', 'category_slug', 'title', 'body', 'contact', 'image_url', 'address', 'designation', 'status', 'createdAt', 'updatedAt']) &&
+        data.author_id is string && data.author_id.size() >= 1 && data.author_id.size() <= 128 && data.author_id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.category_slug is string && data.category_slug.size() >= 1 && data.category_slug.size() <= 80 && data.category_slug.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.body is string && data.body.size() >= 0 && data.body.size() <= 2000 &&
+        data.contact is string && data.contact.size() >= 0 && data.contact.size() <= 100 &&
+        data.image_url is string && data.image_url.size() >= 0 && data.image_url.size() <= 200000 &&
+        data.address is string && data.address.size() >= 0 && data.address.size() <= 300 &&
+        data.designation is string && data.designation.size() >= 0 && data.designation.size() <= 150 &&
+        data.status is string && data.status.size() >= 7 && data.status.size() <= 10 && (data.status == 'pending' || data.status == 'approved' || data.status == 'rejected') &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidBloodDonor(data) {
+      return data.keys().hasAll(['author_id', 'full_name', 'phone', 'blood_group', 'address', 'age', 'last_donation_date', 'photo_url', 'total_donations', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['author_id', 'full_name', 'phone', 'blood_group', 'address', 'age', 'last_donation_date', 'photo_url', 'total_donations', 'status', 'createdAt', 'updatedAt']) &&
+        data.author_id is string && data.author_id.size() >= 1 && data.author_id.size() <= 128 && data.author_id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.full_name is string && data.full_name.size() >= 1 && data.full_name.size() <= 120 &&
+        data.phone is string && data.phone.size() >= 3 && data.phone.size() <= 30 &&
+        data.blood_group is string && data.blood_group.size() >= 2 && data.blood_group.size() <= 3 &&
+        (data.blood_group == 'A+' || data.blood_group == 'A-' || data.blood_group == 'B+' || data.blood_group == 'B-' || data.blood_group == 'AB+' || data.blood_group == 'AB-' || data.blood_group == 'O+' || data.blood_group == 'O-') &&
+        data.address is string && data.address.size() >= 0 && data.address.size() <= 300 &&
+        data.age is number && data.age >= 0 && data.age <= 120 &&
+        data.last_donation_date is string && data.last_donation_date.size() >= 0 && data.last_donation_date.size() <= 40 &&
+        data.photo_url is string && data.photo_url.size() >= 0 && data.photo_url.size() <= 200000 &&
+        data.total_donations is number && data.total_donations >= 0 && data.total_donations <= 500 &&
+        data.status is string && data.status.size() >= 7 && data.status.size() <= 10 && (data.status == 'pending' || data.status == 'approved' || data.status == 'rejected') &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidDonationEvent(data) {
+      return data.keys().hasAll(['author_id', 'donor_id', 'event_date', 'place', 'form_image_url', 'photo_url', 'note', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['author_id', 'donor_id', 'event_date', 'place', 'form_image_url', 'photo_url', 'note', 'status', 'createdAt', 'updatedAt']) &&
+        data.author_id is string && data.author_id.size() >= 1 && data.author_id.size() <= 128 && data.author_id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.donor_id is string && data.donor_id.size() >= 1 && data.donor_id.size() <= 128 && data.donor_id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.event_date is string && data.event_date.size() >= 1 && data.event_date.size() <= 40 &&
+        data.place is string && data.place.size() >= 0 && data.place.size() <= 200 &&
+        data.form_image_url is string && data.form_image_url.size() >= 0 && data.form_image_url.size() <= 200000 &&
+        data.photo_url is string && data.photo_url.size() >= 0 && data.photo_url.size() <= 200000 &&
+        data.note is string && data.note.size() >= 0 && data.note.size() <= 500 &&
+        data.status is string && data.status.size() >= 7 && data.status.size() <= 10 && (data.status == 'pending' || data.status == 'approved' || data.status == 'rejected') &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidEmergencyBanner(data) {
+      return data.keys().hasAll(['author_id', 'title', 'message', 'blood_group', 'hospital', 'phone', 'visible', 'sort_order', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['author_id', 'title', 'message', 'blood_group', 'hospital', 'phone', 'visible', 'sort_order', 'createdAt', 'updatedAt']) &&
+        data.author_id is string && data.author_id.size() >= 1 && data.author_id.size() <= 128 && data.author_id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 150 &&
+        data.message is string && data.message.size() >= 1 && data.message.size() <= 1000 &&
+        data.blood_group is string && data.blood_group.size() >= 0 && data.blood_group.size() <= 10 &&
+        data.hospital is string && data.hospital.size() >= 0 && data.hospital.size() <= 200 &&
+        data.phone is string && data.phone.size() >= 0 && data.phone.size() <= 30 &&
+        data.visible is bool &&
+        data.sort_order is number && data.sort_order >= 0 && data.sort_order <= 10000 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAppLink(data) {
+      return data.keys().hasAll(['platform', 'label', 'url', 'visible', 'sort_order', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['platform', 'label', 'url', 'visible', 'sort_order', 'createdAt', 'updatedAt']) &&
+        data.platform is string && data.platform.size() >= 1 && data.platform.size() <= 40 &&
+        data.label is string && data.label.size() >= 1 && data.label.size() <= 120 &&
+        data.url is string && data.url.size() >= 0 && data.url.size() <= 300000 &&
+        data.visible is bool &&
+        data.sort_order is number && data.sort_order >= 0 && data.sort_order <= 1000 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidEmergencyRequest(data) {
+      return data.keys().hasAll(['author_id', 'patient_name', 'phone', 'blood_group', 'hospital', 'message', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['author_id', 'patient_name', 'phone', 'blood_group', 'hospital', 'message', 'status', 'createdAt', 'updatedAt']) &&
+        data.author_id is string && data.author_id.size() >= 1 && data.author_id.size() <= 128 && data.author_id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.patient_name is string && data.patient_name.size() >= 1 && data.patient_name.size() <= 120 &&
+        data.phone is string && data.phone.size() >= 3 && data.phone.size() <= 30 &&
+        data.blood_group is string && data.blood_group.size() >= 2 && data.blood_group.size() <= 3 &&
+        (data.blood_group == 'A+' || data.blood_group == 'A-' || data.blood_group == 'B+' || data.blood_group == 'B-' || data.blood_group == 'AB+' || data.blood_group == 'AB-' || data.blood_group == 'O+' || data.blood_group == 'O-') &&
+        data.hospital is string && data.hospital.size() >= 0 && data.hospital.size() <= 200 &&
+        data.message is string && data.message.size() >= 0 && data.message.size() <= 1000 &&
+        data.status is string && data.status.size() >= 7 && data.status.size() <= 10 && (data.status == 'pending' || data.status == 'approved' || data.status == 'rejected') &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidCategoryAccess(data) {
+      return data.keys().hasAll(['user_id', 'category_slug', 'createdAt']) &&
+        data.keys().hasOnly(['user_id', 'category_slug', 'createdAt']) &&
+        data.user_id is string && data.user_id.size() >= 1 && data.user_id.size() <= 128 && data.user_id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.category_slug is string && data.category_slug.size() >= 1 && data.category_slug.size() <= 80 && data.category_slug.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidChatThread(data) {
+      return data.keys().hasAll(['user_id', 'last_message_at', 'last_message_preview', 'user_unread', 'staff_unread', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['user_id', 'last_message_at', 'last_message_preview', 'user_unread', 'staff_unread', 'createdAt', 'updatedAt']) &&
+        data.user_id is string && data.user_id.size() >= 1 && data.user_id.size() <= 128 && data.user_id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.last_message_at is string && data.last_message_at.size() >= 1 && data.last_message_at.size() <= 50 &&
+        data.last_message_preview is string && data.last_message_preview.size() >= 0 && data.last_message_preview.size() <= 300 &&
+        data.user_unread is number && data.user_unread >= 0 && data.user_unread <= 10000 &&
+        data.staff_unread is number && data.staff_unread >= 0 && data.staff_unread <= 10000 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidPrivateMessage(data) {
+      return data.keys().hasAll(['thread_id', 'sender_id', 'sender_role', 'body', 'attachment_url', 'createdAt']) &&
+        data.keys().hasOnly(['thread_id', 'sender_id', 'sender_role', 'body', 'attachment_url', 'createdAt']) &&
+        data.thread_id is string && data.thread_id.size() >= 1 && data.thread_id.size() <= 128 && data.thread_id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.sender_id is string && data.sender_id.size() >= 1 && data.sender_id.size() <= 128 && data.sender_id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.sender_role is string && data.sender_role.size() >= 4 && data.sender_role.size() <= 5 && (data.sender_role == 'user' || data.sender_role == 'staff') &&
+        data.body is string && data.body.size() >= 0 && data.body.size() <= 2000 &&
+        data.attachment_url is string && data.attachment_url.size() >= 0 && data.attachment_url.size() <= 300000 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidSiteSetting(data) {
+      return data.keys().hasAll(['key', 'logo_url', 'visible', 'updatedAt']) &&
+        data.keys().hasOnly(['key', 'logo_url', 'visible', 'updatedAt']) &&
+        data.key is string && data.key.size() >= 1 && data.key.size() <= 60 && data.key.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.logo_url is string && data.logo_url.size() >= 0 && data.logo_url.size() <= 300000 &&
+        data.visible is bool &&
+        data.updatedAt is timestamp;
+    }
+
+    // =========================================================
+    // Connection Probe (/test/{testId})
+    // =========================================================
+    match /test/{testId} {
+      allow get: if isValidId(testId);
+      allow list, create, update, delete: if false;
+    }
+
+    // =========================================================
+    // 0. /settings/{settingId}
+    // =========================================================
+    match /settings/{settingId} {
+      allow get: if isValidId(settingId) && (existing().visible == true || isStaff());
+      allow list: if existing().visible == true || isBootstrappedAdmin();
+      allow create: if isVerifiedUser() && isValidId(settingId) && isValidSiteSetting(incoming()) &&
+        incoming().key == settingId && incoming().updatedAt == request.time && (
+          isSuperAdmin() || (settingId == "staff_profiles_config" && isStaff())
+        );
+      allow update: if isVerifiedUser() && isValidId(settingId) && isValidSiteSetting(incoming()) &&
+        incoming().key == existing().key &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['logo_url', 'visible', 'updatedAt']) && (
+          isSuperAdmin() || (settingId == "staff_profiles_config" && isStaff())
+        );
+      allow delete: if isVerifiedUser() && isValidId(settingId) && isSuperAdmin();
+    }
+
+    // =========================================================
+    // 1. /admins/{adminId}
+    // =========================================================
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId) && (isOwner(adminId) || isAdmin());
+      allow list: if isSuperAdmin();
+      allow create: if isVerifiedUser() && isValidId(adminId) && isValidAdmin(incoming()) &&
+        incoming().uid == adminId && incoming().createdAt == request.time && isSuperAdmin();
+      allow update: if isVerifiedUser() && isValidId(adminId) && isValidAdmin(incoming()) &&
+        incoming().uid == existing().uid && incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['email']) && isSuperAdmin();
+      allow delete: if isVerifiedUser() && isValidId(adminId) && isSuperAdmin() &&
+        existing().email != "mdmahmudulhashan0@gmail.com";
+    }
+
+    // =========================================================
+    // 2. /users/{userId} (PII Isolated to Owner & Super Admin)
+    // =========================================================
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isSuperAdmin());
+      allow list: if (isSignedIn() && existing().uid == request.auth.uid) || isSuperAdmin();
+      allow create: if isVerifiedUser() && isValidId(userId) && isValidUser(incoming()) &&
+        incoming().createdAt == request.time && incoming().updatedAt == request.time && (
+          (isOwner(userId) && incoming().uid == request.auth.uid && incoming().roles == ['user'] && incoming().suspended == false && incoming().must_change_password == false) ||
+          (isBootstrappedAdmin() && isOwner(userId) && incoming().uid == request.auth.uid && incoming().roles.hasOnly(['user', 'admin']) && incoming().suspended == false && incoming().must_change_password == false) ||
+          (isSuperAdmin() && incoming().uid == userId)
+        );
+      allow update: if isVerifiedUser() && isValidId(userId) && isValidUser(incoming()) &&
+        incoming().uid == existing().uid && incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (existing().email != "mdmahmudulhashan0@gmail.com" || (incoming().email == "mdmahmudulhashan0@gmail.com" && incoming().suspended == false && 'admin' in incoming().roles)) && (
+          // Action 1: Owner updates own non-RBAC profile fields
+          (isOwner(userId) && existing().suspended == false &&
+            incoming().roles == existing().roles &&
+            incoming().suspended == existing().suspended &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['full_name', 'username', 'phone', 'must_change_password', 'updatedAt'])) ||
+          // Action 2: Super Admin updates user roles, suspension, or profile
+          isSuperAdmin()
+        );
+      allow delete: if isVerifiedUser() && isValidId(userId) && isSuperAdmin() &&
+        existing().email != "mdmahmudulhashan0@gmail.com";
+
+      // Subcollection: /users/{userId}/security_events/{eventId} (Master Gate)
+      match /security_events/{eventId} {
+        allow get: if isValidId(userId) && isValidId(eventId) && (isOwner(userId) || isSuperAdmin()) &&
+          exists(/databases/$(database)/documents/users/$(userId));
+        allow list: if (isSignedIn() && existing().user_id == request.auth.uid) || isSuperAdmin();
+        allow create: if isVerifiedUser() && isValidId(userId) && isValidId(eventId) &&
+          isValidSecurityEvent(incoming()) &&
+          incoming().user_id == request.auth.uid &&
+          incoming().user_id == userId &&
+          incoming().createdAt == request.time &&
+          get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+
+    // =========================================================
+    // 3. /donations/{donationId}
+    // =========================================================
+    match /donations/{donationId} {
+      allow get: if isValidId(donationId) && (existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isSuperAdmin());
+      allow list: if existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isSuperAdmin();
+      allow create: if isVerifiedUser() && isValidId(donationId) && isValidDonation(incoming()) &&
+        incoming().author_id == request.auth.uid &&
+        incoming().createdAt == request.time && incoming().updatedAt == request.time &&
+        (incoming().status == 'pending' || isSuperAdmin());
+      allow update: if isVerifiedUser() && isValidId(donationId) && isValidDonation(incoming()) &&
+        incoming().author_id == existing().author_id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action 1: Author edits note while still in non-terminal 'pending' state
+          (existing().author_id == request.auth.uid && existing().status == 'pending' && incoming().status == 'pending' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['note', 'updatedAt'])) ||
+          // Action 2: Super Admin moderates status or details
+          isSuperAdmin()
+        );
+      allow delete: if isVerifiedUser() && isValidId(donationId) && isSuperAdmin();
+    }
+
+    // =========================================================
+    // 4. /submissions/{submissionId}
+    // =========================================================
+    match /submissions/{submissionId} {
+      allow get: if isValidId(submissionId) && (existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isStaff());
+      allow list: if existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isBootstrappedAdmin();
+      allow create: if isVerifiedUser() && isValidId(submissionId) && isValidSubmission(incoming()) &&
+        incoming().author_id == request.auth.uid &&
+        incoming().createdAt == request.time && incoming().updatedAt == request.time &&
+        (incoming().status == 'pending' || isStaff());
+      allow update: if isVerifiedUser() && isValidId(submissionId) && isValidSubmission(incoming()) &&
+        incoming().author_id == existing().author_id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action 1: Author updates own pending submission
+          (existing().author_id == request.auth.uid && existing().status == 'pending' && incoming().status == 'pending' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['title', 'body', 'contact', 'image_url', 'address', 'designation', 'updatedAt'])) ||
+          // Action 2: Staff moderates status or details
+          isStaff()
+        );
+      allow delete: if isVerifiedUser() && isValidId(submissionId) && isAdmin();
+    }
+
+    // =========================================================
+    // 5. /blood_donors/{donorId}
+    // =========================================================
+    match /blood_donors/{donorId} {
+      allow get: if isValidId(donorId) && (existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isStaff());
+      allow list: if existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isBootstrappedAdmin();
+      allow create: if isVerifiedUser() && isValidId(donorId) && isValidBloodDonor(incoming()) &&
+        incoming().author_id == request.auth.uid &&
+        incoming().createdAt == request.time && incoming().updatedAt == request.time &&
+        (incoming().status == 'pending' || isStaff());
+      allow update: if isVerifiedUser() && isValidId(donorId) && isValidBloodDonor(incoming()) &&
+        incoming().author_id == existing().author_id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action 1: Author updates own pending donor entry
+          (existing().author_id == request.auth.uid && existing().status == 'pending' && incoming().status == 'pending' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['full_name', 'phone', 'address', 'age', 'last_donation_date', 'photo_url', 'updatedAt'])) ||
+          // Action 2: Staff moderates donor status or donation count
+          isStaff()
+        );
+      allow delete: if isVerifiedUser() && isValidId(donorId) && isAdmin();
+    }
+
+    // =========================================================
+    // 6. /donation_events/{eventId}
+    // =========================================================
+    match /donation_events/{eventId} {
+      allow get: if isValidId(eventId) && (existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isStaff());
+      allow list: if existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isBootstrappedAdmin();
+      allow create: if isVerifiedUser() && isValidId(eventId) && isValidDonationEvent(incoming()) &&
+        incoming().author_id == request.auth.uid &&
+        incoming().createdAt == request.time && incoming().updatedAt == request.time &&
+        (incoming().status == 'pending' || isStaff()) &&
+        exists(/databases/$(database)/documents/blood_donors/$(incoming().donor_id));
+      allow update: if isVerifiedUser() && isValidId(eventId) && isValidDonationEvent(incoming()) &&
+        incoming().author_id == existing().author_id &&
+        incoming().donor_id == existing().donor_id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action 1: Author updates note while pending
+          (existing().author_id == request.auth.uid && existing().status == 'pending' && incoming().status == 'pending' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['note', 'place', 'updatedAt'])) ||
+          // Action 2: Staff moderates status
+          isStaff()
+        );
+      allow delete: if isVerifiedUser() && isValidId(eventId) && isAdmin();
+    }
+
+    // =========================================================
+    // 7. /emergency_banners/{bannerId}
+    // =========================================================
+    match /emergency_banners/{bannerId} {
+      allow get: if isValidId(bannerId) && (existing().visible == true || isStaff());
+      allow list: if existing().visible == true || isBootstrappedAdmin();
+      allow create: if isVerifiedUser() && isValidId(bannerId) && isValidEmergencyBanner(incoming()) &&
+        incoming().author_id == request.auth.uid &&
+        incoming().createdAt == request.time && incoming().updatedAt == request.time &&
+        isStaff();
+      allow update: if isVerifiedUser() && isValidId(bannerId) && isValidEmergencyBanner(incoming()) &&
+        incoming().author_id == existing().author_id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['title', 'message', 'blood_group', 'hospital', 'phone', 'visible', 'sort_order', 'updatedAt']) &&
+        isStaff();
+      allow delete: if isVerifiedUser() && isValidId(bannerId) && isAdmin();
+    }
+
+    // =========================================================
+    // 8. /app_links/{linkId} (Super Admin Only for Writes)
+    // =========================================================
+    match /app_links/{linkId} {
+      allow get: if isValidId(linkId) && (existing().visible == true || isSuperAdmin());
+      allow list: if existing().visible == true || isSuperAdmin();
+      allow create: if isVerifiedUser() && isValidId(linkId) && isValidAppLink(incoming()) &&
+        incoming().createdAt == request.time && incoming().updatedAt == request.time &&
+        isSuperAdmin();
+      allow update: if isVerifiedUser() && isValidId(linkId) && isValidAppLink(incoming()) &&
+        incoming().platform == existing().platform &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['label', 'url', 'visible', 'sort_order', 'updatedAt']) &&
+        isSuperAdmin();
+      allow delete: if isVerifiedUser() && isValidId(linkId) && isSuperAdmin();
+    }
+
+    // =========================================================
+    // 9. /emergency_blood_requests/{requestId}
+    // =========================================================
+    match /emergency_blood_requests/{requestId} {
+      allow get: if isValidId(requestId) && (existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isStaff());
+      allow list: if existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isBootstrappedAdmin();
+      allow create: if isVerifiedUser() && isValidId(requestId) && isValidEmergencyRequest(incoming()) &&
+        incoming().author_id == request.auth.uid &&
+        incoming().createdAt == request.time && incoming().updatedAt == request.time &&
+        (incoming().status == 'pending' || isStaff());
+      allow update: if isVerifiedUser() && isValidId(requestId) && isValidEmergencyRequest(incoming()) &&
+        incoming().author_id == existing().author_id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action 1: Author updates message while pending
+          (existing().author_id == request.auth.uid && existing().status == 'pending' && incoming().status == 'pending' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['hospital', 'message', 'updatedAt'])) ||
+          // Action 2: Staff moderates status
+          isStaff()
+        );
+      allow delete: if isVerifiedUser() && isValidId(requestId) && isAdmin();
+    }
+
+    // =========================================================
+    // 10. /category_access/{accessId} (Super Admin Only for Management)
+    // =========================================================
+    match /category_access/{accessId} {
+      allow get: if isValidId(accessId) && ((isSignedIn() && existing().user_id == request.auth.uid) || isSuperAdmin());
+      allow list: if (isSignedIn() && existing().user_id == request.auth.uid) || isSuperAdmin();
+      allow create: if isVerifiedUser() && isValidId(accessId) && isValidCategoryAccess(incoming()) &&
+        incoming().createdAt == request.time &&
+        exists(/databases/$(database)/documents/users/$(incoming().user_id)) &&
+        isSuperAdmin();
+      allow update: if false;
+      allow delete: if isVerifiedUser() && isValidId(accessId) && isSuperAdmin();
+    }
+
+    // =========================================================
+    // 11. /chat_threads/{threadId} & Subcollection /messages/{messageId}
+    // =========================================================
+    match /chat_threads/{threadId} {
+      allow get: if isValidId(threadId) && ((isSignedIn() && existing().user_id == request.auth.uid) || isStaff());
+      allow list: if (isSignedIn() && existing().user_id == request.auth.uid) || isBootstrappedAdmin();
+      allow create: if isVerifiedUser() && isValidId(threadId) && isValidChatThread(incoming()) &&
+        incoming().user_id == request.auth.uid &&
+        incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isValidId(threadId) && isValidChatThread(incoming()) &&
+        incoming().user_id == existing().user_id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action 1: Thread owner marks read or updates thread preview on send
+          (existing().user_id == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['last_message_at', 'last_message_preview', 'user_unread', 'staff_unread', 'updatedAt'])) ||
+          // Action 2: Staff marks read or updates thread preview
+          isStaff()
+        );
+      allow delete: if isVerifiedUser() && isValidId(threadId) && isSuperAdmin();
+
+      // Subcollection: /chat_threads/{threadId}/messages/{messageId} (Master Gate)
+      match /messages/{messageId} {
+        allow get: if isValidId(threadId) && isValidId(messageId) && (
+          get(/databases/$(database)/documents/chat_threads/$(threadId)).data.user_id == request.auth.uid ||
+          isStaff()
+        );
+        allow list: if (isSignedIn() && existing().thread_id == request.auth.uid) || isBootstrappedAdmin();
+        allow create: if isVerifiedUser() && isValidId(threadId) && isValidId(messageId) &&
+          isValidPrivateMessage(incoming()) &&
+          incoming().thread_id == threadId &&
+          incoming().sender_id == request.auth.uid &&
+          incoming().createdAt == request.time && (
+            (incoming().sender_role == 'user' && get(/databases/$(database)/documents/chat_threads/$(threadId)).data.user_id == request.auth.uid) ||
+            (incoming().sender_role == 'staff' && isStaff() && exists(/databases/$(database)/documents/chat_threads/$(threadId)))
+          );
+        allow update: if false;
+        allow delete: if isVerifiedUser() && isValidId(threadId) && isValidId(messageId) && isSuperAdmin();
+      }
+    }
+  }
+}

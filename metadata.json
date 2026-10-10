@@ -1,0 +1,6 @@
+{
+  "name": "স্মার্ট নোয়াখালী — Smart Noakhali",
+  "description": "নোয়াখালী জেলার পূর্ণাঙ্গ ডিজিটাল ডিরেক্টরি, জরুরি রক্তদাতা, হাসপাতাল, ডাক্তার ও নাগরিক সেবা প্ল্যাটফর্ম।",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
