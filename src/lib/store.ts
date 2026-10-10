@@ -28,7 +28,7 @@ import {
   type Category,
 } from "@/data/categories";
 import defaultLogoUrl from "@/assets/logo.png";
-import { saveBinaryToIdb, sanitizeAppFileName } from "@/lib/pwa";
+import { clearBinaryFromIdb, saveBinaryToIdb, sanitizeAppFileName } from "@/lib/pwa";
 
 export const defaultLogo: string = defaultLogoUrl;
 
@@ -736,41 +736,70 @@ export const DEFAULT_APP_PACKAGES: AppPackagesConfig = {
     platform: "android",
     label: "স্মার্ট নোয়াখালী Android অ্যাপ (.APK)",
     version: "2.0.0",
-    fileName: "Smart-Noakhali-Android.apk",
-    fileSize: 2020149,
-    downloadUrl: "/downloads/Smart-Noakhali-Android.apk",
+    fileName: "",
+    fileSize: 0,
+    downloadUrl: "",
     visible: true,
-    uploadedAt: "2026-10-10T11:45:00.000Z",
-    releaseNotes: "অ্যান্ড্রয়েড ফোনের জন্য অফিসিয়াল অ্যাপ (1.93 MB) — এক ক্লিকে ডাউনলোড ও ইনস্টল করুন।",
+    uploadedAt: "",
+    releaseNotes: "অ্যান্ড্রয়েড ফোনের জন্য অফিসিয়াল অ্যাপ — এক ক্লিকে ডাউনলোড ও ইনস্টল করুন।",
   },
   ios: {
     platform: "ios",
     label: "স্মার্ট নোয়াখালী iPhone (iOS) অ্যাপ",
     version: "2.0.0",
-    fileName: "Smart-Noakhali-iOS.mobileconfig",
-    fileSize: 42444,
-    downloadUrl: "/downloads/Smart-Noakhali-iOS.mobileconfig",
+    fileName: "",
+    fileSize: 0,
+    downloadUrl: "",
     visible: true,
-    uploadedAt: "2026-10-10T11:45:00.000Z",
-    releaseNotes: "আইফোন (iOS) ব্যবহারকারীদের জন্য অফিসিয়াল অ্যাপ প্যাকেজ।",
+    uploadedAt: "",
+    releaseNotes: "আইফোন (iOS) ব্যবহারকারীদের জন্য অফিসিয়াল অ্যাপ।",
   },
 };
+
+function isLegacyBundledPackage(rawEntry: Partial<AppPackageInfo> | undefined): boolean {
+  if (!rawEntry) return false;
+  const dl = String(rawEntry.downloadUrl || "");
+  const sz = Number(rawEntry.fileSize || 0);
+  if (
+    dl === "/downloads/Smart-Noakhali-Android.apk" ||
+    dl === "/downloads/Smart-Noakhali-iOS.mobileconfig"
+  ) {
+    return true;
+  }
+  if (sz === 52640 || sz === 42444) {
+    return true;
+  }
+  if (sz === 2020149 && !rawEntry.chunkCount && !rawEntry.embeddedDataUrl) {
+    return true;
+  }
+  return false;
+}
 
 function normalizePackageEntry(
   rawEntry: Partial<AppPackageInfo> | undefined,
   fallback: AppPackageInfo
 ): AppPackageInfo {
-  const merged: AppPackageInfo = { ...fallback, ...(rawEntry || {}) };
-  merged.fileName = sanitizeAppFileName(merged.fileName || fallback.fileName, fallback.platform);
-  if (
-    !merged.fileSize ||
-    merged.fileSize < 1000 ||
-    (fallback.platform === "android" && merged.fileSize === 52640)
-  ) {
-    merged.fileSize = fallback.fileSize;
+  if (!rawEntry || isLegacyBundledPackage(rawEntry)) {
+    return {
+      ...fallback,
+      label: rawEntry?.label || fallback.label,
+      version: rawEntry?.version || fallback.version,
+      releaseNotes: rawEntry?.releaseNotes || fallback.releaseNotes,
+      visible: rawEntry?.visible ?? fallback.visible,
+      fileName: "",
+      fileSize: 0,
+      downloadUrl: "",
+      uploadedAt: "",
+      embeddedDataUrl: undefined,
+      chunkCount: undefined,
+    };
   }
-  if (!merged.downloadUrl) {
-    merged.downloadUrl = fallback.downloadUrl;
+  const merged: AppPackageInfo = { ...fallback, ...rawEntry };
+  merged.fileName = merged.fileName ? sanitizeAppFileName(merged.fileName, fallback.platform) : "";
+  if (!merged.fileSize || merged.fileSize <= 0) {
+    merged.fileSize = 0;
+    merged.fileName = "";
+    merged.downloadUrl = "";
   }
   return merged;
 }
@@ -789,6 +818,17 @@ function parseAppPackages(raw: string | null | undefined): AppPackagesConfig | n
     // ignore
   }
   return null;
+}
+
+function arrayBufferSliceToBase64(buffer: ArrayBuffer, start: number, end: number): string {
+  const bytes = new Uint8Array(buffer.slice(start, end));
+  const chunkSize = 0x8000;
+  const parts: string[] = [];
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const sub = bytes.subarray(i, i + chunkSize);
+    parts.push(String.fromCharCode.apply(null, Array.from(sub)));
+  }
+  return btoa(parts.join(""));
 }
 
 export function useAppPackages() {
@@ -811,12 +851,28 @@ export function useAppPackages() {
         if (docSnap) {
           const parsed = parseAppPackages(docSnap.data().logo_url);
           if (parsed) {
-            setPackages(parsed);
-            try {
-              localStorage.setItem(LOCAL_APP_PACKAGES_KEY, JSON.stringify(parsed));
-            } catch {
-              // ignore
-            }
+            setPackages((prev) => {
+              const merged: AppPackagesConfig = {
+                android: {
+                  ...parsed.android,
+                  fileSize: parsed.android.fileSize || prev.android.fileSize,
+                  fileName: parsed.android.fileName || prev.android.fileName,
+                  downloadUrl: parsed.android.downloadUrl || prev.android.downloadUrl,
+                },
+                ios: {
+                  ...parsed.ios,
+                  fileSize: parsed.ios.fileSize || prev.ios.fileSize,
+                  fileName: parsed.ios.fileName || prev.ios.fileName,
+                  downloadUrl: parsed.ios.downloadUrl || prev.ios.downloadUrl,
+                },
+              };
+              try {
+                localStorage.setItem(LOCAL_APP_PACKAGES_KEY, JSON.stringify(merged));
+              } catch {
+                // ignore
+              }
+              return merged;
+            });
           }
         }
       },
@@ -825,34 +881,97 @@ export function useAppPackages() {
     return () => unsub();
   }, []);
 
-  // Also check server disk manifest (/api/apps/status) on mount
+  // Poll server disk manifest (/api/apps/status) and server content mirror so customers always get exact uploaded file & size
   useEffect(() => {
-    fetch("/api/apps/status")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (data?.ok && data.apps) {
-          setPackages((prev) => {
-            const next = { ...prev };
-            let changed = false;
+    let active = true;
+    async function syncFromServer() {
+      try {
+        const [statusResp, contentResp] = await Promise.all([
+          fetch("/api/apps/status").catch(() => null),
+          fetch(`/api/content?collection=settings&id=${APP_PACKAGES_CONFIG_ID}`).catch(() => null),
+        ]);
+
+        let contentParsed: AppPackagesConfig | null = null;
+        if (
+          contentResp &&
+          contentResp.ok &&
+          (contentResp.headers.get("content-type") || "").includes("application/json")
+        ) {
+          const cJson = await contentResp.json().catch(() => null);
+          if (cJson?.item?.logo_url) {
+            contentParsed = parseAppPackages(cJson.item.logo_url);
+          }
+        }
+
+        let serverApps: Record<string, any> | null = null;
+        if (
+          statusResp &&
+          statusResp.ok &&
+          (statusResp.headers.get("content-type") || "").includes("application/json")
+        ) {
+          const sJson = await statusResp.json().catch(() => null);
+          if (sJson?.ok && sJson.apps) {
+            serverApps = sJson.apps;
+          }
+        }
+
+        if (!active) return;
+
+        setPackages((prev) => {
+          const next: AppPackagesConfig = {
+            android: contentParsed?.android ? { ...prev.android, ...contentParsed.android } : { ...prev.android },
+            ios: contentParsed?.ios ? { ...prev.ios, ...contentParsed.ios } : { ...prev.ios },
+          };
+          let changed = Boolean(contentParsed);
+
+          if (serverApps) {
             for (const plat of ["android", "ios"] as const) {
-              const srv = data.apps[plat];
-              if (srv && srv.fileName && !next[plat].fileName) {
-                next[plat] = {
-                  ...next[plat],
-                  fileName: srv.fileName,
-                  fileSize: srv.fileSize,
-                  version: srv.version || next[plat].version,
-                  downloadUrl: `/api/apps/download/${plat}`,
-                  uploadedAt: srv.uploadedAt,
-                };
-                changed = true;
+              const srv = serverApps[plat];
+              if (srv && srv.fileName && srv.fileSize > 0 && !isLegacyBundledPackage(srv)) {
+                const cleanName = sanitizeAppFileName(srv.fileName, plat);
+                if (
+                  next[plat].fileSize !== srv.fileSize ||
+                  next[plat].fileName !== cleanName ||
+                  next[plat].downloadUrl !== `/api/apps/download/${plat}`
+                ) {
+                  next[plat] = {
+                    ...next[plat],
+                    fileName: cleanName,
+                    fileSize: Number(srv.fileSize),
+                    version: srv.version || next[plat].version || "2.0.0",
+                    label: srv.label || next[plat].label,
+                    releaseNotes: srv.releaseNotes || next[plat].releaseNotes,
+                    visible: srv.visible ?? next[plat].visible ?? true,
+                    downloadUrl: `/api/apps/download/${plat}`,
+                    uploadedAt: srv.uploadedAt || next[plat].uploadedAt,
+                  };
+                  changed = true;
+                }
               }
             }
-            return changed ? next : prev;
-          });
-        }
-      })
-      .catch(() => {});
+          }
+
+          if (changed) {
+            try {
+              localStorage.setItem(LOCAL_APP_PACKAGES_KEY, JSON.stringify(next));
+            } catch {
+              // ignore
+            }
+            return next;
+          }
+          return prev;
+        });
+      } catch {
+        // ignore
+      }
+    }
+
+    void syncFromServer();
+    const timer = setInterval(syncFromServer, 5000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
   }, []);
 
   const saveAppPackagesConfig = useCallback(async (next: AppPackagesConfig) => {
@@ -873,80 +992,161 @@ export function useAppPackages() {
       meta: { label: string; version: string; releaseNotes: string; visible: boolean },
       onProgress?: (percent: number, stage: string) => void
     ) => {
-      onProgress?.(10, "ফাইল পড়া হচ্ছে...");
-      const cleanFileName = sanitizeAppFileName(file.name, platform);
+      if (!file || file.size <= 0) {
+        throw new Error("সঠিক অ্যাপ ফাইল নির্বাচন করুন");
+      }
+      onProgress?.(5, `ফাইল পড়া হচ্ছে (${(file.size / (1024 * 1024)).toFixed(2)} MB)...`);
+      const cleanFileName =
+        sanitizeAppFileName(file.name, platform) ||
+        (platform === "android" ? "app-release.apk" : "app-release.ipa");
+      const exactFileSize = file.size;
+      const mimeType =
+        platform === "android"
+          ? "application/vnd.android.package-archive"
+          : file.type || "application/octet-stream";
+
       const arrayBuf = await file.arrayBuffer();
+      if (arrayBuf.byteLength !== exactFileSize) {
+        throw new Error("ফাইল সাইজ যাচাই ব্যর্থ হয়েছে, আবার চেষ্টা করুন");
+      }
 
-      // 1. Save full binary in local IndexedDB for instant local download
-      await saveBinaryToIdb(platform, cleanFileName, file.size, arrayBuf);
+      // 1. Save full exact binary in local IndexedDB for instant local download
+      await saveBinaryToIdb(platform, cleanFileName, exactFileSize, arrayBuf);
 
-      const base64DataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ""));
-        reader.onerror = () => reject(new Error("ফাইল পড়া যায়নি"));
-        reader.readAsDataURL(file);
-      });
-
-      onProgress?.(35, "সার্ভারে রিয়েল APK ফাইল আপলোড হচ্ছে...");
-
-      // 2. Upload to server / Netlify function (/api/apps/upload)
+      // 2. Upload binary in 2MB chunks to server (/api/apps/upload-chunk + /api/apps/finalize-upload)
+      // so apps of ANY size (e.g. 5MB, 30MB, 100MB+) upload reliably without payload truncation
       let serverDownloadUrl = `/api/apps/download/${platform}`;
+      const SERVER_CHUNK_BYTES = 2 * 1024 * 1024; // 2 MB raw binary per chunk
+      const totalServerChunks = Math.max(1, Math.ceil(exactFileSize / SERVER_CHUNK_BYTES));
+      let chunkUploadSucceeded = false;
+
       try {
-        const resp = await fetch("/api/apps/upload", {
+        for (let idx = 0; idx < totalServerChunks; idx++) {
+          const start = idx * SERVER_CHUNK_BYTES;
+          const end = Math.min(exactFileSize, start + SERVER_CHUNK_BYTES);
+          const chunkB64 = arrayBufferSliceToBase64(arrayBuf, start, end);
+          const pct = 10 + Math.round(((idx + 1) / totalServerChunks) * 65);
+          onProgress?.(
+            pct,
+            `সার্ভারে আপলোড হচ্ছে (${idx + 1}/${totalServerChunks} অংশ — ${(end / (1024 * 1024)).toFixed(2)} / ${(exactFileSize / (1024 * 1024)).toFixed(2)} MB)...`
+          );
+
+          const cResp = await fetch("/api/apps/upload-chunk", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              platform,
+              chunkIndex: idx,
+              totalChunks: totalServerChunks,
+              chunkBase64: chunkB64,
+            }),
+          });
+          if (!cResp.ok) {
+            throw new Error(`Chunk ${idx + 1} upload failed`);
+          }
+        }
+
+        onProgress?.(80, "ফাইল সাইজ ও বাইনারি যাচাই করা হচ্ছে...");
+        const finResp = await fetch("/api/apps/finalize-upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             platform,
             fileName: cleanFileName,
-            fileDataBase64: base64DataUrl,
-            version: meta.version,
-            mimeType:
-              platform === "android"
-                ? "application/vnd.android.package-archive"
-                : file.type || "application/x-apple-aspen-config",
+            expectedSize: exactFileSize,
+            version: meta.version.trim() || "2.0.0",
+            label: meta.label.trim(),
+            releaseNotes: meta.releaseNotes.trim(),
+            visible: meta.visible,
+            mimeType,
           }),
         });
-        if (resp.ok) {
-          const json = await resp.json().catch(() => null);
-          if (json?.downloadUrl) {
-            serverDownloadUrl = json.downloadUrl;
+        if (finResp.ok) {
+          const finJson = await finResp.json().catch(() => null);
+          if (finJson?.ok && finJson.meta?.fileSize === exactFileSize) {
+            chunkUploadSucceeded = true;
+            if (finJson.downloadUrl) {
+              serverDownloadUrl = finJson.downloadUrl;
+            }
           }
         }
       } catch {
-        // Continue with Firebase Firestore chunked storage
+        // Fallback to single-request upload if chunk endpoint wasn't reachable
       }
 
-      // 3. Persist multi-megabyte binary in Firebase Firestore chunks (/settings/app_pkg_chunk_*)
-      let chunkCount = 0;
-      const CHUNK_LEN = 240000;
-      if (base64DataUrl.length > 180000 && base64DataUrl.length <= CHUNK_LEN * 65) {
-        const chunks: string[] = [];
-        for (let i = 0; i < base64DataUrl.length; i += CHUNK_LEN) {
-          chunks.push(base64DataUrl.slice(i, i + CHUNK_LEN));
-        }
-        chunkCount = chunks.length;
-        for (let idx = 0; idx < chunks.length; idx++) {
-          const pct = 40 + Math.round(((idx + 1) / chunks.length) * 45);
-          onProgress?.(
-            pct,
-            `Firebase ডাটাবেজে সংরক্ষিত হচ্ছে (${idx + 1}/${chunks.length} অংশ)...`
-          );
-          await upsertSettingDoc(`app_pkg_chunk_${platform}_${idx}`, chunks[idx], {
-            visible: true,
+      if (!chunkUploadSucceeded) {
+        onProgress?.(50, "সার্ভারে সরাসরি ফাইল আপলোড হচ্ছে...");
+        const fullB64 = arrayBufferSliceToBase64(arrayBuf, 0, exactFileSize);
+        const dataUrl = `data:${mimeType};base64,${fullB64}`;
+        try {
+          const resp = await fetch("/api/apps/upload", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              platform,
+              fileName: cleanFileName,
+              fileDataBase64: dataUrl,
+              expectedSize: exactFileSize,
+              version: meta.version.trim() || "2.0.0",
+              label: meta.label.trim(),
+              releaseNotes: meta.releaseNotes.trim(),
+              visible: meta.visible,
+              mimeType,
+            }),
           });
+          if (resp.ok) {
+            const json = await resp.json().catch(() => null);
+            if (json?.downloadUrl) {
+              serverDownloadUrl = json.downloadUrl;
+            }
+          }
+        } catch {
+          // continue
         }
       }
 
-      onProgress?.(92, "কনফিগারেশন আপডেট হচ্ছে...");
+      // 3. For files <= 10 MB, also mirror chunks into settings store for redundant cloud backup
+      let chunkCount = 0;
+      let embeddedDataUrl: string | undefined = undefined;
+      if (exactFileSize <= 10 * 1024 * 1024) {
+        try {
+          const fullB64 = arrayBufferSliceToBase64(arrayBuf, 0, exactFileSize);
+          const dataUrl = `data:${mimeType};base64,${fullB64}`;
+          if (dataUrl.length <= 180000) {
+            embeddedDataUrl = dataUrl;
+          } else {
+            const CHUNK_LEN = 240000;
+            const totalCloudChunks = Math.ceil(dataUrl.length / CHUNK_LEN);
+            if (totalCloudChunks <= 60) {
+              chunkCount = totalCloudChunks;
+              for (let idx = 0; idx < totalCloudChunks; idx++) {
+                const slice = dataUrl.slice(idx * CHUNK_LEN, (idx + 1) * CHUNK_LEN);
+                const pct = 82 + Math.round(((idx + 1) / totalCloudChunks) * 12);
+                onProgress?.(
+                  pct,
+                  `ক্লাউড ব্যাকআপ সিঙ্ক হচ্ছে (${idx + 1}/${totalCloudChunks})...`
+                );
+                await upsertSettingDoc(`app_pkg_chunk_${platform}_${idx}`, slice, {
+                  visible: true,
+                });
+              }
+            }
+          }
+        } catch {
+          // Server binary is already saved and verified
+        }
+      }
+
+      onProgress?.(96, "কনফিগারেশন সংরক্ষণ হচ্ছে...");
 
       const nextPkg: AppPackageInfo = {
         platform,
         label: meta.label.trim() || DEFAULT_APP_PACKAGES[platform].label,
         version: meta.version.trim() || "2.0.0",
         fileName: cleanFileName,
-        fileSize: file.size,
+        fileSize: exactFileSize,
         downloadUrl: serverDownloadUrl,
-        embeddedDataUrl: base64DataUrl.length <= 180000 ? base64DataUrl : undefined,
+        embeddedDataUrl,
         chunkCount: chunkCount > 0 ? chunkCount : undefined,
         visible: meta.visible,
         uploadedAt: new Date().toISOString(),
@@ -959,14 +1159,57 @@ export function useAppPackages() {
       };
 
       await saveAppPackagesConfig(nextConfig);
-      onProgress?.(100, "সম্পন্ন!");
+      onProgress?.(100, "হুবহু সাইজে অ্যাপ আপলোড সম্পন্ন!");
       return nextPkg;
+    },
+    [packages, saveAppPackagesConfig]
+  );
+
+  const removeAppBinary = useCallback(
+    async (platform: "android" | "ios") => {
+      await clearBinaryFromIdb(platform);
+      try {
+        await fetch("/api/apps/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ platform }),
+        });
+      } catch {
+        // ignore
+      }
+      const nextConfig: AppPackagesConfig = {
+        ...packages,
+        [platform]: {
+          ...DEFAULT_APP_PACKAGES[platform],
+          label: packages[platform]?.label || DEFAULT_APP_PACKAGES[platform].label,
+          version: packages[platform]?.version || DEFAULT_APP_PACKAGES[platform].version,
+          releaseNotes:
+            packages[platform]?.releaseNotes || DEFAULT_APP_PACKAGES[platform].releaseNotes,
+          visible: packages[platform]?.visible ?? true,
+        },
+      };
+      await saveAppPackagesConfig(nextConfig);
     },
     [packages, saveAppPackagesConfig]
   );
 
   const updateAppMeta = useCallback(
     async (platform: "android" | "ios", patch: Partial<AppPackageInfo>) => {
+      try {
+        await fetch("/api/apps/update-meta", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            platform,
+            label: patch.label,
+            version: patch.version,
+            releaseNotes: patch.releaseNotes,
+            visible: patch.visible,
+          }),
+        });
+      } catch {
+        // ignore
+      }
       const nextConfig: AppPackagesConfig = {
         ...packages,
         [platform]: {
@@ -982,6 +1225,7 @@ export function useAppPackages() {
   return {
     packages,
     uploadAppBinary,
+    removeAppBinary,
     updateAppMeta,
     saveAppPackagesConfig,
   };

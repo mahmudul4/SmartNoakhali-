@@ -1818,20 +1818,147 @@ export function useEmergencyRequests() {
 
 // ---------- Category access ----------
 export function useCategoryAccess() {
-  const { items, loading } = useFirestoreRealtime<CategoryAccessRow>("category_access", "user_owned");
+  const { items: rawItems, loading } = useFirestoreRealtime<CategoryAccessRow>("category_access", "user_owned");
+  const [approvalItems, setApprovalItems] = useState<CategoryAccessRow[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadApprovals() {
+      try {
+        const resp = await fetch("/api/content?collection=settings&id=category_approvals");
+        if (resp.ok && (resp.headers.get("content-type") || "").includes("application/json")) {
+          const json = await resp.json();
+          const raw = json?.item?.logo_url;
+          if (typeof raw === "string" && raw.trim()) {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === "object" && active) {
+              const rows: CategoryAccessRow[] = [];
+              for (const [uid, slugs] of Object.entries(parsed)) {
+                if (Array.isArray(slugs)) {
+                  for (const s of slugs) {
+                    if (typeof s === "string" && s.trim()) {
+                      rows.push({
+                        id: `appr_${uid}_${s}`,
+                        user_id: uid,
+                        category_slug: s,
+                        created_at: new Date().toISOString(),
+                      });
+                    }
+                  }
+                }
+              }
+              setApprovalItems(rows);
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    void loadApprovals();
+    const timer = setInterval(loadApprovals, 4000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  const items = (() => {
+    const map = new Map<string, CategoryAccessRow>();
+    for (const r of approvalItems) {
+      map.set(`${r.user_id}::${r.category_slug}`, r);
+    }
+    for (const r of rawItems) {
+      map.set(`${r.user_id}::${r.category_slug}`, r);
+    }
+    return Array.from(map.values());
+  })();
+
+  const syncCategoryApprovalsMap = async (
+    uid: string,
+    slug: string,
+    mode: "grant" | "revoke"
+  ) => {
+    try {
+      let mapObj: Record<string, string[]> = {};
+      try {
+        const localRaw = localStorage.getItem("sn_category_approvals_v1");
+        if (localRaw) {
+          const p = JSON.parse(localRaw);
+          if (p && typeof p === "object") mapObj = p;
+        }
+      } catch {
+        // ignore
+      }
+      try {
+        const resp = await fetch("/api/content?collection=settings&id=category_approvals");
+        if (resp.ok && (resp.headers.get("content-type") || "").includes("application/json")) {
+          const json = await resp.json();
+          if (json?.item?.logo_url) {
+            const srv = JSON.parse(json.item.logo_url);
+            if (srv && typeof srv === "object") {
+              for (const [k, v] of Object.entries(srv)) {
+                if (Array.isArray(v)) {
+                  mapObj[k] = Array.from(new Set([...(mapObj[k] || []), ...(v as string[])]));
+                }
+              }
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      const current = new Set(mapObj[uid] || []);
+      if (mode === "grant") current.add(slug);
+      else current.delete(slug);
+      mapObj[uid] = Array.from(current);
+
+      const serialized = JSON.stringify(mapObj);
+      try {
+        localStorage.setItem("sn_category_approvals_v1", serialized);
+      } catch {
+        // ignore
+      }
+      await fetch("/api/content/upsert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          collection: "settings",
+          id: "category_approvals",
+          doc: {
+            id: "category_approvals",
+            key: "category_approvals",
+            logo_url: serialized,
+            visible: true,
+            updated_at: new Date().toISOString(),
+          },
+        }),
+      }).catch(() => {});
+    } catch {
+      // ignore
+    }
+  };
 
   const grant = async (user_id: string, category_slug: string) => {
-    const id = genId();
+    const cleanUid = sanitizeString(user_id, 128, "");
+    const cleanSlug = sanitizeString(category_slug, 80, "").replace(/[^a-zA-Z0-9_-]/g, "-");
+    const id = `${cleanUid}_${cleanSlug}`.replace(/[^a-zA-Z0-9_-]/g, "_");
     const nowIso = new Date().toISOString();
     try {
       const row = {
         id,
-        user_id: sanitizeString(user_id, 128, ""),
-        category_slug: sanitizeString(category_slug, 80, "").replace(/[^a-zA-Z0-9_-]/g, "-"),
+        user_id: cleanUid,
+        category_slug: cleanSlug,
         created_at: nowIso,
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("category_access", id, row);
+      await syncCategoryApprovalsMap(cleanUid, cleanSlug, "grant");
+      setApprovalItems((prev) => [
+        ...prev.filter((x) => !(x.user_id === cleanUid && x.category_slug === cleanSlug)),
+        row,
+      ]);
       await syncSingleDocToNativeFirestore("category_access", id, row);
       return { error: null };
     } catch (e) {
@@ -1840,8 +1967,25 @@ export function useCategoryAccess() {
   };
 
   const revoke = async (id: string) => {
+    const target = items.find((x) => x.id === id);
     try {
       removeCloudMirrorDoc("category_access", id);
+      if (target) {
+        for (const r of rawItems) {
+          if (r.user_id === target.user_id && r.category_slug === target.category_slug) {
+            removeCloudMirrorDoc("category_access", r.id);
+            if (auth.currentUser?.emailVerified) {
+              await deleteDoc(doc(db, "category_access", r.id)).catch(() => {});
+            }
+          }
+        }
+        await syncCategoryApprovalsMap(target.user_id, target.category_slug, "revoke");
+        setApprovalItems((prev) =>
+          prev.filter(
+            (x) => !(x.user_id === target.user_id && x.category_slug === target.category_slug)
+          )
+        );
+      }
       if (auth.currentUser?.emailVerified) {
         await deleteDoc(doc(db, "category_access", id)).catch(() => {});
       }
@@ -1852,6 +1996,284 @@ export function useCategoryAccess() {
   };
 
   return { items, loading, grant, revoke };
+}
+
+// ---------- Category Access Requests & Payment/Subscription Requests ----------
+export interface CategoryRequestEntry {
+  id: string;
+  userId: string;
+  userName: string;
+  userPhone: string;
+  categorySlug: string;
+  categoryBn?: string;
+  reason?: string;
+  status: "pending" | "approved" | "rejected";
+  createdAt: string;
+  updated_at?: string;
+}
+
+export function useCategoryRequests() {
+  const [requests, setRequests] = useState<CategoryRequestEntry[]>(() => {
+    const mirror = readLocalCloudMirror();
+    const map = mirror.collections.category_requests || {};
+    return Object.values(map).sort((a: any, b: any) =>
+      String(b.createdAt || b.created_at || "").localeCompare(String(a.createdAt || a.created_at || ""))
+    ) as CategoryRequestEntry[];
+  });
+
+  useEffect(() => {
+    const sync = () => {
+      const mirror = readLocalCloudMirror();
+      const map = mirror.collections.category_requests || {};
+      const list = Object.values(map).sort((a: any, b: any) =>
+        String(b.createdAt || b.created_at || "").localeCompare(String(a.createdAt || a.created_at || ""))
+      ) as CategoryRequestEntry[];
+      setRequests(list);
+    };
+    sync();
+    window.addEventListener("sn-cloud-mirror-updated", sync);
+    const timer = setInterval(() => {
+      void pullCloudMirrorFromRemote().then(sync);
+    }, 3500);
+    return () => {
+      window.removeEventListener("sn-cloud-mirror-updated", sync);
+      clearInterval(timer);
+    };
+  }, []);
+
+  const submitCategoryRequest = async (input: {
+    userId: string;
+    userName: string;
+    userPhone: string;
+    categorySlug: string;
+    categoryBn?: string;
+    reason?: string;
+  }) => {
+    const id = genId();
+    const nowIso = new Date().toISOString();
+    const entry: CategoryRequestEntry = {
+      id,
+      userId: sanitizeString(input.userId, 128, ""),
+      userName: sanitizeString(input.userName, 120, "গ্রাহক"),
+      userPhone: sanitizeString(input.userPhone, 40, ""),
+      categorySlug: sanitizeString(input.categorySlug, 80, ""),
+      categoryBn: sanitizeString(input.categoryBn || input.categorySlug, 120, ""),
+      reason: sanitizeString(input.reason || "", 400, ""),
+      status: "pending",
+      createdAt: nowIso,
+      updated_at: nowIso,
+    };
+    upsertCloudMirrorDoc("category_requests", id, entry);
+    return { ok: true, id };
+  };
+
+  const approveCategoryRequest = async (id: string) => {
+    const existing = requests.find((r) => r.id === id);
+    if (!existing) return;
+    const nowIso = new Date().toISOString();
+    const updated: CategoryRequestEntry = {
+      ...existing,
+      status: "approved",
+      updated_at: nowIso,
+    };
+    upsertCloudMirrorDoc("category_requests", id, updated);
+    void recordStaffActivity({
+      action_type: "approve",
+      action_label: "ক্যাটাগরি অ্যাকসেস রিকোয়েস্ট অনুমোদন করেছে",
+      module: "access",
+      module_label: "ক্যাটাগরি অ্যাকসেস",
+      target_id: id,
+      target_title: `${existing.userName} (${existing.categoryBn || existing.categorySlug})`,
+      target_detail: `ফোন: ${existing.userPhone} • UID: ${existing.userId}`,
+    });
+  };
+
+  const rejectCategoryRequest = async (id: string) => {
+    const existing = requests.find((r) => r.id === id);
+    if (!existing) return;
+    const nowIso = new Date().toISOString();
+    const updated: CategoryRequestEntry = {
+      ...existing,
+      status: "rejected",
+      updated_at: nowIso,
+    };
+    upsertCloudMirrorDoc("category_requests", id, updated);
+    void recordStaffActivity({
+      action_type: "reject",
+      action_label: "ক্যাটাগরি অ্যাকসেস রিকোয়েস্ট বাতিল করেছে",
+      module: "access",
+      module_label: "ক্যাটাগরি অ্যাকসেস",
+      target_id: id,
+      target_title: `${existing.userName} (${existing.categoryBn || existing.categorySlug})`,
+      target_detail: `ফোন: ${existing.userPhone} • UID: ${existing.userId}`,
+    });
+  };
+
+  const deleteCategoryRequest = async (id: string) => {
+    const existing = requests.find((r) => r.id === id);
+    removeCloudMirrorDoc("category_requests", id);
+    if (existing) {
+      void recordStaffActivity({
+        action_type: "delete",
+        action_label: "ক্যাটাগরি অ্যাকসেস রিকোয়েস্ট ডিলিট করেছে",
+        module: "access",
+        module_label: "ক্যাটাগরি অ্যাকসেস",
+        target_id: id,
+        target_title: `${existing.userName} (${existing.categoryBn || existing.categorySlug})`,
+        target_detail: `ফোন: ${existing.userPhone} • UID: ${existing.userId}`,
+        deleted_snapshot: { ...existing },
+        collection_name: "category_requests",
+      });
+    }
+  };
+
+  return {
+    requests,
+    submitCategoryRequest,
+    approveCategoryRequest,
+    rejectCategoryRequest,
+    deleteCategoryRequest,
+  };
+}
+
+export interface PaymentRequestEntry {
+  id: string;
+  userId: string;
+  userName: string;
+  userPhone: string;
+  senderPhone: string;
+  amount: number;
+  method: string;
+  trxId: string;
+  status: "pending" | "approved" | "rejected";
+  createdAt: string;
+  updated_at?: string;
+}
+
+export function usePaymentRequests() {
+  const [requests, setRequests] = useState<PaymentRequestEntry[]>(() => {
+    const mirror = readLocalCloudMirror();
+    const map = mirror.collections.payment_requests || {};
+    return Object.values(map).sort((a: any, b: any) =>
+      String(b.createdAt || b.created_at || "").localeCompare(String(a.createdAt || a.created_at || ""))
+    ) as PaymentRequestEntry[];
+  });
+
+  useEffect(() => {
+    const sync = () => {
+      const mirror = readLocalCloudMirror();
+      const map = mirror.collections.payment_requests || {};
+      const list = Object.values(map).sort((a: any, b: any) =>
+        String(b.createdAt || b.created_at || "").localeCompare(String(a.createdAt || a.created_at || ""))
+      ) as PaymentRequestEntry[];
+      setRequests(list);
+    };
+    sync();
+    window.addEventListener("sn-cloud-mirror-updated", sync);
+    const timer = setInterval(() => {
+      void pullCloudMirrorFromRemote().then(sync);
+    }, 3500);
+    return () => {
+      window.removeEventListener("sn-cloud-mirror-updated", sync);
+      clearInterval(timer);
+    };
+  }, []);
+
+  const submitRequest = async (input: {
+    userId: string;
+    userName: string;
+    userPhone: string;
+    senderPhone: string;
+    amount: number;
+    method: string;
+    trxId: string;
+  }) => {
+    const id = genId();
+    const nowIso = new Date().toISOString();
+    const entry: PaymentRequestEntry = {
+      id,
+      userId: sanitizeString(input.userId, 128, ""),
+      userName: sanitizeString(input.userName, 120, "গ্রাহক"),
+      userPhone: sanitizeString(input.userPhone, 40, ""),
+      senderPhone: sanitizeString(input.senderPhone, 40, ""),
+      amount: Number(input.amount || 0),
+      method: sanitizeString(input.method, 40, "bKash"),
+      trxId: sanitizeString(input.trxId, 80, ""),
+      status: "pending",
+      createdAt: nowIso,
+      updated_at: nowIso,
+    };
+    upsertCloudMirrorDoc("payment_requests", id, entry);
+    return { ok: true, id };
+  };
+
+  const approveRequest = async (id: string) => {
+    const existing = requests.find((r) => r.id === id);
+    if (!existing) return;
+    const nowIso = new Date().toISOString();
+    const updated: PaymentRequestEntry = {
+      ...existing,
+      status: "approved",
+      updated_at: nowIso,
+    };
+    upsertCloudMirrorDoc("payment_requests", id, updated);
+    void recordStaffActivity({
+      action_type: "approve",
+      action_label: "সাবস্ক্রিপশন পেমেন্ট রিকোয়েস্ট অনুমোদন করেছে",
+      module: "access",
+      module_label: "সাবস্ক্রিপশন পেমেন্ট",
+      target_id: id,
+      target_title: `${existing.userName} (${existing.amount}৳ • ${existing.method})`,
+      target_detail: `প্রেরক: ${existing.senderPhone} • TrxID: ${existing.trxId}`,
+    });
+  };
+
+  const rejectRequest = async (id: string) => {
+    const existing = requests.find((r) => r.id === id);
+    if (!existing) return;
+    const nowIso = new Date().toISOString();
+    const updated: PaymentRequestEntry = {
+      ...existing,
+      status: "rejected",
+      updated_at: nowIso,
+    };
+    upsertCloudMirrorDoc("payment_requests", id, updated);
+    void recordStaffActivity({
+      action_type: "reject",
+      action_label: "সাবস্ক্রিপশন পেমেন্ট রিকোয়েস্ট বাতিল করেছে",
+      module: "access",
+      module_label: "সাবস্ক্রিপশন পেমেন্ট",
+      target_id: id,
+      target_title: `${existing.userName} (${existing.amount}৳ • ${existing.method})`,
+      target_detail: `প্রেরক: ${existing.senderPhone} • TrxID: ${existing.trxId}`,
+    });
+  };
+
+  const deleteRequest = async (id: string) => {
+    const existing = requests.find((r) => r.id === id);
+    removeCloudMirrorDoc("payment_requests", id);
+    if (existing) {
+      void recordStaffActivity({
+        action_type: "delete",
+        action_label: "সাবস্ক্রিপশন পেমেন্ট রিকোয়েস্ট ডিলিট করেছে",
+        module: "access",
+        module_label: "সাবস্ক্রিপশন পেমেন্ট",
+        target_id: id,
+        target_title: `${existing.userName} (${existing.amount}৳ • ${existing.method})`,
+        target_detail: `প্রেরক: ${existing.senderPhone} • TrxID: ${existing.trxId}`,
+        deleted_snapshot: { ...existing },
+        collection_name: "payment_requests",
+      });
+    }
+  };
+
+  return {
+    requests,
+    submitRequest,
+    approveRequest,
+    rejectRequest,
+    deleteRequest,
+  };
 }
 
 // ---------- Private chat: Deletion Tombstones & Sync ----------
@@ -2621,35 +3043,317 @@ export async function uploadPublicImage(file: File, _folder = "uploads"): Promis
   });
 }
 
-export async function getUserSubmissionCounts(phone: string, userId: string) {
-  const currentUser = auth.currentUser;
-  const isVerifiedAdmin = Boolean(
-    currentUser && currentUser.emailVerified && isSuperAdminEmail(currentUser.email)
-  );
-  if (!isVerifiedAdmin) {
-    return {
-      subCount: { pending: 0, approved: 0, rejected: 0 },
-      access: [] as string[],
-    };
+export interface UserFullActivitySummary {
+  subCount: { pending: number; approved: number; rejected: number };
+  access: string[];
+  submissions: Array<{
+    id: string;
+    title: string;
+    category_slug: string;
+    contact: string;
+    address: string;
+    status: string;
+    created_at: string;
+  }>;
+  bloodDonors: Array<{
+    id: string;
+    full_name: string;
+    blood_group: string;
+    phone: string;
+    address: string;
+    status: string;
+  }>;
+  donations: Array<{
+    id: string;
+    sender_name: string;
+    sender_phone: string;
+    amount: number;
+    method: string;
+    trx_id: string;
+    status: string;
+    created_at: string;
+  }>;
+  chatCount: number;
+  lastChatPreview: string;
+}
+
+export async function getUserSubmissionCounts(
+  phone: string,
+  userId: string,
+  email?: string
+): Promise<UserFullActivitySummary> {
+  const cleanPhone = (phone || "").trim();
+  const cleanEmail = (email || "").trim().toLowerCase();
+  const accessSet = new Set<string>();
+
+  const subMap = new Map<
+    string,
+    {
+      id: string;
+      title: string;
+      category_slug: string;
+      contact: string;
+      address: string;
+      status: string;
+      created_at: string;
+    }
+  >();
+
+  const donorMap = new Map<
+    string,
+    {
+      id: string;
+      full_name: string;
+      blood_group: string;
+      phone: string;
+      address: string;
+      status: string;
+    }
+  >();
+
+  const donationMap = new Map<
+    string,
+    {
+      id: string;
+      sender_name: string;
+      sender_phone: string;
+      amount: number;
+      method: string;
+      trx_id: string;
+      status: string;
+      created_at: string;
+    }
+  >();
+
+  let chatCount = 0;
+  let lastChatPreview = "";
+
+  const matchesTargetUser = (row: any): boolean => {
+    if (!row || typeof row !== "object") return false;
+    const rowUid = String(row.user_id || row.author_id || row.uid || "").trim();
+    const rowEmail = String(row.email || row.user_email || "").trim().toLowerCase();
+    const rowPhone = String(row.contact || row.phone || row.sender_phone || "").trim();
+    if (userId && rowUid === userId) return true;
+    if (cleanEmail && rowEmail && rowEmail === cleanEmail) return true;
+    if (cleanPhone && rowPhone && rowPhone === cleanPhone) return true;
+    return false;
+  };
+
+  // 1. Check local cloud mirror first
+  try {
+    const mirror = readLocalCloudMirror();
+    for (const s of Object.values(mirror.collections.submissions || {})) {
+      if (matchesTargetUser(s)) {
+        subMap.set(String(s.id), {
+          id: String(s.id),
+          title: String(s.title || "তথ্য"),
+          category_slug: String(s.category_slug || "general"),
+          contact: String(s.contact || ""),
+          address: String(s.address || ""),
+          status: String(s.status || "pending"),
+          created_at: String(s.created_at || new Date().toISOString()),
+        });
+      }
+    }
+    for (const acc of Object.values(mirror.collections.category_access || {})) {
+      if (matchesTargetUser(acc) && acc.category_slug) {
+        accessSet.add(String(acc.category_slug));
+      }
+    }
+    for (const bd of Object.values(mirror.collections.blood_donors || {})) {
+      if (matchesTargetUser(bd)) {
+        donorMap.set(String(bd.id), {
+          id: String(bd.id),
+          full_name: String(bd.full_name || ""),
+          blood_group: String(bd.blood_group || ""),
+          phone: String(bd.phone || ""),
+          address: String(bd.address || ""),
+          status: String(bd.status || "pending"),
+        });
+      }
+    }
+    for (const dn of Object.values(mirror.collections.donations || {})) {
+      if (matchesTargetUser(dn)) {
+        donationMap.set(String(dn.id), {
+          id: String(dn.id),
+          sender_name: String(dn.sender_name || ""),
+          sender_phone: String(dn.sender_phone || ""),
+          amount: Number(dn.amount || 0),
+          method: String(dn.method || "bKash"),
+          trx_id: String(dn.trx_id || ""),
+          status: String(dn.status || "pending"),
+          created_at: String(dn.created_at || new Date().toISOString()),
+        });
+      }
+    }
+  } catch {
+    // ignore
   }
 
-  const subsSnap = await getDocs(
-    query(collection(db, "submissions"))
-  ).catch(() => null);
-  const accSnap = await getDocs(
-    query(collection(db, "category_access"), where("user_id", "==", userId))
-  ).catch(() => null);
+  // 2. Fetch from server /api/content & /api/chat/threads (works for all Super Admin sessions)
+  try {
+    const [subsResp, accResp, apprResp, donorsResp, donsResp, chatResp] = await Promise.all([
+      fetch("/api/content?collection=submissions").catch(() => null),
+      fetch("/api/content?collection=category_access").catch(() => null),
+      fetch("/api/content?collection=settings&id=category_approvals").catch(() => null),
+      fetch("/api/content?collection=blood_donors").catch(() => null),
+      fetch("/api/content?collection=donations").catch(() => null),
+      fetch("/api/chat/threads").catch(() => null),
+    ]);
 
-  const allSubs = subsSnap?.docs.map((d) => d.data()) ?? [];
-  const matching = allSubs.filter(
-    (s) => s.author_id === userId || (phone && s.contact === phone)
+    if (subsResp && subsResp.ok) {
+      const j = await subsResp.json().catch(() => null);
+      for (const s of j?.items || []) {
+        if (matchesTargetUser(s)) {
+          subMap.set(String(s.id), {
+            id: String(s.id),
+            title: String(s.title || "তথ্য"),
+            category_slug: String(s.category_slug || "general"),
+            contact: String(s.contact || ""),
+            address: String(s.address || ""),
+            status: String(s.status || "pending"),
+            created_at: String(s.created_at || new Date().toISOString()),
+          });
+        }
+      }
+    }
+
+    if (accResp && accResp.ok) {
+      const j = await accResp.json().catch(() => null);
+      for (const a of j?.items || []) {
+        if (matchesTargetUser(a) && a.category_slug) {
+          accessSet.add(String(a.category_slug));
+        }
+      }
+    }
+
+    if (apprResp && apprResp.ok) {
+      const j = await apprResp.json().catch(() => null);
+      const raw = j?.item?.logo_url;
+      if (typeof raw === "string" && raw.trim()) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object") {
+            const byUid = parsed[userId];
+            if (Array.isArray(byUid)) {
+              byUid.forEach((slug: any) => {
+                if (typeof slug === "string" && slug.trim()) accessSet.add(slug.trim());
+              });
+            }
+            if (cleanEmail && Array.isArray(parsed[cleanEmail])) {
+              parsed[cleanEmail].forEach((slug: any) => {
+                if (typeof slug === "string" && slug.trim()) accessSet.add(slug.trim());
+              });
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    if (donorsResp && donorsResp.ok) {
+      const j = await donorsResp.json().catch(() => null);
+      for (const bd of j?.items || []) {
+        if (matchesTargetUser(bd)) {
+          donorMap.set(String(bd.id), {
+            id: String(bd.id),
+            full_name: String(bd.full_name || ""),
+            blood_group: String(bd.blood_group || ""),
+            phone: String(bd.phone || ""),
+            address: String(bd.address || ""),
+            status: String(bd.status || "pending"),
+          });
+        }
+      }
+    }
+
+    if (donsResp && donsResp.ok) {
+      const j = await donsResp.json().catch(() => null);
+      for (const dn of j?.items || []) {
+        if (matchesTargetUser(dn)) {
+          donationMap.set(String(dn.id), {
+            id: String(dn.id),
+            sender_name: String(dn.sender_name || ""),
+            sender_phone: String(dn.sender_phone || ""),
+            amount: Number(dn.amount || 0),
+            method: String(dn.method || "bKash"),
+            trx_id: String(dn.trx_id || ""),
+            status: String(dn.status || "pending"),
+            created_at: String(dn.created_at || new Date().toISOString()),
+          });
+        }
+      }
+    }
+
+    if (chatResp && chatResp.ok) {
+      const j = await chatResp.json().catch(() => null);
+      for (const t of j?.threads || []) {
+        if (
+          t &&
+          (t.id === userId ||
+            t.user_id === userId ||
+            (cleanEmail && String(t.user_email || "").toLowerCase() === cleanEmail) ||
+            (cleanPhone && String(t.user_phone || "") === cleanPhone))
+        ) {
+          chatCount += 1;
+          if (t.last_message_preview) {
+            lastChatPreview = String(t.last_message_preview);
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // 3. Also query Firestore if signed in with verified Firebase account
+  if (auth.currentUser?.emailVerified) {
+    try {
+      const [subsSnap, accSnap] = await Promise.all([
+        getDocs(query(collection(db, "submissions"))).catch(() => null),
+        getDocs(query(collection(db, "category_access"), where("user_id", "==", userId))).catch(
+          () => null
+        ),
+      ]);
+      for (const d of subsSnap?.docs || []) {
+        const s = d.data();
+        if (matchesTargetUser(s)) {
+          subMap.set(d.id, {
+            id: d.id,
+            title: String(s.title || "তথ্য"),
+            category_slug: String(s.category_slug || "general"),
+            contact: String(s.contact || ""),
+            address: String(s.address || ""),
+            status: String(s.status || "pending"),
+            created_at: String(s.created_at || new Date().toISOString()),
+          });
+        }
+      }
+      for (const d of accSnap?.docs || []) {
+        const slug = d.data()?.category_slug;
+        if (slug) accessSet.add(String(slug));
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const allMatchingSubs = Array.from(subMap.values()).sort((a, b) =>
+    b.created_at.localeCompare(a.created_at)
   );
+
   return {
     subCount: {
-      pending: matching.filter((s) => s.status === "pending").length,
-      approved: matching.filter((s) => s.status === "approved").length,
-      rejected: matching.filter((s) => s.status === "rejected").length,
+      pending: allMatchingSubs.filter((s) => s.status === "pending").length,
+      approved: allMatchingSubs.filter((s) => s.status === "approved").length,
+      rejected: allMatchingSubs.filter((s) => s.status === "rejected").length,
     },
-    access: accSnap?.docs.map((d) => String(d.data().category_slug)) ?? [],
+    access: Array.from(accessSet),
+    submissions: allMatchingSubs,
+    bloodDonors: Array.from(donorMap.values()),
+    donations: Array.from(donationMap.values()),
+    chatCount,
+    lastChatPreview,
   };
 }

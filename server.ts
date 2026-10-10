@@ -30,58 +30,27 @@ interface AppBinaryMeta {
   fileName: string;
   fileSize: number;
   version: string;
+  label?: string;
+  releaseNotes?: string;
+  visible?: boolean;
   mimeType: string;
   uploadedAt: string;
   savedFile: string;
   downloadUrl?: string;
 }
 
-function getDefaultManifest(): Record<string, AppBinaryMeta> {
-  const androidFile = "Smart-Noakhali-Android.apk";
-  const iosFile = "Smart-Noakhali-iOS.mobileconfig";
-  const androidPath = path.join(DOWNLOADS_DIR, androidFile);
-  const iosPath = path.join(DOWNLOADS_DIR, iosFile);
-  const out: Record<string, AppBinaryMeta> = {};
-  if (fs.existsSync(androidPath)) {
-    const st = fs.statSync(androidPath);
-    out.android = {
-      platform: "android",
-      fileName: androidFile,
-      fileSize: st.size,
-      version: "2.0.0",
-      mimeType: "application/vnd.android.package-archive",
-      uploadedAt: st.mtime.toISOString(),
-      savedFile: androidFile,
-      downloadUrl: `/downloads/${androidFile}`,
-    };
-  }
-  if (fs.existsSync(iosPath)) {
-    const st = fs.statSync(iosPath);
-    out.ios = {
-      platform: "ios",
-      fileName: iosFile,
-      fileSize: st.size,
-      version: "2.0.0",
-      mimeType: "application/x-apple-aspen-config",
-      uploadedAt: st.mtime.toISOString(),
-      savedFile: iosFile,
-      downloadUrl: `/downloads/${iosFile}`,
-    };
-  }
-  return out;
-}
-
 function readManifest(): Record<string, AppBinaryMeta> {
-  const fallback = getDefaultManifest();
   try {
     if (fs.existsSync(MANIFEST_PATH)) {
       const parsed = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf-8"));
-      return { ...fallback, ...(parsed || {}) };
+      if (parsed && typeof parsed === "object") {
+        return parsed;
+      }
     }
   } catch {
     // ignore
   }
-  return fallback;
+  return {};
 }
 
 function writeManifest(data: Record<string, AppBinaryMeta>) {
@@ -915,6 +884,73 @@ async function startServer() {
     const store = readVerifiedUsers();
     const deletedIds = readDeletedUsers();
     const deletedSet = new Set(deletedIds.map((x) => x.toLowerCase()));
+
+    // Merge users from content_store.json (user_registry_mirror / super_admin_user_vault) and live_chat_store.json
+    try {
+      const content = readContentStore();
+      for (const mirrorKey of ["user_registry_mirror", "super_admin_user_vault"]) {
+        const rawMirror = content[mirrorKey];
+        if (typeof rawMirror === "string" && rawMirror.trim()) {
+          const parsed = JSON.parse(rawMirror);
+          const mirrorUsers = parsed?.users && typeof parsed.users === "object" ? parsed.users : parsed;
+          if (mirrorUsers && typeof mirrorUsers === "object") {
+            for (const u of Object.values(mirrorUsers) as Array< Record<string, any> >) {
+              if (!u || typeof u !== "object") continue;
+              const uid = String(u.uid || u.email || "").trim();
+              const email = String(u.email || "").trim().toLowerCase();
+              if (!uid && !email) continue;
+              const key = uid || email;
+              if (!store[key]) {
+                store[key] = {
+                  uid: key,
+                  email: email || `${key}@user.smartnoakhali.app`,
+                  phone: normalizePhone(String(u.phone || "")),
+                  password: u.password,
+                  full_name: u.full_name || email.split("@")[0] || "ইউজার",
+                  username: u.username || email.split("@")[0] || "user",
+                  verified_via: u.verified_via || "email",
+                  is_verified: true,
+                  roles: Array.isArray(u.roles) && u.roles.length > 0 ? u.roles : ["user"],
+                  photo_url: u.photo_url,
+                  designation: u.designation,
+                  suspended: Boolean(u.suspended),
+                  created_at: u.created_at || u.updated_at || new Date().toISOString(),
+                  updated_at: u.updated_at || new Date().toISOString(),
+                };
+              }
+            }
+          }
+        }
+      }
+
+      const chatStore = readChatStore();
+      for (const t of Object.values(chatStore.threads || {})) {
+        const uid = String(t.user_id || t.id || "").trim();
+        const email = String(t.user_email || "").trim().toLowerCase();
+        if (!uid) continue;
+        const alreadyExists =
+          store[uid] ||
+          (email && Object.values(store).some((x) => x.email.toLowerCase() === email));
+        if (!alreadyExists) {
+          store[uid] = {
+            uid,
+            email: email || `${uid}@chat.smartnoakhali.app`,
+            phone: normalizePhone(String(t.user_phone || "")),
+            full_name: t.user_name || "গ্রাহক",
+            username: email ? email.split("@")[0] : uid.slice(0, 12),
+            verified_via: "email",
+            is_verified: true,
+            roles: ["user"],
+            suspended: false,
+            created_at: t.created_at || new Date().toISOString(),
+            updated_at: t.last_message_at || new Date().toISOString(),
+          };
+        }
+      }
+    } catch {
+      // ignore merge errors
+    }
+
     const activeUsers = Object.values(store).filter(
       (u) =>
         !deletedSet.has(u.uid.toLowerCase()) &&
@@ -1296,19 +1332,212 @@ async function startServer() {
 
   // ============================================================================
   // 1. Direct App Upload & One-Click Download Endpoints (Super Admin Only)
+  // Supports both single-request and multi-chunk binary uploads of any size
   // ============================================================================
   app.get("/api/apps/status", (_req, res) => {
     const manifest = readManifest();
+    // Verify actual disk file size so customers always see the exact real byte size
+    for (const plat of ["android", "ios"] as const) {
+      const m = manifest[plat];
+      if (m?.savedFile) {
+        const p = path.join(DOWNLOADS_DIR, m.savedFile);
+        if (fs.existsSync(p)) {
+          try {
+            const st = fs.statSync(p);
+            if (st.size > 0) {
+              m.fileSize = st.size;
+            }
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }
     res.json({ ok: true, apps: manifest });
+  });
+
+  app.post("/api/apps/upload-chunk", (req, res) => {
+    try {
+      const { uploadId, platform, chunkIndex, chunkBase64 } = req.body as {
+        uploadId?: string;
+        platform?: string;
+        chunkIndex?: number;
+        chunkBase64?: string;
+      };
+      if ((platform !== "android" && platform !== "ios") || !uploadId || typeof chunkBase64 !== "string") {
+        res.status(400).json({ error: "অবৈধ আপলোড চাঙ্ক ডাটা" });
+        return;
+      }
+      const safeUploadId = String(uploadId).replace(/[^a-zA-Z0-9_-]/g, "_");
+      const tempPath = path.join(DOWNLOADS_DIR, `.upload_${platform}_${safeUploadId}.part`);
+      if (Number(chunkIndex) === 0 && fs.existsSync(tempPath)) {
+        try {
+          fs.unlinkSync(tempPath);
+        } catch {
+          // ignore
+        }
+      }
+      const cleanB64 = chunkBase64.includes(",") ? chunkBase64.split(",")[1] : chunkBase64;
+      const chunkBuf = Buffer.from(cleanB64, "base64");
+      fs.appendFileSync(tempPath, chunkBuf);
+      const st = fs.statSync(tempPath);
+      res.json({ ok: true, chunkIndex: Number(chunkIndex) || 0, currentBytes: st.size });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "চাঙ্ক আপলোড ব্যর্থ" });
+    }
+  });
+
+  app.post("/api/apps/finalize-upload", (req, res) => {
+    try {
+      const {
+        uploadId,
+        platform,
+        fileName,
+        expectedSize,
+        version,
+        label,
+        releaseNotes,
+        visible,
+        mimeType,
+      } = req.body as {
+        uploadId?: string;
+        platform?: string;
+        fileName?: string;
+        expectedSize?: number;
+        version?: string;
+        label?: string;
+        releaseNotes?: string;
+        visible?: boolean;
+        mimeType?: string;
+      };
+      if ((platform !== "android" && platform !== "ios") || !uploadId) {
+        res.status(400).json({ error: "অবৈধ প্ল্যাটফর্ম বা আপলোড আইডি" });
+        return;
+      }
+      const safeUploadId = String(uploadId).replace(/[^a-zA-Z0-9_-]/g, "_");
+      const tempPath = path.join(DOWNLOADS_DIR, `.upload_${platform}_${safeUploadId}.part`);
+      if (!fs.existsSync(tempPath)) {
+        res.status(404).json({ error: "আপলোডকৃত টেম্প ফাইল পাওয়া যায়নি" });
+        return;
+      }
+      const st = fs.statSync(tempPath);
+      if (expectedSize && expectedSize > 0 && st.size !== Number(expectedSize)) {
+        try {
+          fs.unlinkSync(tempPath);
+        } catch {
+          // ignore
+        }
+        res.status(400).json({
+          error: `ফাইল সাইজ মিলেনি (আপলোড: ${expectedSize} বাইট, প্রাপ্ত: ${st.size} বাইট)। অনুগ্রহ করে আবার চেষ্টা করুন।`,
+        });
+        return;
+      }
+
+      const defaultExt = platform === "android" ? ".apk" : ".ipa";
+      const safeOriginal = (fileName || `smart-noakhali-${platform}${defaultExt}`)
+        .replace(/\s+\./g, ".")
+        .replace(/[^a-zA-Z0-9._-]/g, "_");
+      const savedFile = `smart-noakhali-${platform}-${Date.now()}-${safeOriginal}`;
+      const targetPath = path.join(DOWNLOADS_DIR, savedFile);
+
+      const manifest = readManifest();
+      const prev = manifest[platform];
+      if (prev?.savedFile) {
+        const oldPath = path.join(DOWNLOADS_DIR, prev.savedFile);
+        if (fs.existsSync(oldPath)) {
+          try {
+            fs.unlinkSync(oldPath);
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      fs.renameSync(tempPath, targetPath);
+      const finalStat = fs.statSync(targetPath);
+
+      const meta: AppBinaryMeta = {
+        platform,
+        fileName: safeOriginal,
+        fileSize: finalStat.size,
+        version: (version || "2.0.0").trim(),
+        label: label?.trim(),
+        releaseNotes: releaseNotes?.trim(),
+        visible: visible ?? true,
+        mimeType:
+          platform === "android"
+            ? "application/vnd.android.package-archive"
+            : mimeType || "application/octet-stream",
+        uploadedAt: new Date().toISOString(),
+        savedFile,
+        downloadUrl: `/api/apps/download/${platform}`,
+      };
+
+      manifest[platform] = meta;
+      writeManifest(manifest);
+
+      res.json({
+        ok: true,
+        meta,
+        downloadUrl: `/api/apps/download/${platform}`,
+      });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : "অ্যাপ ফাইল সংরক্ষণ ব্যর্থ হয়েছে",
+      });
+    }
+  });
+
+  app.post("/api/apps/update-meta", (req, res) => {
+    try {
+      const { platform, label, version, releaseNotes, visible } = req.body as {
+        platform?: string;
+        label?: string;
+        version?: string;
+        releaseNotes?: string;
+        visible?: boolean;
+      };
+      if (platform !== "android" && platform !== "ios") {
+        res.status(400).json({ error: "অবৈধ প্ল্যাটফর্ম" });
+        return;
+      }
+      const manifest = readManifest();
+      const prev = manifest[platform];
+      if (prev) {
+        manifest[platform] = {
+          ...prev,
+          label: label !== undefined ? label.trim() : prev.label,
+          version: version !== undefined ? version.trim() : prev.version,
+          releaseNotes: releaseNotes !== undefined ? releaseNotes.trim() : prev.releaseNotes,
+          visible: visible !== undefined ? Boolean(visible) : prev.visible,
+        };
+        writeManifest(manifest);
+      }
+      res.json({ ok: true, meta: manifest[platform] || null });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "আপডেট ব্যর্থ" });
+    }
   });
 
   app.post("/api/apps/upload", (req, res) => {
     try {
-      const { platform, fileName, fileDataBase64, version, mimeType } = req.body as {
+      const {
+        platform,
+        fileName,
+        fileDataBase64,
+        version,
+        label,
+        releaseNotes,
+        visible,
+        mimeType,
+      } = req.body as {
         platform?: string;
         fileName?: string;
         fileDataBase64?: string;
         version?: string;
+        label?: string;
+        releaseNotes?: string;
+        visible?: boolean;
         mimeType?: string;
       };
 
@@ -1328,19 +1557,16 @@ async function startServer() {
       const buffer = Buffer.from(base64Clean, "base64");
 
       const defaultExt = platform === "android" ? ".apk" : ".ipa";
-      const safeOriginal = (fileName || `smart-noakhali-${platform}${defaultExt}`).replace(
-        /[^a-zA-Z0-9._-]/g,
-        "_"
-      );
+      const safeOriginal = (fileName || `smart-noakhali-${platform}${defaultExt}`)
+        .replace(/\s+\./g, ".")
+        .replace(/[^a-zA-Z0-9._-]/g, "_");
       const savedFile = `smart-noakhali-${platform}-${Date.now()}-${safeOriginal}`;
       const targetPath = path.join(DOWNLOADS_DIR, savedFile);
 
-      // Clean up older custom binary for same platform (keep canonical fallback updated too)
+      // Clean up older custom binary for same platform
       const manifest = readManifest();
-      const canonicalName =
-        platform === "android" ? "Smart-Noakhali-Android.apk" : "Smart-Noakhali-iOS.mobileconfig";
       const prev = manifest[platform];
-      if (prev?.savedFile && prev.savedFile !== canonicalName) {
+      if (prev?.savedFile) {
         const oldPath = path.join(DOWNLOADS_DIR, prev.savedFile);
         if (fs.existsSync(oldPath)) {
           try {
@@ -1352,22 +1578,20 @@ async function startServer() {
       }
 
       fs.writeFileSync(targetPath, buffer);
-      // Also mirror to canonical path in public/downloads/ so static /downloads/... always matches
-      try {
-        fs.writeFileSync(path.join(DOWNLOADS_DIR, canonicalName), buffer);
-      } catch {
-        // ignore
-      }
+      const finalStat = fs.statSync(targetPath);
 
       const meta: AppBinaryMeta = {
         platform,
         fileName: safeOriginal,
-        fileSize: buffer.length,
+        fileSize: finalStat.size,
         version: (version || "2.0.0").trim(),
+        label: label?.trim(),
+        releaseNotes: releaseNotes?.trim(),
+        visible: visible ?? true,
         mimeType:
           platform === "android"
             ? "application/vnd.android.package-archive"
-            : mimeType || "application/x-apple-aspen-config",
+            : mimeType || "application/octet-stream",
         uploadedAt: new Date().toISOString(),
         savedFile,
         downloadUrl: `/api/apps/download/${platform}`,
@@ -1389,28 +1613,46 @@ async function startServer() {
     }
   });
 
+  app.post("/api/apps/delete", (req, res) => {
+    const platform = req.body?.platform === "ios" ? "ios" : "android";
+    const manifest = readManifest();
+    const prev = manifest[platform];
+    if (prev?.savedFile) {
+      const oldPath = path.join(DOWNLOADS_DIR, prev.savedFile);
+      if (fs.existsSync(oldPath)) {
+        try {
+          fs.unlinkSync(oldPath);
+        } catch {
+          // ignore
+        }
+      }
+    }
+    delete manifest[platform];
+    writeManifest(manifest);
+    res.json({ ok: true });
+  });
+
   app.get("/api/apps/download/:platform", (req, res) => {
     const platform = req.params.platform === "ios" ? "ios" : "android";
     const manifest = readManifest();
     const meta = manifest[platform];
-    const defaultFileName =
-      platform === "android" ? "Smart-Noakhali-Android.apk" : "Smart-Noakhali-iOS.mobileconfig";
     const defaultMime =
       platform === "android"
         ? "application/vnd.android.package-archive"
-        : "application/x-apple-aspen-config";
+        : "application/octet-stream";
 
-    const candidates = [
-      meta?.savedFile ? path.join(DOWNLOADS_DIR, meta.savedFile) : "",
-      path.join(DOWNLOADS_DIR, defaultFileName),
-    ].filter(Boolean);
-
-    for (const filePath of candidates) {
+    if (meta?.savedFile) {
+      const filePath = path.join(DOWNLOADS_DIR, meta.savedFile);
       if (fs.existsSync(filePath)) {
-        const cleanDownloadName = (meta?.fileName || defaultFileName)
+        const stat = fs.statSync(filePath);
+        const cleanDownloadName = (meta.fileName || meta.savedFile)
           .replace(/\s+\./g, ".")
           .replace(/\.json$/i, "");
-        res.setHeader("Content-Type", meta?.mimeType || defaultMime);
+        res.setHeader("Content-Type", meta.mimeType || defaultMime);
+        res.setHeader("Content-Length", String(stat.size));
+        res.setHeader("X-Exact-File-Size", String(stat.size));
+        res.setHeader("X-Exact-File-Name", cleanDownloadName);
+        res.setHeader("Cache-Control", "no-store, no-transform");
         res.setHeader(
           "Content-Disposition",
           `attachment; filename="${cleanDownloadName}"`
@@ -1434,6 +1676,7 @@ async function startServer() {
       res.status(404).end();
       return;
     }
+    const stat = fs.statSync(filePath);
     const lower = requested.toLowerCase();
     const mime = lower.endsWith(".apk")
       ? "application/vnd.android.package-archive"
@@ -1441,6 +1684,8 @@ async function startServer() {
         ? "application/x-apple-aspen-config"
         : "application/octet-stream";
     res.setHeader("Content-Type", mime);
+    res.setHeader("Content-Length", String(stat.size));
+    res.setHeader("Cache-Control", "no-store, no-transform");
     res.setHeader("Content-Disposition", `attachment; filename="${requested}"`);
     res.sendFile(filePath);
   });

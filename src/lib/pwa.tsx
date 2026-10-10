@@ -98,10 +98,26 @@ export async function saveBinaryToIdb(
   });
 }
 
+export async function clearBinaryFromIdb(platform: "android" | "ios"): Promise<void> {
+  const idb = await openAppBinaryIdb();
+  if (!idb) return;
+  await new Promise<void>((resolve) => {
+    try {
+      const tx = idb.transaction(IDB_STORE, "readwrite");
+      tx.objectStore(IDB_STORE).delete(platform);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
 export async function loadBinaryFromIdb(
   platform: "android" | "ios",
   expectedSize?: number
 ): Promise<ArrayBuffer | null> {
+  if (!expectedSize || expectedSize <= 0) return null;
   const idb = await openAppBinaryIdb();
   if (!idb) return null;
   return new Promise((resolve) => {
@@ -112,8 +128,13 @@ export async function loadBinaryFromIdb(
         const res = req.result as
           | { fileSize?: number; buffer?: ArrayBuffer }
           | undefined;
-        if (res?.buffer && res.buffer.byteLength >= 1000) {
-          if (!expectedSize || Math.abs(res.buffer.byteLength - expectedSize) <= 64) {
+        if (
+          res?.buffer &&
+          res.buffer.byteLength > 0 &&
+          res.buffer.byteLength !== 52640 &&
+          res.buffer.byteLength !== 42444
+        ) {
+          if (res.buffer.byteLength === expectedSize) {
             resolve(res.buffer);
             return;
           }
@@ -148,8 +169,40 @@ export async function loadChunkedBinaryFromFirestore(
   platform: "android" | "ios",
   chunkCount: number
 ): Promise<ArrayBuffer | null> {
-  if (!chunkCount || chunkCount <= 0 || chunkCount > 80) return null;
+  if (!chunkCount || chunkCount <= 0 || chunkCount > 120) return null;
   try {
+    // Try server /api/content mirror first for speed and zero permission issues
+    try {
+      const resp = await fetch("/api/content?collection=settings");
+      if (resp.ok && (resp.headers.get("content-type") || "").includes("application/json")) {
+        const json = await resp.json();
+        if (Array.isArray(json?.items)) {
+          const map = new Map<string, string>();
+          for (const item of json.items) {
+            if (item && typeof item.id === "string" && typeof item.logo_url === "string") {
+              map.set(item.id, item.logo_url);
+            }
+          }
+          const serverParts: string[] = [];
+          let allFound = true;
+          for (let idx = 0; idx < chunkCount; idx++) {
+            const c = map.get(`app_pkg_chunk_${platform}_${idx}`);
+            if (!c) {
+              allFound = false;
+              break;
+            }
+            serverParts.push(c);
+          }
+          if (allFound && serverParts.length === chunkCount) {
+            const decoded = await decodeBase64DataUrlToBuffer(serverParts.join(""));
+            if (decoded && decoded.byteLength > 0) return decoded;
+          }
+        }
+      }
+    } catch {
+      // fallback to Firestore
+    }
+
     const chunkPromises = Array.from({ length: chunkCount }, (_, idx) =>
       getDoc(doc(db, "settings", `app_pkg_chunk_${platform}_${idx}`))
     );
@@ -169,9 +222,7 @@ export async function loadChunkedBinaryFromFirestore(
 }
 
 export function sanitizeAppFileName(rawName: string | undefined, platform: "android" | "ios"): string {
-  const fallback =
-    platform === "android" ? "Smart-Noakhali-Android.apk" : "Smart-Noakhali-iOS.mobileconfig";
-  if (!rawName || !rawName.trim()) return fallback;
+  if (!rawName || !rawName.trim()) return "";
   let cleaned = rawName
     .trim()
     .replace(/\s+\./g, ".")
@@ -187,7 +238,7 @@ export function sanitizeAppFileName(rawName: string | undefined, platform: "andr
       !cleaned.toLowerCase().endsWith(".mobileconfig") &&
       !cleaned.toLowerCase().endsWith(".ipa")
     ) {
-      cleaned = `${cleaned}.mobileconfig`;
+      cleaned = `${cleaned}.ipa`;
     }
   }
   return cleaned;
@@ -202,70 +253,43 @@ export async function downloadAppPackageBinary(opts: {
   chunkCount?: number;
 }): Promise<{ ok: boolean; fileName: string; byteLength: number }> {
   const { platform, embeddedDataUrl, downloadUrl, fileSize, chunkCount } = opts;
-  const cleanFileName = sanitizeAppFileName(opts.fileName, platform);
+  const cleanFileName =
+    sanitizeAppFileName(opts.fileName, platform) ||
+    (platform === "android" ? "app-release.apk" : "app-release.ipa");
   const mimeType =
     platform === "android"
       ? "application/vnd.android.package-archive"
-      : "application/x-apple-aspen-config";
-  const staticPath =
-    platform === "android"
-      ? "/downloads/Smart-Noakhali-Android.apk"
-      : "/downloads/Smart-Noakhali-iOS.mobileconfig";
+      : "application/octet-stream";
   const apiPath = `/api/apps/download/${platform}`;
 
-  // 1. Check local IndexedDB binary cache first if size matches
-  const cachedBuf = await loadBinaryFromIdb(platform, fileSize);
-  if (cachedBuf && cachedBuf.byteLength > 1000) {
-    triggerBlobDownload(cachedBuf, mimeType, cleanFileName);
-    return { ok: true, fileName: cleanFileName, byteLength: cachedBuf.byteLength };
-  }
-
-  // 2. If embedded data URL is present and valid binary (> 1KB), decode directly
-  if (embeddedDataUrl && embeddedDataUrl.startsWith("data:")) {
-    const buf = await decodeBase64DataUrlToBuffer(embeddedDataUrl);
-    if (buf && buf.byteLength > 1000) {
-      await saveBinaryToIdb(platform, cleanFileName, buf.byteLength, buf);
-      triggerBlobDownload(buf, mimeType, cleanFileName);
-      return { ok: true, fileName: cleanFileName, byteLength: buf.byteLength };
-    }
-  }
-
-  // 3. If multi-megabyte binary is stored in Firebase Firestore chunks, reassemble & download
-  if (chunkCount && chunkCount > 0) {
-    const chunkedBuf = await loadChunkedBinaryFromFirestore(platform, chunkCount);
-    if (chunkedBuf && chunkedBuf.byteLength > 1000) {
-      await saveBinaryToIdb(platform, cleanFileName, chunkedBuf.byteLength, chunkedBuf);
-      triggerBlobDownload(chunkedBuf, mimeType, cleanFileName);
-      return { ok: true, fileName: cleanFileName, byteLength: chunkedBuf.byteLength };
-    }
-  }
-
-  // 4. Try candidate URLs (API download first if custom uploaded, then static /downloads/*)
+  // 1. Try direct server binary endpoint first to ensure exact server-stored file & exact byte size
   const candidates = Array.from(
     new Set(
       [
-        downloadUrl && !downloadUrl.startsWith("/api/apps/download") ? downloadUrl : "",
         apiPath,
-        staticPath,
-        downloadUrl || "",
+        downloadUrl &&
+        !downloadUrl.startsWith("/downloads/Smart-Noakhali-") &&
+        !downloadUrl.startsWith("data:")
+          ? downloadUrl
+          : "",
       ].filter(Boolean)
     )
   );
 
   for (const url of candidates) {
     try {
-      const resp = await fetch(url, { cache: "no-cache" });
+      const resp = await fetch(`${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}`, {
+        cache: "no-store",
+      });
       if (!resp.ok) continue;
       const contentType = (resp.headers.get("content-type") || "").toLowerCase();
-      // Reject JSON or HTML fallback responses so Chrome never saves .apk.json or 0.01KB files!
       if (contentType.includes("application/json") || contentType.includes("text/html")) {
         continue;
       }
       const buf = await resp.arrayBuffer();
-      if (buf.byteLength < 1000) {
+      if (buf.byteLength <= 0 || buf.byteLength === 52640 || buf.byteLength === 42444) {
         continue;
       }
-      // Also verify first bytes aren't JSON '{"ok":' or HTML '<!doctype'
       const prefix = new TextDecoder("utf-8", { fatal: false })
         .decode(buf.slice(0, 32))
         .trim()
@@ -273,16 +297,53 @@ export async function downloadAppPackageBinary(opts: {
       if (prefix.startsWith("{") || prefix.startsWith("<!doctype") || prefix.startsWith("<html")) {
         continue;
       }
+      // If expected fileSize is known, prefer exact match
+      if (fileSize && fileSize > 0 && buf.byteLength !== fileSize) {
+        // Still allow if server has a newer uploaded binary with X-App-Exact-Size matching buf.byteLength
+        const headerExact = Number(resp.headers.get("x-app-exact-size") || 0);
+        if (headerExact > 0 && buf.byteLength !== headerExact) {
+          continue;
+        }
+      }
 
       await saveBinaryToIdb(platform, cleanFileName, buf.byteLength, buf);
       triggerBlobDownload(buf, mimeType, cleanFileName);
       return { ok: true, fileName: cleanFileName, byteLength: buf.byteLength };
     } catch {
-      // try next candidate
+      // try next fallback
     }
   }
 
-  throw new Error("অ্যাপ ফাইলটি ডাউনলোড করা যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।");
+  // 2. Check local IndexedDB binary cache if exact byte size matches
+  if (fileSize && fileSize > 0) {
+    const cachedBuf = await loadBinaryFromIdb(platform, fileSize);
+    if (cachedBuf && cachedBuf.byteLength === fileSize) {
+      triggerBlobDownload(cachedBuf, mimeType, cleanFileName);
+      return { ok: true, fileName: cleanFileName, byteLength: cachedBuf.byteLength };
+    }
+  }
+
+  // 3. If embedded data URL is present and valid binary, decode directly
+  if (embeddedDataUrl && embeddedDataUrl.startsWith("data:")) {
+    const buf = await decodeBase64DataUrlToBuffer(embeddedDataUrl);
+    if (buf && buf.byteLength > 0 && (!fileSize || buf.byteLength === fileSize)) {
+      await saveBinaryToIdb(platform, cleanFileName, buf.byteLength, buf);
+      triggerBlobDownload(buf, mimeType, cleanFileName);
+      return { ok: true, fileName: cleanFileName, byteLength: buf.byteLength };
+    }
+  }
+
+  // 4. If multi-megabyte binary is stored in chunks, reassemble & verify byte size
+  if (chunkCount && chunkCount > 0) {
+    const chunkedBuf = await loadChunkedBinaryFromFirestore(platform, chunkCount);
+    if (chunkedBuf && chunkedBuf.byteLength > 0) {
+      await saveBinaryToIdb(platform, cleanFileName, chunkedBuf.byteLength, chunkedBuf);
+      triggerBlobDownload(chunkedBuf, mimeType, cleanFileName);
+      return { ok: true, fileName: cleanFileName, byteLength: chunkedBuf.byteLength };
+    }
+  }
+
+  throw new Error("এখনো কোনো অ্যাপ ফাইল আপলোড করা হয়নি। সুপার এডমিন প্যানেল থেকে অ্যাপ ফাইল আপলোড করুন।");
 }
 
 function triggerBlobDownload(buf: ArrayBuffer, mimeType: string, fileName: string) {

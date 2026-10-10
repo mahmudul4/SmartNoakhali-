@@ -62,6 +62,8 @@ export interface VaultUserMeta {
   photo_url?: string;
   designation?: string;
   roles?: string[];
+  suspended?: boolean;
+  must_change_password?: boolean;
   verified_via?: "email" | "phone" | "google" | string;
   created_at?: string;
   updated_at: string;
@@ -137,6 +139,37 @@ export async function syncVaultFromCloud(): Promise<Record<string, VaultUserMeta
   let merged: Record<string, VaultUserMeta> = { ...local };
   const deletedSet = new Set<string>(readLocalDeletedUsers());
 
+  const upsertMeta = (u: Partial<VaultUserMeta> & { uid?: string; email?: string }) => {
+    const cleanEmail = String(u.email || "").trim().toLowerCase();
+    const cleanUid = String(u.uid || cleanEmail || "").trim();
+    if (!cleanUid && !cleanEmail) return;
+    const effectiveEmail =
+      cleanEmail ||
+      (u.phone ? `${String(u.phone).replace(/\D/g, "")}@phone.smartnoakhali.app` : `${cleanUid}@user.smartnoakhali.app`);
+    const existing = merged[cleanUid] || merged[effectiveEmail];
+    const meta: VaultUserMeta = {
+      uid: cleanUid || existing?.uid || effectiveEmail,
+      email: effectiveEmail,
+      password: u.password || existing?.password,
+      full_name: u.full_name || existing?.full_name,
+      username: u.username || existing?.username,
+      phone: u.phone || existing?.phone,
+      photo_url: u.photo_url || existing?.photo_url,
+      designation: u.designation || existing?.designation,
+      roles: Array.isArray(u.roles) && u.roles.length > 0 ? u.roles : existing?.roles || ["user"],
+      suspended: u.suspended !== undefined ? Boolean(u.suspended) : existing?.suspended ?? false,
+      must_change_password:
+        u.must_change_password !== undefined
+          ? Boolean(u.must_change_password)
+          : existing?.must_change_password ?? false,
+      verified_via: u.verified_via || existing?.verified_via || "email",
+      created_at: u.created_at || existing?.created_at || u.updated_at || new Date().toISOString(),
+      updated_at: u.updated_at || existing?.updated_at || new Date().toISOString(),
+    };
+    merged[meta.uid] = { ...merged[meta.uid], ...meta };
+    merged[meta.email] = { ...merged[meta.email], ...meta };
+  };
+
   // 1. Sync from Server Verified Users Store (/api/auth/users)
   try {
     const resp = await fetch("/api/auth/users");
@@ -150,29 +183,73 @@ export async function syncVaultFromCloud(): Promise<Record<string, VaultUserMeta
       }
       if (Array.isArray(data.users)) {
         for (const u of data.users) {
-          if (u && u.email) {
-            const meta: VaultUserMeta = {
-              uid: u.uid || u.email,
-              email: String(u.email).toLowerCase(),
-              password: u.password,
-              full_name: u.full_name,
-              username: u.username,
-              phone: u.phone,
-              photo_url: u.photo_url,
-              designation: u.designation,
-              roles: u.roles,
-              verified_via: u.verified_via,
-              created_at: u.created_at || u.updated_at || new Date().toISOString(),
-              updated_at: u.updated_at || new Date().toISOString(),
-            };
-            merged[meta.uid] = { ...merged[meta.uid], ...meta };
-            merged[meta.email] = { ...merged[meta.email], ...meta };
+          if (u && (u.email || u.uid)) {
+            upsertMeta(u);
           }
         }
       }
     }
   } catch {
     // ignore network error
+  }
+
+  // 1.5 Sync from Hosting Content Store (/api/content) & Chat Threads (/api/chat/threads)
+  try {
+    const contentResp = await fetch("/api/content");
+    if (contentResp.ok) {
+      const contentData = await contentResp.json();
+      for (const mirrorKey of [USER_REGISTRY_MIRROR_ID, VAULT_SETTING_ID]) {
+        const raw = contentData?.[mirrorKey];
+        if (typeof raw === "string" && raw.trim()) {
+          try {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed?.deletedIds)) {
+              for (const dId of parsed.deletedIds) {
+                if (dId) deletedSet.add(String(dId).toLowerCase());
+              }
+            }
+            const usersObj =
+              parsed?.users && typeof parsed.users === "object" ? parsed.users : parsed;
+            if (usersObj && typeof usersObj === "object") {
+              for (const v of Object.values(usersObj) as VaultUserMeta[]) {
+                if (v && typeof v === "object" && (v.email || v.uid)) {
+                  upsertMeta(v);
+                }
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      // Also discover users who submitted listings/donors/donations in cloud_mirror
+      const collections = contentData?.cloud_mirror?.collections;
+      if (collections && typeof collections === "object") {
+        for (const d of Object.values(collections.blood_donors || {}) as Array<Record<string, any>>) {
+          if (d && (d.author_id || d.phone)) {
+            const ph = String(d.phone || "").trim();
+            const uid = String(d.author_id || `donor_${ph || d.id}`).trim();
+            if (!merged[uid]) {
+              upsertMeta({
+                uid,
+                email: ph ? `${ph.replace(/\D/g, "")}@phone.smartnoakhali.app` : `${uid}@user.smartnoakhali.app`,
+                full_name: d.full_name || "রক্তদাতা",
+                phone: ph,
+                designation: `রক্তদাতা (${d.blood_group || ""})`,
+                photo_url: d.photo_url || undefined,
+                roles: ["user"],
+                verified_via: "phone",
+                created_at: d.created_at,
+                updated_at: d.updated_at || d.created_at || new Date().toISOString(),
+              });
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore
   }
 
   // 2. Sync from Firestore (/settings/user_registry_mirror — readable across all sessions)
@@ -195,10 +272,9 @@ export async function syncVaultFromCloud(): Promise<Record<string, VaultUserMeta
           parsed.users && typeof parsed.users === "object"
             ? parsed.users
             : (parsed as unknown as Record<string, VaultUserMeta>);
-        for (const [k, v] of Object.entries(mirrorUsers)) {
-          if (v && typeof v === "object" && v.email) {
-            merged[k] = { ...merged[k], ...v };
-            merged[v.email.toLowerCase()] = { ...merged[v.email.toLowerCase()], ...v };
+        for (const v of Object.values(mirrorUsers)) {
+          if (v && typeof v === "object" && (v.email || v.uid)) {
+            upsertMeta(v);
           }
         }
       }
@@ -214,7 +290,11 @@ export async function syncVaultFromCloud(): Promise<Record<string, VaultUserMeta
       const raw = snap.data().logo_url;
       if (typeof raw === "string" && raw.trim()) {
         const cloudVault = JSON.parse(raw) as Record<string, VaultUserMeta>;
-        merged = { ...cloudVault, ...merged };
+        for (const v of Object.values(cloudVault)) {
+          if (v && typeof v === "object" && (v.email || v.uid)) {
+            upsertMeta(v);
+          }
+        }
       }
     }
   } catch {
@@ -248,6 +328,8 @@ export async function recordUserCredential(entry: {
   photo_url?: string;
   designation?: string;
   roles?: string[];
+  suspended?: boolean;
+  must_change_password?: boolean;
   verified_via?: "email" | "phone" | "google";
 }) {
   const cleanEmail = entry.email.trim().toLowerCase();
@@ -281,6 +363,11 @@ export async function recordUserCredential(entry: {
     photo_url: entry.photo_url !== undefined ? entry.photo_url : existing.photo_url,
     designation: entry.designation !== undefined ? entry.designation : existing.designation,
     roles: entry.roles !== undefined ? entry.roles : existing.roles,
+    suspended: entry.suspended !== undefined ? entry.suspended : existing.suspended,
+    must_change_password:
+      entry.must_change_password !== undefined
+        ? entry.must_change_password
+        : existing.must_change_password,
     verified_via: entry.verified_via !== undefined ? entry.verified_via : existing.verified_via,
     created_at: existing.created_at || new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -290,7 +377,7 @@ export async function recordUserCredential(entry: {
   vault[effectiveEmail] = updated;
   writeLocalVault(vault);
 
-  // Sync with Express server store so phone/email/staff logins always work
+  // Sync with Express server store so phone/email/staff logins and Super Admin user list always work
   try {
     await fetch("/api/auth/sync-user", {
       method: "POST",
@@ -305,6 +392,7 @@ export async function recordUserCredential(entry: {
         roles: updated.roles || ["user"],
         photo_url: updated.photo_url,
         designation: updated.designation,
+        suspended: Boolean(updated.suspended),
         verified_via: updated.verified_via || "email",
         is_verified: true,
       }),
@@ -313,39 +401,29 @@ export async function recordUserCredential(entry: {
     // Non-fatal
   }
 
-  // Persist to Firestore /settings/user_registry_mirror whenever signed in (Google, Email, Phone, or Staff)
+  // Also sync user_registry_mirror to /api/content/sync so all devices and sessions see updated user info
+  const regPayload = sanitizeString(
+    JSON.stringify({ users: vault, deletedIds: readLocalDeletedUsers() }),
+    295000,
+    "{}"
+  );
+  try {
+    await fetch("/api/content/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        [USER_REGISTRY_MIRROR_ID]: regPayload,
+      }),
+    });
+  } catch {
+    // Non-fatal
+  }
+
+  // Persist to Firestore /settings/user_registry_mirror whenever signed in
   if (auth.currentUser) {
     try {
       const regRef = doc(db, "settings", USER_REGISTRY_MIRROR_ID);
       const regSnap = await getDoc(regRef).catch(() => null);
-      let existingUsers: Record<string, VaultUserMeta> = {};
-      let existingDeleted: string[] = readLocalDeletedUsers();
-      if (regSnap && regSnap.exists()) {
-        const raw = regSnap.data().logo_url;
-        if (typeof raw === "string" && raw.trim()) {
-          const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === "object") {
-            existingUsers = parsed.users || parsed;
-            if (Array.isArray(parsed.deletedIds)) {
-              existingDeleted = Array.from(new Set([...existingDeleted, ...parsed.deletedIds]));
-            }
-          }
-        }
-      }
-      const nextUsers: Record<string, VaultUserMeta> = {
-        ...existingUsers,
-        ...vault,
-        [key]: updated,
-        [effectiveEmail]: updated,
-      };
-      const filteredDeleted = existingDeleted.filter(
-        (x) => x !== key.toLowerCase() && x !== effectiveEmail.toLowerCase()
-      );
-      const regPayload = sanitizeString(
-        JSON.stringify({ users: nextUsers, deletedIds: filteredDeleted }),
-        295000,
-        "{}"
-      );
       if (!regSnap || !regSnap.exists()) {
         await setDoc(regRef, {
           key: USER_REGISTRY_MIRROR_ID,
@@ -431,16 +509,25 @@ function isVerifiedFirebaseBootstrappedStaff(): boolean {
   return Boolean(u && u.emailVerified && isBootstrappedAdminEmail(u.email));
 }
 
-async function ensureSuperAdminSignedIn() {
-  if (isVerifiedFirebaseSuperAdmin() && auth.currentUser) {
-    return auth.currentUser;
-  }
+function hasActiveSuperAdminSession(): boolean {
+  if (isVerifiedFirebaseSuperAdmin()) return true;
+  if (auth.currentUser && isSuperAdminEmail(auth.currentUser.email)) return true;
   try {
-    if (sessionStorage.getItem("sn_super_admin_session_v1") === "true") {
-      return null;
+    if (sessionStorage.getItem("sn_super_admin_session_v1") === "true") return true;
+    const raw = sessionStorage.getItem("sn_verified_user_session_v1");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (isSuperAdminEmail(parsed?.user?.email)) return true;
     }
   } catch {
     // ignore
+  }
+  return false;
+}
+
+async function ensureSuperAdminSignedIn() {
+  if (hasActiveSuperAdminSession()) {
+    return auth.currentUser;
   }
   googleProvider.setCustomParameters({ login_hint: SUPER_ADMIN_EMAIL });
   const cred = await signInWithPopup(auth, googleProvider);
@@ -521,7 +608,7 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
       "এডমিন (সীমিত অ্যাকসেস)",
     created_at: defaultRegularAdminVault?.updated_at || new Date().toISOString(),
     last_sign_in_at: defaultRegularAdminVault?.updated_at || new Date().toISOString(),
-    banned_until: null,
+    banned_until: defaultRegularAdminVault?.suspended ? "suspended" : null,
     roles: defaultRegularAdminVault?.roles || ["admin", "user"],
     profile: {
       full_name:
@@ -533,48 +620,74 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
         defaultRegularAdminProfile?.phone ||
         defaultRegularAdminVault?.phone ||
         "",
-      suspended: false,
-      must_change_password: false,
+      suspended: Boolean(defaultRegularAdminVault?.suspended),
+      must_change_password: Boolean(defaultRegularAdminVault?.must_change_password),
       photo_url:
         defaultRegularAdminProfile?.photo_url ||
         defaultRegularAdminVault?.photo_url ||
         null,
-      designation: "শুধু এডমিন",
+      designation: defaultRegularAdminVault?.designation || "শুধু এডমিন",
     },
   };
 
-  const buildExtraVaultUsers = (existingEmails: Set<string>) =>
+  const buildExtraVaultUsers = (existingEmails: Set<string>, existingIds: Set<string>) =>
     Object.values(vault)
       .filter(
         (v) =>
-          v.email &&
-          !existingEmails.has(v.email.toLowerCase()) &&
-          v.email.toLowerCase() !== SUPER_ADMIN_EMAIL.toLowerCase() &&
-          v.email.toLowerCase() !== REGULAR_ADMIN_EMAIL.toLowerCase()
+          (v.email || v.uid) &&
+          !existingEmails.has((v.email || "").toLowerCase()) &&
+          !existingIds.has((v.uid || "").toLowerCase()) &&
+          (v.email || "").toLowerCase() !== SUPER_ADMIN_EMAIL.toLowerCase() &&
+          (v.email || "").toLowerCase() !== REGULAR_ADMIN_EMAIL.toLowerCase()
       )
       .reduce<AdminUserRecord[]>((acc, v) => {
-        if (acc.some((x) => x.email.toLowerCase() === v.email.toLowerCase())) return acc;
+        const emailLower = (v.email || "").toLowerCase();
+        const uidLower = (v.uid || v.email || "").toLowerCase();
+        if (
+          acc.some(
+            (x) =>
+              (emailLower && x.email.toLowerCase() === emailLower) ||
+              (uidLower && x.id.toLowerCase() === uidLower)
+          )
+        ) {
+          return acc;
+        }
+        const roles = Array.isArray(v.roles) && v.roles.length > 0 ? v.roles : ["user"];
+        const resolvedRoleDesignation =
+          v.designation ||
+          staffProfiles[emailLower]?.designation ||
+          (roles.includes("admin")
+            ? "শুধু এডমিন"
+            : roles.includes("editor")
+              ? "এডিটর"
+              : roles.includes("moderator")
+                ? "মডারেটর"
+                : "সাধারণ ইউজার");
+        const isSuspended = Boolean(v.suspended);
         acc.push({
           id: v.uid || v.email,
           email: v.email,
           password:
             v.password ||
             (v.verified_via === "google" ? "Google OAuth (সরাসরি গুগল লগইন)" : "ইউজার সেটকৃত পাসওয়ার্ড"),
-          photo_url: v.photo_url || staffProfiles[v.email.toLowerCase()]?.photo_url || null,
-          designation: v.designation || "সাধারণ ইউজার",
+          photo_url: v.photo_url || staffProfiles[emailLower]?.photo_url || null,
+          designation: resolvedRoleDesignation,
           verified_via: v.verified_via || "email",
           created_at: v.created_at || v.updated_at,
           last_sign_in_at: v.updated_at,
-          banned_until: null,
-          roles: v.roles || ["user"],
+          banned_until: isSuspended ? "suspended" : null,
+          roles,
           profile: {
-            full_name: v.full_name || v.email.split("@")[0],
+            full_name:
+              v.full_name ||
+              staffProfiles[emailLower]?.full_name ||
+              v.email.split("@")[0],
             username: v.username || v.email.split("@")[0],
-            phone: v.phone || null,
-            suspended: false,
-            must_change_password: false,
-            photo_url: v.photo_url || null,
-            designation: v.designation || "সাধারণ ইউজার",
+            phone: v.phone || staffProfiles[emailLower]?.phone || null,
+            suspended: isSuspended,
+            must_change_password: Boolean(v.must_change_password),
+            photo_url: v.photo_url || staffProfiles[emailLower]?.photo_url || null,
+            designation: resolvedRoleDesignation,
           },
         });
         return acc;
@@ -595,6 +708,24 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
     try {
       const snap = await getDocs(collection(db, "users"));
       snapDocs = snap.docs;
+      // Backfill any Firestore /users docs into vault so they are always available even if Super Admin logs in via Email/Password later
+      for (const d of snap.docs) {
+        const uData = d.data();
+        if (uData && uData.email) {
+          const emLow = String(uData.email).toLowerCase();
+          if (!vault[d.id] && !vault[emLow]) {
+            void recordUserCredential({
+              uid: d.id,
+              email: String(uData.email),
+              full_name: uData.full_name || undefined,
+              username: uData.username || undefined,
+              phone: uData.phone || undefined,
+              roles: Array.isArray(uData.roles) ? uData.roles : ["user"],
+              suspended: Boolean(uData.suspended),
+            });
+          }
+        }
+      }
     } catch {
       // Fall back to vault + mirror if Firestore /users read is restricted
     }
@@ -609,16 +740,21 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
     const username = data.username ?? null;
     const isSuper = isProtectedMainSuperAdmin({ id: d.id, email, username });
     const isRegularBootstrapped = emailLower === REGULAR_ADMIN_EMAIL.toLowerCase();
-    const rawRoles = Array.isArray(data.roles) ? (data.roles as string[]) : ["user"];
+    const vMeta = vault[d.id] || vault[emailLower];
+    const sProf = staffProfiles[d.id] || staffProfiles[emailLower];
+
+    const rawRoles =
+      Array.isArray(vMeta?.roles) && vMeta.roles.length > 0
+        ? vMeta.roles
+        : Array.isArray(data.roles)
+          ? (data.roles as string[])
+          : ["user"];
     const roles = isSuper
       ? Array.from(new Set([...rawRoles, "admin", "moderator", "editor", "user"]))
       : isRegularBootstrapped && !rawRoles.includes("admin")
       ? Array.from(new Set([...rawRoles, "admin"]))
       : rawRoles;
-    const suspended = isSuper ? false : Boolean(data.suspended);
-
-    const vMeta = vault[d.id] || vault[emailLower];
-    const sProf = staffProfiles[d.id] || staffProfiles[emailLower];
+    const suspended = isSuper ? false : Boolean(vMeta?.suspended ?? data.suspended);
 
     const resolvedPassword = isSuper
       ? SUPER_ADMIN_PASSWORD
@@ -657,13 +793,13 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
       profile: {
         full_name:
           sProf?.full_name ||
-          data.full_name ||
           vMeta?.full_name ||
+          data.full_name ||
           (isSuper ? "Mahmudul Hasan (Super Admin)" : null),
-        username: isSuper ? "mahmudul" : username,
-        phone: sProf?.phone || data.phone || vMeta?.phone || null,
+        username: isSuper ? "mahmudul" : vMeta?.username || username,
+        phone: sProf?.phone || vMeta?.phone || data.phone || null,
         suspended,
-        must_change_password: Boolean(data.must_change_password),
+        must_change_password: Boolean(vMeta?.must_change_password ?? data.must_change_password),
         photo_url: resolvedPhoto,
         designation: resolvedDesignation,
       },
@@ -687,7 +823,8 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
 
   const activeRows = rows.filter((r) => !isUserDeleted(r.id, r.email));
   const seenEmails = new Set(activeRows.map((r) => r.email.toLowerCase()));
-  const extraVaultRows = buildExtraVaultUsers(seenEmails).filter(
+  const seenIds = new Set(activeRows.map((r) => r.id.toLowerCase()));
+  const extraVaultRows = buildExtraVaultUsers(seenEmails, seenIds).filter(
     (u) => !isUserDeleted(u.id, u.email)
   );
   return [...activeRows, ...extraVaultRows];
@@ -746,6 +883,7 @@ export async function createUser(opts?: {
     photo_url: payload.photo_url || "",
     designation: payload.designation || "",
     roles,
+    suspended: false,
   });
 
   void recordStaffActivity({
@@ -774,7 +912,13 @@ export async function setUserRole(opts?: {
   await assertNotProtectedSuperAdmin(d.user_id);
 
   const vault = readLocalVault();
-  const vMeta = vault[d.user_id];
+  const vMeta =
+    vault[d.user_id] ||
+    Object.values(vault).find(
+      (x) =>
+        x.uid === d.user_id ||
+        x.email?.toLowerCase() === d.user_id.toLowerCase()
+    );
   const existingVaultRoles = Array.isArray(vMeta?.roles) ? vMeta.roles : ["user"];
   const nextSet = new Set(existingVaultRoles);
   if (d.enable) nextSet.add(d.role);
@@ -801,7 +945,7 @@ export async function setUserRole(opts?: {
 
       await recordUserCredential({
         uid: d.user_id,
-        email: String(snap.data().email || vMeta?.email || ""),
+        email: String(snap.data().email || vMeta?.email || d.user_id),
         roles: finalDocRoles,
       });
 
@@ -907,15 +1051,26 @@ export async function deleteUser(opts?: {
     // Non-fatal
   }
 
+  // 3.5 Sync updated user_registry_mirror to /api/content/sync
+  const regPayload = sanitizeString(
+    JSON.stringify({ users: vault, deletedIds: readLocalDeletedUsers() }),
+    295000,
+    "{}"
+  );
+  try {
+    await fetch("/api/content/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [USER_REGISTRY_MIRROR_ID]: regPayload }),
+    });
+  } catch {
+    // ignore
+  }
+
   // 4. Sync updated user_registry_mirror & vault, and delete Firestore documents
   if (auth.currentUser) {
     try {
       const regRef = doc(db, "settings", USER_REGISTRY_MIRROR_ID);
-      const regPayload = sanitizeString(
-        JSON.stringify({ users: vault, deletedIds: readLocalDeletedUsers() }),
-        295000,
-        "{}"
-      );
       await setDoc(
         regRef,
         {
@@ -991,13 +1146,43 @@ export async function suspendUser(opts?: {
   const d = opts?.data;
   if (!d) throw new Error("Missing data");
   await assertNotProtectedSuperAdmin(d.user_id);
+
+  const vault = readLocalVault();
+  const vMeta =
+    vault[d.user_id] ||
+    Object.values(vault).find(
+      (x) =>
+        x.uid === d.user_id ||
+        x.email?.toLowerCase() === d.user_id.toLowerCase()
+    );
+
   if (isVerifiedFirebaseSuperAdmin()) {
     const path = `users/${d.user_id}`;
-    await updateDoc(doc(db, "users", d.user_id), {
-      suspended: Boolean(d.suspend),
-      updatedAt: serverTimestamp(),
-    }).catch((e) => handleFirestoreError(e, OperationType.UPDATE, path));
+    const snap = await getDoc(doc(db, "users", d.user_id)).catch(() => null);
+    if (snap && snap.exists()) {
+      await updateDoc(doc(db, "users", d.user_id), {
+        suspended: Boolean(d.suspend),
+        updatedAt: serverTimestamp(),
+      }).catch((e) => handleFirestoreError(e, OperationType.UPDATE, path));
+    }
   }
+
+  await recordUserCredential({
+    uid: d.user_id,
+    email: vMeta?.email || (d.user_id === "admin_mr_bear" ? REGULAR_ADMIN_EMAIL : d.user_id),
+    suspended: Boolean(d.suspend),
+  });
+
+  void recordStaffActivity({
+    action_type: "user",
+    action_label: d.suspend ? "ইউজার একাউন্ট স্থগিত (Suspend) করেছে" : "ইউজার একাউন্ট সক্রিয় করেছে",
+    module: "users",
+    module_label: "ইউজার ম্যানেজমেন্ট",
+    target_id: d.user_id,
+    target_title: vMeta?.email || d.user_id,
+    target_detail: `স্ট্যাটাস: ${d.suspend ? "স্থগিত" : "সক্রিয়"}`,
+  });
+
   return { ok: true };
 }
 
@@ -1027,6 +1212,7 @@ export async function resetUserPassword(opts?: {
     uid: d.user_id,
     email: d.email || d.user_id,
     password: assignedPassword,
+    must_change_password: Boolean(d.force_change ?? false),
   });
 
   return { password: assignedPassword };

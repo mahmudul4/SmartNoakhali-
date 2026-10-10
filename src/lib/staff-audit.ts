@@ -32,6 +32,7 @@ export type AuditModuleType =
   | "donation"
   | "categories"
   | "users"
+  | "access"
   | "profile"
   | "settings";
 
@@ -57,7 +58,9 @@ export interface StaffActivityLogEntry {
     | "donation_events"
     | "emergency_blood_requests"
     | "emergency_banners"
-    | "donations";
+    | "donations"
+    | "category_requests"
+    | "payment_requests";
   restored?: boolean;
   created_at: string;
 }

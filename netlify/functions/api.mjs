@@ -365,6 +365,72 @@ export async function handler(event) {
     const store = readJsonStore("verified_users_store.json", {});
     const deletedIds = readJsonStore("deleted_users.json", []);
     const deletedSet = new Set(deletedIds.map((x) => String(x).toLowerCase()));
+
+    try {
+      const content = readJsonStore("content_store.json", {});
+      for (const mirrorKey of ["user_registry_mirror", "super_admin_user_vault"]) {
+        const rawMirror = content[mirrorKey];
+        if (typeof rawMirror === "string" && rawMirror.trim()) {
+          const parsed = JSON.parse(rawMirror);
+          const mirrorUsers = parsed?.users && typeof parsed.users === "object" ? parsed.users : parsed;
+          if (mirrorUsers && typeof mirrorUsers === "object") {
+            for (const u of Object.values(mirrorUsers)) {
+              if (!u || typeof u !== "object") continue;
+              const uid = String(u.uid || u.email || "").trim();
+              const email = String(u.email || "").trim().toLowerCase();
+              if (!uid && !email) continue;
+              const key = uid || email;
+              if (!store[key]) {
+                store[key] = {
+                  uid: key,
+                  email: email || `${key}@user.smartnoakhali.app`,
+                  phone: normalizePhone(String(u.phone || "")),
+                  password: u.password,
+                  full_name: u.full_name || email.split("@")[0] || "ইউজার",
+                  username: u.username || email.split("@")[0] || "user",
+                  verified_via: u.verified_via || "email",
+                  is_verified: true,
+                  roles: Array.isArray(u.roles) && u.roles.length > 0 ? u.roles : ["user"],
+                  photo_url: u.photo_url,
+                  designation: u.designation,
+                  suspended: Boolean(u.suspended),
+                  created_at: u.created_at || u.updated_at || new Date().toISOString(),
+                  updated_at: u.updated_at || new Date().toISOString(),
+                };
+              }
+            }
+          }
+        }
+      }
+
+      const chatStore = readJsonStore("live_chat_store.json", { threads: {} });
+      for (const t of Object.values(chatStore.threads || {})) {
+        const uid = String(t.user_id || t.id || "").trim();
+        const email = String(t.user_email || "").trim().toLowerCase();
+        if (!uid) continue;
+        const alreadyExists =
+          store[uid] ||
+          (email && Object.values(store).some((x) => String(x.email || "").toLowerCase() === email));
+        if (!alreadyExists) {
+          store[uid] = {
+            uid,
+            email: email || `${uid}@chat.smartnoakhali.app`,
+            phone: normalizePhone(String(t.user_phone || "")),
+            full_name: t.user_name || "গ্রাহক",
+            username: email ? email.split("@")[0] : uid.slice(0, 12),
+            verified_via: "email",
+            is_verified: true,
+            roles: ["user"],
+            suspended: false,
+            created_at: t.created_at || new Date().toISOString(),
+            updated_at: t.last_message_at || new Date().toISOString(),
+          };
+        }
+      }
+    } catch {
+      // ignore
+    }
+
     const activeUsers = Object.values(store).filter(
       (u) =>
         !deletedSet.has(String(u.uid || "").toLowerCase()) &&
@@ -699,9 +765,148 @@ export async function handler(event) {
     return jsonResponse(200, { ok: true });
   }
 
-  // 10. Mobile App Package Status, Upload & Direct Binary Download (/api/apps/*)
+  // 10. Mobile App Package Status, Upload, Delete & Direct Binary Download (/api/apps/*)
   if (method === "GET" && apiPath === "/api/apps/status") {
     const manifest = readJsonStore("app_packages_manifest.json", {});
+    for (const plat of ["android", "ios"]) {
+      const m = manifest[plat];
+      if (m?.savedFile) {
+        const p = path.join(TMP_DIR, m.savedFile);
+        if (fs.existsSync(p)) {
+          try {
+            const st = fs.statSync(p);
+            if (st.size > 0) m.fileSize = st.size;
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }
+    return jsonResponse(200, { ok: true, apps: manifest });
+  }
+
+  if (method === "POST" && apiPath === "/api/apps/upload-chunk") {
+    const platform = body.platform === "ios" ? "ios" : body.platform === "android" ? "android" : "";
+    const uploadId = String(body.uploadId || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+    const chunkBase64 = body.chunkBase64;
+    if (!platform || !uploadId || typeof chunkBase64 !== "string") {
+      return jsonResponse(400, { error: "অবৈধ আপলোড চাঙ্ক ডাটা" });
+    }
+    ensureTmpDir();
+    const tempPath = path.join(TMP_DIR, `.upload_${platform}_${uploadId}.part`);
+    if (Number(body.chunkIndex) === 0 && fs.existsSync(tempPath)) {
+      try {
+        fs.unlinkSync(tempPath);
+      } catch {
+        // ignore
+      }
+    }
+    const cleanB64 = chunkBase64.includes(",") ? chunkBase64.split(",")[1] : chunkBase64;
+    const chunkBuf = Buffer.from(cleanB64, "base64");
+    fs.appendFileSync(tempPath, chunkBuf);
+    const st = fs.statSync(tempPath);
+    return jsonResponse(200, { ok: true, chunkIndex: Number(body.chunkIndex) || 0, currentBytes: st.size });
+  }
+
+  if (method === "POST" && apiPath === "/api/apps/finalize-upload") {
+    const platform = body.platform === "ios" ? "ios" : body.platform === "android" ? "android" : "";
+    const uploadId = String(body.uploadId || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+    if (!platform || !uploadId) {
+      return jsonResponse(400, { error: "অবৈধ প্ল্যাটফর্ম বা আপলোড আইডি" });
+    }
+    ensureTmpDir();
+    const tempPath = path.join(TMP_DIR, `.upload_${platform}_${uploadId}.part`);
+    if (!fs.existsSync(tempPath)) {
+      return jsonResponse(404, { error: "আপলোডকৃত টেম্প ফাইল পাওয়া যায়নি" });
+    }
+    const st = fs.statSync(tempPath);
+    if (body.expectedSize && Number(body.expectedSize) > 0 && st.size !== Number(body.expectedSize)) {
+      try {
+        fs.unlinkSync(tempPath);
+      } catch {
+        // ignore
+      }
+      return jsonResponse(400, {
+        error: `ফাইল সাইজ মিলেনি (আপলোড: ${body.expectedSize} বাইট, প্রাপ্ত: ${st.size} বাইট)।`,
+      });
+    }
+    const defaultExt = platform === "android" ? ".apk" : ".ipa";
+    const safeOriginal = String(body.fileName || `smart-noakhali-${platform}${defaultExt}`)
+      .replace(/\s+\./g, ".")
+      .replace(/[^a-zA-Z0-9._-]/g, "_");
+    const savedFile = `smart-noakhali-${platform}-${Date.now()}-${safeOriginal}`;
+    const targetPath = path.join(TMP_DIR, savedFile);
+
+    const manifest = readJsonStore("app_packages_manifest.json", {});
+    const prev = manifest[platform];
+    if (prev?.savedFile) {
+      try {
+        const oldPath = path.join(TMP_DIR, prev.savedFile);
+        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+      } catch {
+        // ignore
+      }
+    }
+    fs.renameSync(tempPath, targetPath);
+    const finalStat = fs.statSync(targetPath);
+    const meta = {
+      platform,
+      fileName: safeOriginal,
+      fileSize: finalStat.size,
+      version: String(body.version || "2.0.0").trim(),
+      label: body.label ? String(body.label).trim() : undefined,
+      releaseNotes: body.releaseNotes ? String(body.releaseNotes).trim() : undefined,
+      visible: body.visible ?? true,
+      mimeType:
+        platform === "android"
+          ? "application/vnd.android.package-archive"
+          : body.mimeType || "application/octet-stream",
+      uploadedAt: new Date().toISOString(),
+      savedFile,
+      downloadUrl: `/api/apps/download/${platform}`,
+    };
+    manifest[platform] = meta;
+    writeJsonStore("app_packages_manifest.json", manifest);
+    return jsonResponse(200, { ok: true, meta, downloadUrl: `/api/apps/download/${platform}` });
+  }
+
+  if (method === "POST" && apiPath === "/api/apps/update-meta") {
+    const platform = body.platform === "ios" ? "ios" : body.platform === "android" ? "android" : "";
+    if (!platform) return jsonResponse(400, { error: "অবৈধ প্ল্যাটফর্ম" });
+    const manifest = readJsonStore("app_packages_manifest.json", {});
+    if (manifest[platform]) {
+      manifest[platform] = {
+        ...manifest[platform],
+        label: body.label !== undefined ? String(body.label).trim() : manifest[platform].label,
+        version: body.version !== undefined ? String(body.version).trim() : manifest[platform].version,
+        releaseNotes:
+          body.releaseNotes !== undefined
+            ? String(body.releaseNotes).trim()
+            : manifest[platform].releaseNotes,
+        visible: body.visible !== undefined ? Boolean(body.visible) : manifest[platform].visible,
+      };
+      writeJsonStore("app_packages_manifest.json", manifest);
+    }
+    return jsonResponse(200, { ok: true, meta: manifest[platform] || null });
+  }
+
+  if (method === "POST" && apiPath === "/api/apps/delete") {
+    const platform = body.platform === "ios" ? "ios" : body.platform === "android" ? "android" : "";
+    if (!platform) {
+      return jsonResponse(400, { error: "অবৈধ প্ল্যাটফর্ম" });
+    }
+    const manifest = readJsonStore("app_packages_manifest.json", {});
+    const prev = manifest[platform];
+    if (prev?.savedFile) {
+      try {
+        const p = path.join(TMP_DIR, prev.savedFile);
+        if (fs.existsSync(p)) fs.unlinkSync(p);
+      } catch {
+        // ignore
+      }
+    }
+    delete manifest[platform];
+    writeJsonStore("app_packages_manifest.json", manifest);
     return jsonResponse(200, { ok: true, apps: manifest });
   }
 
@@ -716,8 +921,8 @@ export async function handler(event) {
       ? fileDataBase64.split(",")[1]
       : fileDataBase64;
     const buffer = Buffer.from(base64Clean, "base64");
-    const defaultExt = platform === "android" ? ".apk" : ".mobileconfig";
-    const safeOriginal = String(body.fileName || `Smart-Noakhali-${platform}${defaultExt}`)
+    const defaultExt = platform === "android" ? ".apk" : ".ipa";
+    const safeOriginal = String(body.fileName || `app-${platform}${defaultExt}`)
       .replace(/\s+\./g, ".")
       .replace(/[^a-zA-Z0-9._-]/g, "_");
     const savedFile = `smart-noakhali-${platform}-${Date.now()}-${safeOriginal}`;
@@ -732,10 +937,13 @@ export async function handler(event) {
       fileName: safeOriginal,
       fileSize: buffer.length,
       version: String(body.version || "2.0.0").trim(),
+      label: body.label ? String(body.label).trim() : undefined,
+      releaseNotes: body.releaseNotes ? String(body.releaseNotes).trim() : undefined,
+      visible: body.visible ?? true,
       mimeType:
         platform === "android"
           ? "application/vnd.android.package-archive"
-          : body.mimeType || "application/x-apple-aspen-config",
+          : body.mimeType || "application/octet-stream",
       uploadedAt: new Date().toISOString(),
       savedFile,
       downloadUrl: `/api/apps/download/${platform}`,
@@ -753,25 +961,24 @@ export async function handler(event) {
     const platform = apiPath.endsWith("/ios") ? "ios" : "android";
     const manifest = readJsonStore("app_packages_manifest.json", {});
     const meta = manifest[platform] || {};
-    const defaultFileName =
-      platform === "android" ? "Smart-Noakhali-Android.apk" : "Smart-Noakhali-iOS.mobileconfig";
     const defaultMime =
       platform === "android"
         ? "application/vnd.android.package-archive"
-        : "application/x-apple-aspen-config";
+        : "application/octet-stream";
     const bundledDownloadsDir = path.resolve(process.cwd(), "public", "downloads");
 
     const candidates = [
       meta.savedFile ? path.join(TMP_DIR, meta.savedFile) : "",
       meta.savedFile ? path.join(bundledDownloadsDir, meta.savedFile) : "",
-      path.join(bundledDownloadsDir, defaultFileName),
     ].filter(Boolean);
 
     for (const candidatePath of candidates) {
       try {
         if (fs.existsSync(candidatePath)) {
           const buf = fs.readFileSync(candidatePath);
-          const cleanName = String(meta.fileName || defaultFileName)
+          const cleanName = String(
+            meta.fileName || (platform === "android" ? "app.apk" : "app.ipa")
+          )
             .replace(/\s+\./g, ".")
             .replace(/\.json$/i, "");
           return {
@@ -779,8 +986,11 @@ export async function handler(event) {
             isBase64Encoded: true,
             headers: {
               "Content-Type": meta.mimeType || defaultMime,
+              "Content-Length": String(buf.length),
+              "X-Exact-File-Size": String(buf.length),
+              "X-Exact-File-Name": cleanName,
               "Content-Disposition": `attachment; filename="${cleanName}"`,
-              "Cache-Control": "public, max-age=3600",
+              "Cache-Control": "no-store, no-transform",
             },
             body: buf.toString("base64"),
           };
@@ -790,14 +1000,9 @@ export async function handler(event) {
       }
     }
 
-    return {
-      statusCode: 302,
-      headers: {
-        Location: `/downloads/${defaultFileName}`,
-        "Cache-Control": "no-store",
-      },
-      body: "",
-    };
+    return jsonResponse(404, {
+      error: "এখনও কোনো অ্যাপ ফাইল আপলোড করা হয়নি। সুপার এডমিন ড্যাশবোর্ড থেকে ফাইল আপলোড করুন।",
+    });
   }
 
   return jsonResponse(200, { ok: true });
