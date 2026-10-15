@@ -51,13 +51,18 @@ export async function upsertSettingDoc(
   payloadValue: string,
   options?: { visible?: boolean; allowStaff?: boolean }
 ) {
-  const cleanUrl = sanitizeString(payloadValue, 295000, "");
+  const cleanUrl =
+    settingId === SITE_CONFIG_ID
+      ? (typeof payloadValue === "string" ? payloadValue.trim() : "")
+      : sanitizeString(payloadValue, 295000, "");
   const isVisible = options?.visible !== false;
 
   // 1. Immediately cache in localStorage
   try {
     if (settingId === SITE_CONFIG_ID) {
-      localStorage.setItem(LOCAL_LOGO_KEY, cleanUrl);
+      if (cleanUrl.length < 500000) {
+        localStorage.setItem(LOCAL_LOGO_KEY, cleanUrl);
+      }
     } else if (settingId === DONATION_CONFIG_ID) {
       localStorage.setItem(LOCAL_DONATION_KEY, cleanUrl);
     } else if (settingId === CATEGORIES_CONFIG_ID) {
@@ -176,7 +181,9 @@ export function useLogo() {
   const setLogo = useCallback(async (nextLogo: string | null) => {
     const val = nextLogo ?? "";
     try {
-      localStorage.setItem(LOCAL_LOGO_KEY, val);
+      if (val.length < 500000) {
+        localStorage.setItem(LOCAL_LOGO_KEY, val);
+      }
     } catch {}
     setCustomLogo(nextLogo);
     await upsertSettingDoc(SITE_CONFIG_ID, val);

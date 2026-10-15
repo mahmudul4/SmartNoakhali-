@@ -1830,6 +1830,71 @@ async function startServer() {
     }
   });
 
+  app.post("/api/logo/upload", (req, res) => {
+    try {
+      const { fileDataBase64 } = (req.body || {}) as {
+        fileDataBase64?: string;
+      };
+      if (!fileDataBase64 || typeof fileDataBase64 !== "string") {
+        res.status(400).json({ error: "ফাইল ডাটা পাওয়া যায়নি" });
+        return;
+      }
+      const base64Clean = fileDataBase64.includes(",")
+        ? fileDataBase64.split(",")[1]
+        : fileDataBase64;
+      const buffer = Buffer.from(base64Clean, "base64");
+      if (buffer.length === 0) {
+        res.status(400).json({ error: "ফাইল খালি" });
+        return;
+      }
+
+      // Save pristine original to public/logo.png and src/assets/logo.png
+      const publicLogoPath = path.resolve(__dirname, "public", "logo.png");
+      const srcLogoPath = path.resolve(__dirname, "src", "assets", "logo.png");
+      fs.writeFileSync(publicLogoPath, buffer);
+      if (fs.existsSync(path.dirname(srcLogoPath))) {
+        fs.writeFileSync(srcLogoPath, buffer);
+      }
+
+      try {
+        fs.writeFileSync(path.resolve(__dirname, "public", "pwa-512x512.png"), buffer);
+        fs.writeFileSync(path.resolve(__dirname, "public", "apple-touch-icon.png"), buffer);
+        fs.writeFileSync(path.resolve(__dirname, "public", "pwa-192x192.png"), buffer);
+        fs.writeFileSync(path.resolve(__dirname, "public", "pwa-maskable-512x512.png"), buffer);
+      } catch {
+        // ignore
+      }
+
+      const timestamp = Date.now();
+      const logoUrl = `/logo.png?v=${timestamp}`;
+
+      // Update content store
+      const store = readContentStore();
+      store.site_config = logoUrl;
+      const mirror = store.cloud_mirror || {
+        collections: {},
+        deletedIds: {},
+        updatedAt: new Date().toISOString(),
+      };
+      mirror.collections = mirror.collections || {};
+      mirror.collections.settings = mirror.collections.settings || {};
+      mirror.collections.settings["site_config"] = {
+        id: "site_config",
+        key: "site_config",
+        logo_url: logoUrl,
+        visible: true,
+        updated_at: new Date().toISOString(),
+      };
+      store.cloud_mirror = mirror;
+      store.updatedAt = new Date().toISOString();
+      writeContentStore(store);
+
+      res.json({ ok: true, logoUrl });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "লোগো আপলোড ব্যর্থ" });
+    }
+  });
+
   app.post("/api/apps/delete", (req, res) => {
     const platform = req.body?.platform === "ios" ? "ios" : "android";
     const manifest = readManifest();

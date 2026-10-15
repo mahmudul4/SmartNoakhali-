@@ -298,20 +298,7 @@ function AdminLoginForm() {
   const [showPw, setShowPw] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  async function handleGoogleAdminLogin() {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const appU = await signInWithGoogle(undefined, { requireStaff: true });
-      clearFailedAdminLogins();
-      await logEvent("admin_login_success", `google_${appU.email}`);
-      toast.success("স্বাগতম! গুগল দিয়ে এডমিন প্যানেলে সফলভাবে লগইন হয়েছে");
-    } catch (err: any) {
-      toast.error(err?.message || "গুগল দিয়ে এডমিন লগইন সম্পন্ন করা যায়নি");
-    } finally {
-      setBusy(false);
-    }
-  }
+
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -331,7 +318,7 @@ function AdminLoginForm() {
       cleanInput === "mdmahmudulhashan0";
 
     if (!isSuperInput) {
-      toast.error("শুধুমাত্র সুপার এডমিন এই প্যানেল দিয়ে লগইন করতে পারবেন!");
+      toast.error("শুধুমাত্র মেইন এডমিন এই প্যানেল দিয়ে লগইন করতে পারবেন!");
       return;
     }
 
@@ -344,15 +331,15 @@ function AdminLoginForm() {
           uid: auth.currentUser?.uid || "super_admin_mahmudul",
           email: SUPER_ADMIN_EMAIL,
           password: password,
-          full_name: "মেইন সুপার এডমিন",
+          full_name: "মেইন এডমিন",
           roles: ["admin", "editor", "moderator", "user"],
         });
-        toast.success("স্বাগতম, মেইন সুপার এডমিন!");
+        toast.success("স্বাগতম, মেইন এডমিন!");
         return;
       }
       recordFailedAdminLogin();
       await logEvent("login_failed", username);
-      toast.error("ভুল সুপার এডমিন পাসওয়ার্ড!");
+      toast.error("ভুল মেইন এডমিন পাসওয়ার্ড!");
     } catch (err: any) {
       recordFailedAdminLogin();
       await logEvent("login_failed", username);
@@ -374,45 +361,11 @@ function AdminLoginForm() {
         </div>
 
         <h1 className="mb-1 text-center font-display text-lg font-bold text-primary-deep">
-          এডমিন ও স্টাফ কন্ট্রোল প্যানেল
+          মেইন এডমিন কন্ট্রোল প্যানেল
         </h1>
         <p className="mb-5 text-center text-xs text-muted-foreground">
-          অনুমোদিত সুপার এডমিন ও এডমিন অ্যাকাউন্ট দিয়ে প্রবেশ করুন
+          শুধুমাত্র অনুমোদিত মেইন এডমিনের জন্য সংরক্ষিত
         </p>
-
-        {/* Google Admin 1-Click Login */}
-        <button
-          type="button"
-          disabled={busy}
-          onClick={handleGoogleAdminLogin}
-          className="flex w-full items-center justify-center gap-2.5 rounded-xl border-2 border-primary/40 bg-white py-3.5 text-sm font-bold text-primary-deep shadow-card transition hover:border-primary hover:bg-primary/5 active:scale-[0.99] disabled:opacity-60"
-        >
-          <svg className="h-5 w-5" viewBox="0 0 24 24">
-            <path
-              fill="#4285F4"
-              d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
-            />
-            <path
-              fill="#34A853"
-              d="M12 24c3.3 0 6.08-1.09 8.1-2.96l-3.88-3.05c-1.1.74-2.5 1.18-4.22 1.18-3.25 0-6-2.2-6.98-5.15H1.01v3.14C3.02 21.15 7.21 24 12 24Z"
-            />
-            <path
-              fill="#FBBC05"
-              d="M5.02 14.02c-.25-.74-.39-1.54-.39-2.37 0-.83.14-1.63.39-2.37V6.14H1.01C.37 7.42 0 8.87 0 11.65s.37 4.23 1.01 5.51l4.01-3.14Z"
-            />
-            <path
-              fill="#EA4335"
-              d="M12 4.75c1.8 0 3.41.62 4.68 1.84l3.51-3.51C18.07 1.19 15.3 0 12 0 7.21 0 3.02 2.85 1.01 6.84l4.01 3.14C6 7.02 8.75 4.75 12 4.75Z"
-            />
-          </svg>
-          Google দিয়ে সরাসরি এডমিন লগইন
-        </button>
-
-        <div className="my-4 flex items-center gap-3 text-[11px] text-muted-foreground">
-          <div className="h-px flex-1 bg-border" />
-          <span>অথবা পাসওয়ার্ড দিয়ে সুপার এডমিন লগইন</span>
-          <div className="h-px flex-1 bg-border" />
-        </div>
 
         <form onSubmit={onSubmit} className="space-y-3.5">
           <div>
@@ -455,7 +408,7 @@ function AdminLoginForm() {
             className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-hero py-3 text-sm font-semibold text-primary-foreground shadow-elevated disabled:opacity-60"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-            সুপার এডমিন হিসেবে লগইন করুন
+            মেইন এডমিন হিসেবে প্রবেশ করুন
           </button>
         </form>
       </div>
@@ -5346,11 +5299,11 @@ function SettingsAdminPanel() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    if (!file.type.startsWith("image/")) return toast.error("শুধু ছবি ফাইল নির্বাচন করুন");
+    if (!file.type.startsWith("image/")) return toast.error("শুধু ছবি ফাইল (PNG / JPG) নির্বাচন করুন");
 
     setUpdatingLogo(true);
     try {
-      // 1. Read original bit-for-bit Data URL preserving transparent PNG / vector quality
+      // 1. Read base64 data url
       const rawDataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result));
@@ -5358,44 +5311,51 @@ function SettingsAdminPanel() {
         reader.readAsDataURL(file);
       });
 
-      // 2. If under 750KB, save original bit-for-bit without touching any pixels or compressing
-      if (rawDataUrl.length <= 750000) {
-        await setLogo(rawDataUrl);
-        toast.success("আসল লোগো ফাইল কোনো পরিবর্তন ছাড়া হুবহু Firebase-এ সংরক্ষিত হয়েছে!");
-        return;
+      // 2. Try server-side direct file upload to save public/logo.png bit-for-bit
+      try {
+        const res = await fetch("/api/logo/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileDataBase64: rawDataUrl }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.ok && data?.logoUrl) {
+            await setLogo(data.logoUrl);
+            toast.success("আসল লোগো ফাইল কোনো পরিবর্তন ছাড়া সফলভাবে সেভ হয়েছে!");
+            return;
+          }
+        }
+      } catch {
+        // Continue to client-side fallback if server endpoint unavailable
       }
 
-      // 3. For ultra-heavy files, render onto crisp canvas preserving PNG format and transparency
-      const cleanPng = await new Promise<string>((resolve) => {
+      // 3. Client-side high-res 512x512 canvas preserving PNG transparency and colors
+      const cleanDataUrl = await new Promise<string>((resolve) => {
         const img = new Image();
+        const objUrl = URL.createObjectURL(file);
         img.onload = () => {
-          const maxDim = 800;
-          let { width, height } = img;
-          if (width > maxDim || height > maxDim) {
-            if (width > height) {
-              height = Math.round((height * maxDim) / width);
-              width = maxDim;
-            } else {
-              width = Math.round((width * maxDim) / height);
-              height = maxDim;
-            }
-          }
+          URL.revokeObjectURL(objUrl);
           const canvas = document.createElement("canvas");
-          canvas.width = Math.max(width, 1);
-          canvas.height = Math.max(height, 1);
+          const size = 512;
+          canvas.width = size;
+          canvas.height = size;
           const ctx = canvas.getContext("2d");
           if (!ctx) return resolve(rawDataUrl);
-          ctx.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL("image/png"));
+          ctx.drawImage(img, 0, 0, size, size);
+          resolve(canvas.toDataURL(file.type === "image/png" ? "image/png" : "image/jpeg", 0.95));
         };
-        img.onerror = () => resolve(rawDataUrl);
-        img.src = rawDataUrl;
+        img.onerror = () => {
+          URL.revokeObjectURL(objUrl);
+          resolve(rawDataUrl);
+        };
+        img.src = objUrl;
       });
 
-      await setLogo(cleanPng);
+      await setLogo(cleanDataUrl);
       toast.success("লোগো কোনো বিকৃতি ছাড়া সফলভাবে Firebase-এ আপডেট হয়েছে!");
     } catch (err: any) {
-      toast.error(err?.message || "লোগো আপডেট ব্যর্থ হয়েছে");
+      toast.error(err?.message || "লোগো আপলোড ব্যর্থ হয়েছে");
     } finally {
       setUpdatingLogo(false);
     }
