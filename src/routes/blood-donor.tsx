@@ -232,7 +232,6 @@ function DonorForm({ onDone, addDonor }: { onDone: () => void; addDonor: ReturnT
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (f.size > 4 * 1024 * 1024) return toast.error("4MB এর বেশি না");
     setUploading(true);
     const url = await uploadPublicImage(f, "donors");
     setUploading(false);
@@ -331,14 +330,28 @@ function DonorForm({ onDone, addDonor }: { onDone: () => void; addDonor: ReturnT
           className="w-full min-w-0 rounded-xl border border-border bg-background px-3 py-2.5 text-sm"
         />
       </label>
-      <label className="flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border bg-background px-3 py-3 text-sm">
+      <label className="flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border bg-background px-3 py-3 text-sm transition hover:bg-muted/40">
         <Upload className="h-4 w-4 shrink-0 text-primary" />
         <span className="min-w-0 flex-1 truncate text-muted-foreground">
-          {uploading ? "আপলোড হচ্ছে..." : photo_url ? "ছবি যোগ হয়েছে" : "ছবি (ঐচ্ছিক)"}
+          {uploading ? "আপলোড ও প্রসেস হচ্ছে..." : photo_url ? "ছবি যোগ হয়েছে (পরিবর্তন করতে চাপুন)" : "রক্তদাতার ছবি (ঐচ্ছিক)"}
         </span>
         <input type="file" accept="image/*" className="hidden" onChange={onFile} />
       </label>
-      {photo_url && <img src={photo_url} alt="" className="h-20 w-20 rounded-full object-cover" />}
+      {photo_url && (
+        <div className="flex items-center gap-3 rounded-xl border border-border/60 bg-muted/30 p-2">
+          <img src={photo_url} alt="Donor preview" className="h-14 w-14 rounded-full border border-primary/20 object-cover" />
+          <div className="flex-1 text-xs">
+            <p className="font-semibold text-emerald-700">ছবি সফলভাবে সংযুক্ত হয়েছে</p>
+            <button
+              type="button"
+              onClick={() => setPhoto(null)}
+              className="mt-0.5 text-[11px] font-semibold text-destructive hover:underline"
+            >
+              ছবি মুছে ফেলুন
+            </button>
+          </div>
+        </div>
+      )}
       <button
         disabled={submitting}
         className="flex w-full items-center justify-center gap-2 rounded-xl bg-rose-600 py-3 text-sm font-semibold text-white disabled:opacity-60"
@@ -381,12 +394,22 @@ function DonorCard({
   return (
     <div className="w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-border/60 bg-gradient-card p-3.5 shadow-card sm:p-4">
       <div className="flex w-full min-w-0 items-center justify-between gap-2.5 sm:gap-3">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-rose-500/10 text-rose-600 ring-2 ring-rose-500/20 sm:h-12 sm:w-12">
+        <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-rose-500/10 text-rose-600 ring-2 ring-rose-500/20 sm:h-12 sm:w-12">
           {d.photo_url ? (
-            <img src={d.photo_url} alt={d.full_name} className="h-full w-full object-cover" />
-          ) : (
-            <Droplet className="h-5 w-5 sm:h-6 sm:w-6" />
-          )}
+            <img
+              src={d.photo_url}
+              alt={d.full_name}
+              className="h-full w-full object-cover"
+              onError={(e) => {
+                (e.currentTarget as HTMLElement).style.display = "none";
+                const fb = (e.currentTarget.parentElement?.querySelector(".fallback-droplet") as HTMLElement);
+                if (fb) fb.classList.remove("hidden");
+              }}
+            />
+          ) : null}
+          <div className={`fallback-droplet flex h-full w-full items-center justify-center ${d.photo_url ? "hidden" : ""}`}>
+            <Droplet className="h-5 w-5 sm:h-6 sm:w-6 text-rose-600" />
+          </div>
         </div>
 
         <div className="min-w-0 flex-1 overflow-hidden">
@@ -488,7 +511,6 @@ function DonatedModal({
     const f = e.target.files?.[0];
     e.target.value = "";
     if (!f) return;
-    if (f.size > 5 * 1024 * 1024) return toast.error("৫MB এর বেশি না");
     setUploading(kind);
     const url = await uploadPublicImage(f, `donor-events/${donor.id}`);
     setUploading(null);

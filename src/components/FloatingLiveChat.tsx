@@ -34,7 +34,8 @@ import {
   useCloudDonors,
   useEmergencyRequests,
 } from "@/lib/cloud";
-import { AttachmentView, VoiceRecorderButton } from "@/routes/chat";
+import { AttachmentView, VoiceRecorderButton, playChatChime } from "@/routes/chat";
+import { FormattedChatMessage } from "@/lib/chat-formatter";
 
 export interface AiChatMessage {
   id: string;
@@ -107,26 +108,31 @@ export function FloatingLiveChat() {
 
   const threadsHook = useChatThreads();
 
-  // Ensure user's own chat thread when logged in as regular user
+  // Guest metadata
+  const [guestName, setGuestName] = useState(() => localStorage.getItem("sn_guest_name_v1") || "");
+  const [guestPhone, setGuestPhone] = useState(() => localStorage.getItem("sn_guest_phone_v1") || "");
+  const [showGuestEdit, setShowGuestEdit] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Determine active thread
+  const effectiveThreadId = user
+    ? user.id
+    : getOrCreateGuestId();
+
   useEffect(() => {
-    if (!user || isStaff) return;
-    let cancelled = false;
-    (async () => {
-      const t = await ensureMyThread(user.id);
-      if (!cancelled) setThreadId(t?.id ?? null);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [user, isStaff]);
+    setThreadId(effectiveThreadId);
+    if (user) {
+      void ensureMyThread(user.id);
+    }
+  }, [user, effectiveThreadId]);
 
   const { items, send } = useThreadMessages(
-    open && chatMode === "live" && !isStaff ? threadId : null
+    open && chatMode === "live" ? threadId : null
   );
 
   useEffect(() => {
-    if (open && chatMode === "live" && threadId && !isStaff) {
-      void markThreadRead(threadId, "user");
+    if (open && chatMode === "live" && threadId) {
+      void markThreadRead(threadId, isStaff ? "staff" : "user");
     }
   }, [open, chatMode, threadId, items.length, isStaff]);
 
@@ -146,6 +152,26 @@ export function FloatingLiveChat() {
     ? threadsHook.items.reduce((sum, t) => sum + (Number(t.staff_unread) || 0), 0)
     : threadsHook.items.reduce((sum, t) => sum + (Number(t.user_unread) || 0), 0);
 
+  function handleCopy(textToCopy: string, id: string) {
+    void navigator.clipboard.writeText(textToCopy);
+    setCopiedId(id);
+    toast.success("বার্তা কপি করা হয়েছে!");
+    setTimeout(() => setCopiedId(null), 2000);
+  }
+
+  function getOrCreateGuestId(): string {
+    try {
+      let id = localStorage.getItem("sn_guest_chat_id_v1");
+      if (!id) {
+        id = `guest_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        localStorage.setItem("sn_guest_chat_id_v1", id);
+      }
+      return id;
+    } catch {
+      return `guest_${Date.now()}`;
+    }
+  }
+
   async function askAi(promptText: string) {
     const clean = promptText.trim();
     if (!clean || aiLoading) return;
@@ -157,6 +183,7 @@ export function FloatingLiveChat() {
       created_at: new Date().toISOString(),
     };
     setAiMessages((prev) => [...prev, userMsg]);
+    playChatChime("send");
     setAiInput("");
     setAiLoading(true);
 
@@ -209,22 +236,27 @@ export function FloatingLiveChat() {
         }),
       });
 
-      const data = await resp.json();
+      const data = await resp.json().catch(() => ({}));
+      const replyText =
+        data.reply ||
+        `স্মার্ট নোয়াখালী এআই সহকারী: আপনার অনুসন্ধানের জন্য সরাসরি যোগাযোগ:\n• জাতীয় জরুরি সেবা: 📞 [999](tel:999)\n• নোয়াখালী জেনারেল হাসপাতাল: 📞 [01730-324794](tel:01730324794)\n• নোয়াখালী ফায়ার সার্ভিস: 📞 [01730-002444](tel:01730002444)\n• সুধারাম মডেল থানা: 📞 [01320-116035](tel:01320116035)\n\nঅথবা উপরের 'লাইভ চ্যাট' ট্যাবে মেসেজ দিয়ে সরাসরি এডমিনদের সাথে কথা বলুন।`;
+
       const replyMsg: AiChatMessage = {
         id: `a_${Date.now()}`,
         role: "assistant",
-        text: data.reply || "দুঃখিত, এই মুহূর্তে উত্তর পাওয়া যায়নি।",
+        text: replyText,
         created_at: new Date().toISOString(),
         matches: data.matches,
       };
       setAiMessages((prev) => [...prev, replyMsg]);
+      playChatChime("receive");
     } catch {
       setAiMessages((prev) => [
         ...prev,
         {
-          id: `err_${Date.now()}`,
+          id: `fallback_${Date.now()}`,
           role: "assistant",
-          text: "নেটওয়ার্ক ত্রুটির কারণে উত্তর লোড করা যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন বা 'লাইভ চ্যাট' ট্যাবে মেসেজ দিন।",
+          text: `স্মার্ট নোয়াখালী এআই সহকারী: তাৎক্ষণিক যোগাযোগের জন্য জরুরি সেবা:\n• জরুরি হটলাইন: 📞 [999](tel:999)\n• নোয়াখালী সদর হাসপাতাল: 📞 [01730-324794](tel:01730324794)\n• ফায়ার সার্ভিস: 📞 [01730-002444](tel:01730002444)\n\nসরাসরি এডমিনের সাথে কথা বলতে 'লাইভ চ্যাট' ট্যাবে মেসেজ দিন।`,
           created_at: new Date().toISOString(),
         },
       ]);
@@ -233,39 +265,47 @@ export function FloatingLiveChat() {
     }
   }
 
-  const userMeta = user
-    ? {
-        user_name: user.displayName || undefined,
-        user_email: user.email || undefined,
-        user_phone: user.phone || undefined,
-        sender_name: user.displayName || user.email?.split("@")[0] || "গ্রাহক",
-      }
-    : undefined;
+  const effectiveSenderName = isStaff
+    ? user?.displayName || "এডমিন সাপোর্ট"
+    : user?.displayName || guestName || "অতিথি গ্রাহক";
+
+  const userMeta = {
+    user_name: effectiveSenderName,
+    user_email: user?.email || undefined,
+    user_phone: user?.phone || guestPhone || undefined,
+    sender_name: effectiveSenderName,
+    sender_role_label: isStaff ? "এডমিন" : "গ্রাহক",
+  };
 
   async function onSend(e: React.FormEvent) {
     e.preventDefault();
     const t = text.trim();
-    if (!t || !user || !threadId) return;
+    if (!t || !threadId) return;
     setText("");
-    const { error } = await send(user.id, "user", t, undefined, userMeta);
+    const role = isStaff ? "staff" : "user";
+    const senderId = user?.id || threadId;
+    playChatChime("send");
+    const { error } = await send(senderId, role, t, undefined, userMeta);
     if (error) toast.error(error.message);
   }
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     e.target.value = "";
-    if (!f || !user || !threadId) return;
-    if (f.size > 5 * 1024 * 1024) return toast.error("৫MB-এর বেশি না");
+    if (!f || !threadId) return;
     setBusy(true);
     const url = await uploadPublicImage(f, `chat/${threadId}`);
     setBusy(false);
     if (!url) return toast.error("আপলোড ব্যর্থ");
-    const { error } = await send(user.id, "user", "", url, userMeta);
+    const role = isStaff ? "staff" : "user";
+    const senderId = user?.id || threadId;
+    playChatChime("send");
+    const { error } = await send(senderId, role, "", url, userMeta);
     if (error) toast.error(error.message);
   }
 
   async function onVoice(blob: Blob) {
-    if (!user || !threadId) return;
+    if (!threadId) return;
     setBusy(true);
     const file = new File([blob], `voice-${Date.now()}.webm`, {
       type: "audio/webm",
@@ -273,7 +313,10 @@ export function FloatingLiveChat() {
     const url = await uploadPublicImage(file, `chat/${threadId}`);
     setBusy(false);
     if (!url) return toast.error("আপলোড ব্যর্থ");
-    const { error } = await send(user.id, "user", "", url, userMeta);
+    const role = isStaff ? "staff" : "user";
+    const senderId = user?.id || threadId;
+    playChatChime("send");
+    const { error } = await send(senderId, role, "", url, userMeta);
     if (error) toast.error(error.message);
   }
 
@@ -398,9 +441,7 @@ export function FloatingLiveChat() {
                             {isUser ? "আপনি" : "স্মার্ট এআই সহকারী"}
                           </span>
                         </div>
-                        <p className="whitespace-pre-wrap break-words leading-relaxed">
-                          {m.text}
-                        </p>
+                        <FormattedChatMessage text={m.text} isUser={isUser} />
 
                         {/* Clickable Matched Submissions */}
                         {m.matches?.submissions && m.matches.submissions.length > 0 && (
@@ -524,81 +565,69 @@ export function FloatingLiveChat() {
                 </button>
               </form>
             </>
-          ) : !isAuthed ? (
-            <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
-              <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary">
-                <MessageCircle className="h-7 w-7" />
-              </div>
-              <p className="font-display text-base font-bold text-primary-deep">
-                সরাসরি লাইভ চ্যাটে স্বাগতম!
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                এডমিন, এডিটর বা মডারেটরের সাথে সরাসরি কথা বলতে লগইন করুন। অথবা লগইন ছাড়াই উপরের "এআই দিয়ে খুঁজুন" ট্যাব ব্যবহার করুন!
-              </p>
-              <button
-                type="button"
-                onClick={() =>
-                  void signInWithGoogle().catch((e) =>
-                    toast.error(e?.message || "লগইন ব্যর্থ")
-                  )
-                }
-                className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-gradient-hero py-2.5 text-xs font-bold text-primary-foreground shadow-elevated"
-              >
-                <LogIn className="h-3.5 w-3.5" /> Google দিয়ে দ্রুত শুরু করুন
-              </button>
-              <Link
-                to="/auth"
-                onClick={() => setOpen(false)}
-                className="mt-2.5 text-xs font-semibold text-primary underline"
-              >
-                ইমেইল দিয়ে লগইন / নিবন্ধন →
-              </Link>
-            </div>
-          ) : isStaff ? (
-            <div className="flex flex-1 flex-col justify-between p-4">
-              <div className="space-y-2 overflow-y-auto">
-                <div className="rounded-2xl bg-primary/5 p-3 text-center">
-                  <ShieldCheck className="mx-auto h-7 w-7 text-primary" />
-                  <p className="mt-1 font-display text-sm font-bold text-primary-deep">
-                    স্টাফ চ্যাট ইনবক্স
-                  </p>
-                  <p className="text-[11px] text-muted-foreground">
-                    অপেক্ষমাণ অপঠিত বার্তা: {unreadCount} টি
-                  </p>
-                </div>
-                {threadsHook.items.slice(0, 4).map((t) => (
-                  <Link
-                    key={t.id}
-                    to="/mdmahmudulhashan"
-                    onClick={() => setOpen(false)}
-                    className="flex items-center justify-between rounded-xl border border-border bg-background p-2.5 text-left transition hover:border-primary"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-semibold text-foreground">
-                        ইউজার #{t.user_id.slice(0, 8)}
-                      </p>
-                      <p className="truncate text-[11px] text-muted-foreground">
-                        {t.last_message_preview || "বার্তা দেখুন"}
-                      </p>
-                    </div>
-                    {t.staff_unread > 0 && (
-                      <span className="ml-2 rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-bold text-white">
-                        {t.staff_unread}
-                      </span>
-                    )}
-                  </Link>
-                ))}
-              </div>
-              <Link
-                to="/mdmahmudulhashan"
-                onClick={() => setOpen(false)}
-                className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-full bg-gradient-hero py-2.5 text-xs font-bold text-primary-foreground shadow-elevated"
-              >
-                এডমিন প্যানেলে সব চ্যাট ও উত্তর দিন →
-              </Link>
-            </div>
           ) : (
             <>
+              {/* Header notice for guest or staff */}
+              {!isAuthed && (
+                <div className="flex flex-col border-b border-border bg-amber-500/10 px-3 py-1.5 text-xs text-amber-950">
+                  <div className="flex items-center justify-between gap-1.5">
+                    <span className="truncate text-[11px]">
+                      অতিথি চ্যাট: <strong>{guestName || "গ্রাহক"}</strong>
+                    </span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setShowGuestEdit(!showGuestEdit)}
+                        className="text-[10px] font-bold text-amber-900 underline"
+                      >
+                        {showGuestEdit ? "সম্পন্ন" : "নাম লিখুন"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void signInWithGoogle().catch((e) => toast.error(e?.message || "লগইন ব্যর্থ"))}
+                        className="rounded bg-primary px-1.5 py-0.5 text-[9px] font-bold text-primary-foreground"
+                      >
+                        গুগল লগইন
+                      </button>
+                    </div>
+                  </div>
+                  {showGuestEdit && (
+                    <div className="mt-1.5 flex gap-1.5">
+                      <input
+                        value={guestName}
+                        onChange={(e) => {
+                          setGuestName(e.target.value);
+                          localStorage.setItem("sn_guest_name_v1", e.target.value);
+                        }}
+                        placeholder="আপনার নাম..."
+                        className="flex-1 rounded border border-border bg-background px-2 py-0.5 text-[10px]"
+                      />
+                      <input
+                        value={guestPhone}
+                        onChange={(e) => {
+                          setGuestPhone(e.target.value);
+                          localStorage.setItem("sn_guest_phone_v1", e.target.value);
+                        }}
+                        placeholder="মোবাইল নম্বর..."
+                        className="flex-1 rounded border border-border bg-background px-2 py-0.5 text-[10px]"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {isStaff && (
+                <div className="flex items-center justify-between bg-primary/10 px-3 py-1 text-[11px] text-primary-deep border-b border-border">
+                  <span className="font-semibold">এডমিন/স্টাফ হিসেবে চ্যাট করছেন</span>
+                  <Link
+                    to="/mdmahmudulhashan"
+                    onClick={() => setOpen(false)}
+                    className="text-[10px] font-bold text-primary underline"
+                  >
+                    ইনবক্স ({unreadCount}) →
+                  </Link>
+                </div>
+              )}
               <div className="flex-1 space-y-2.5 overflow-y-auto bg-background/60 p-3">
                 {items.length === 0 && (
                   <div className="rounded-2xl border border-dashed border-border bg-card/80 p-5 text-center text-xs text-muted-foreground">

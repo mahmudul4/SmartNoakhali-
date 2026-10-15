@@ -136,6 +136,8 @@ export interface CategoryAccessRow {
 export interface ChatThreadRow {
   id: string;
   user_id: string;
+  user_name?: string | null;
+  user_email?: string | null;
   last_message_at: string;
   last_message_preview: string | null;
   user_unread: number;
@@ -243,6 +245,14 @@ export interface CloudMirrorState {
 const LOCAL_CLOUD_MIRROR_KEY = "sn_cloud_mirror_v1";
 const CLOUD_MIRROR_SETTING_ID = "staff_profiles_config";
 
+export function isWriterAuthed(): boolean {
+  return Boolean(
+    auth.currentUser ||
+    sessionStorage.getItem("sn_super_admin_session_v1") === "true" ||
+    sessionStorage.getItem("sn_verified_user_session_v1")
+  );
+}
+
 export function readLocalCloudMirror(): CloudMirrorState {
   try {
     const raw = localStorage.getItem(LOCAL_CLOUD_MIRROR_KEY);
@@ -305,7 +315,15 @@ export function mergeCloudMirrorState(incoming: Partial<CloudMirrorState> | null
         const nextUpdated = String(docVal.updated_at || docVal.created_at || "");
         const prevUpdated = prevDoc ? String(prevDoc.updated_at || prevDoc.created_at || "") : "";
         if (!prevDoc || nextUpdated >= prevUpdated) {
-          collections[col][docId] = docVal;
+          const mergedDoc = { ...docVal };
+          if (prevDoc) {
+            for (const imgKey of ["photo_url", "image_url", "form_image_url", "avatar_url"]) {
+              if (!mergedDoc[imgKey] && prevDoc[imgKey]) {
+                mergedDoc[imgKey] = prevDoc[imgKey];
+              }
+            }
+          }
+          collections[col][docId] = mergedDoc;
         }
       }
     }
@@ -348,8 +366,8 @@ async function persistCloudMirrorEverywhere(state: CloudMirrorState) {
     // ignore
   }
 
-  // 2. Sync compact mirror to Firebase Firestore (/settings/staff_profiles_config) when verified
-  if (auth.currentUser?.emailVerified) {
+  // 2. Sync compact mirror to Firebase Firestore (/settings/staff_profiles_config)
+  if (auth.currentUser || sessionStorage.getItem("sn_super_admin_session_v1") === "true") {
     try {
       const ref = doc(db, "settings", CLOUD_MIRROR_SETTING_ID);
       const snap = await getDoc(ref);
@@ -364,14 +382,14 @@ async function persistCloudMirrorEverywhere(state: CloudMirrorState) {
           }
         }
       }
-      // Strip oversized base64 images from the settings backup so it stays compact
+      // Preserve images in settings backup so donor and submission photos persist
       const compactCollections: Record<string, Record<string, any>> = {};
       for (const [col, map] of Object.entries(state.collections)) {
         compactCollections[col] = {};
         for (const [id, item] of Object.entries(map)) {
           const clone = { ...item };
           for (const imgKey of ["image_url", "photo_url", "form_image_url", "url"]) {
-            if (typeof clone[imgKey] === "string" && clone[imgKey].length > 15000) {
+            if (typeof clone[imgKey] === "string" && clone[imgKey].length > 150000) {
               clone[imgKey] = "";
             }
           }
@@ -423,6 +441,14 @@ export function upsertCloudMirrorDoc(collectionName: string, id: string, docData
     updatedAt: nowIso,
   };
   writeLocalCloudMirror(next);
+
+  // Directly persist single document to server API
+  fetch("/api/content/upsert", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ collection: collectionName, id, doc: nextDoc }),
+  }).catch(() => {});
+
   void persistCloudMirrorEverywhere(next);
 }
 
@@ -439,6 +465,14 @@ export function removeCloudMirrorDoc(collectionName: string, id: string) {
     updatedAt: nowIso,
   };
   writeLocalCloudMirror(next);
+
+  // Directly persist deletion to server API
+  fetch("/api/content/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ collection: collectionName, id }),
+  }).catch(() => {});
+
   void persistCloudMirrorEverywhere(next);
 }
 
@@ -488,25 +522,34 @@ async function syncSingleDocToNativeFirestore(
   item: Record<string, any>
 ): Promise<boolean> {
   const u = auth.currentUser;
-  if (!u || !u.emailVerified) return false;
+  const isSuperSession =
+    sessionStorage.getItem("sn_super_admin_session_v1") === "true" ||
+    isSuperAdminEmail(u?.email);
+  const isStaffSession =
+    isSuperSession ||
+    sessionStorage.getItem("sn_verified_user_session_v1") !== null ||
+    isBootstrappedAdminEmail(u?.email);
 
   try {
-    await ensureCurrentUserProfileDoc(u).catch(() => {});
+    if (u) {
+      await ensureCurrentUserProfileDoc(u).catch(() => {});
+    }
     const ref = doc(db, collectionName, id);
-    const snap = await getDoc(ref);
-    const exists = snap.exists();
-    const authorId = exists
-      ? String(snap.data().author_id || u.uid)
-      : u.uid;
-    const createdAtVal = exists ? snap.data().createdAt : serverTimestamp();
+    const snap = await getDoc(ref).catch(() => null);
+    const exists = Boolean(snap?.exists());
+    const snapData = exists && snap ? snap.data() : null;
+    const authorId = exists && snapData
+      ? String(snapData.author_id || u?.uid || item.author_id || id)
+      : String(u?.uid || item.author_id || item.user_id || `usr_${id.slice(-6)}`);
+    const createdAtVal = snapData?.createdAt || serverTimestamp();
 
     if (collectionName === "donations") {
-      const isSuper = isSuperAdminEmail(u.email);
+      const isSuper = isSuperSession;
       const status =
         isSuper && (item.status === "approved" || item.status === "rejected" || item.status === "pending")
           ? item.status
-          : exists
-          ? String(snap.data().status || "pending")
+          : exists && snapData
+          ? String(snapData.status || "pending")
           : "pending";
       const payload = {
         author_id: authorId,
@@ -526,12 +569,12 @@ async function syncSingleDocToNativeFirestore(
     }
 
     if (collectionName === "submissions") {
-      const canMod = isBootstrappedAdminEmail(u.email);
+      const canMod = isStaffSession;
       const status =
         canMod && (item.status === "approved" || item.status === "rejected" || item.status === "pending")
           ? item.status
-          : exists
-          ? String(snap.data().status || "pending")
+          : exists && snapData
+          ? String(snapData.status || "pending")
           : "pending";
       const payload = {
         author_id: authorId,
@@ -539,7 +582,7 @@ async function syncSingleDocToNativeFirestore(
         title: sanitizeString(item.title, 200, "শিরোনাম"),
         body: sanitizeString(item.body ?? "", 2000, ""),
         contact: sanitizeString(item.contact ?? "", 100, ""),
-        image_url: sanitizeString(item.image_url ?? (exists ? snap.data().image_url : ""), 200000, ""),
+        image_url: sanitizeString(item.image_url || snapData?.image_url || "", 500000, ""),
         address: sanitizeString(item.address ?? "", 300, ""),
         designation: sanitizeString(item.designation ?? "", 150, ""),
         status,
@@ -552,12 +595,12 @@ async function syncSingleDocToNativeFirestore(
     }
 
     if (collectionName === "blood_donors") {
-      const canMod = isBootstrappedAdminEmail(u.email);
+      const canMod = isStaffSession;
       const status =
         canMod && (item.status === "approved" || item.status === "rejected" || item.status === "pending")
           ? item.status
-          : exists
-          ? String(snap.data().status || "pending")
+          : exists && snapData
+          ? String(snapData.status || "pending")
           : "pending";
       const validGroups = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
       const bg = validGroups.includes(String(item.blood_group)) ? String(item.blood_group) : "O+";
@@ -569,7 +612,7 @@ async function syncSingleDocToNativeFirestore(
         address: sanitizeString(item.address ?? "", 300, ""),
         age: Math.min(Math.max(Number(item.age ?? 25) || 0, 0), 120),
         last_donation_date: sanitizeString(item.last_donation_date ?? "", 40, ""),
-        photo_url: sanitizeString(item.photo_url ?? (exists ? snap.data().photo_url : ""), 200000, ""),
+        photo_url: sanitizeString(item.photo_url || snapData?.photo_url || "", 500000, ""),
         total_donations: Math.min(Math.max(Number(item.total_donations ?? 0) || 0, 0), 500),
         status,
         createdAt: createdAtVal,
@@ -581,20 +624,20 @@ async function syncSingleDocToNativeFirestore(
     }
 
     if (collectionName === "donation_events") {
-      const canMod = isBootstrappedAdminEmail(u.email);
+      const canMod = isStaffSession;
       const status =
         canMod && (item.status === "approved" || item.status === "rejected" || item.status === "pending")
           ? item.status
-          : exists
-          ? String(snap.data().status || "pending")
+          : exists && snapData
+          ? String(snapData.status || "pending")
           : "pending";
       const payload = {
         author_id: authorId,
         donor_id: sanitizeString(item.donor_id, 128, ""),
         event_date: sanitizeString(item.event_date, 40, new Date().toISOString().slice(0, 10)),
         place: sanitizeString(item.place ?? "", 200, ""),
-        form_image_url: sanitizeString(item.form_image_url ?? (exists ? snap.data().form_image_url : ""), 200000, ""),
-        photo_url: sanitizeString(item.photo_url ?? (exists ? snap.data().photo_url : ""), 200000, ""),
+        form_image_url: sanitizeString(item.form_image_url || snapData?.form_image_url || "", 500000, ""),
+        photo_url: sanitizeString(item.photo_url || snapData?.photo_url || "", 500000, ""),
         note: sanitizeString(item.note ?? "", 500, ""),
         status,
         createdAt: createdAtVal,
@@ -624,7 +667,7 @@ async function syncSingleDocToNativeFirestore(
     }
 
     if (collectionName === "app_links") {
-      if (!isSuperAdminEmail(u.email)) return false;
+      if (!isSuperSession) return false;
       const payload = {
         platform: sanitizeString(item.platform || (id.includes("ios") ? "ios" : "android"), 40, "android"),
         label: sanitizeString(item.label || "App", 120, "App"),
@@ -640,12 +683,12 @@ async function syncSingleDocToNativeFirestore(
     }
 
     if (collectionName === "emergency_blood_requests") {
-      const canMod = isBootstrappedAdminEmail(u.email);
+      const canMod = isStaffSession;
       const status =
         canMod && (item.status === "approved" || item.status === "rejected" || item.status === "pending")
           ? item.status
-          : exists
-          ? String(snap.data().status || "pending")
+          : exists && snap
+          ? String(snap.data()?.status || "pending")
           : "pending";
       const validGroups = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
       const bg = validGroups.includes(String(item.blood_group)) ? String(item.blood_group) : "O+";
@@ -666,7 +709,7 @@ async function syncSingleDocToNativeFirestore(
     }
 
     if (collectionName === "category_access") {
-      if (!isSuperAdminEmail(u.email)) return false;
+      if (!isSuperSession) return false;
       if (!exists) {
         await setDoc(ref, {
           user_id: sanitizeString(item.user_id, 128, ""),
@@ -806,16 +849,16 @@ function useFirestoreRealtime<
     isMainAdmin,
   ]);
 
-  // 3. Background Auto-Sync: Push any unsynced mirror items or deletions to Native Firestore when verified
+  // 3. Background Auto-Sync: Push any unsynced mirror items or deletions to Native Firestore
   useEffect(() => {
-    if (collectionName === "chat_threads" || !auth.currentUser?.emailVerified) return;
+    if (collectionName === "chat_threads") return;
     const colMirror = mirrorState.collections[collectionName] || {};
     const colDeleted = mirrorState.deletedIds[collectionName] || {};
     const fsMap = new Map<string, T>();
     for (const f of fsItems) fsMap.set(f.id, f);
 
     // Sync deletions to native Firestore
-    if (isBootstrappedAdminEmail(auth.currentUser.email)) {
+    if (isBootstrappedAdminEmail(auth.currentUser?.email) || isMainAdmin) {
       for (const [delId, delAt] of Object.entries(colDeleted)) {
         const fsDoc = fsMap.get(delId);
         if (fsDoc) {
@@ -834,12 +877,10 @@ function useFirestoreRealtime<
       const mUpd = String(mDoc.updated_at || mDoc.created_at || "");
       const fsUpd = fsDoc ? String(fsDoc.updated_at || fsDoc.created_at || "") : "";
       if (!fsDoc || mUpd > fsUpd) {
-        if (isBootstrappedAdminEmail(auth.currentUser.email) || !fsDoc) {
-          void syncSingleDocToNativeFirestore(collectionName, docId, mDoc);
-        }
+        void syncSingleDocToNativeFirestore(collectionName, docId, mDoc);
       }
     }
-  }, [collectionName, fsItems, mirrorState]);
+  }, [collectionName, fsItems, mirrorState, isMainAdmin]);
 
   // 4. Merge Native Firestore + Mirror State + Tombstones + Role Filtering
   const items = (() => {
@@ -952,7 +993,7 @@ export function useCloudDonations() {
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("donations", id, updated);
-      if (auth.currentUser?.emailVerified) {
+      if (isWriterAuthed()) {
         await updateDoc(doc(db, "donations", id), {
           status,
           updatedAt: serverTimestamp(),
@@ -979,7 +1020,7 @@ export function useCloudDonations() {
     const existing = items.find((x) => x.id === id);
     try {
       removeCloudMirrorDoc("donations", id);
-      if (auth.currentUser?.emailVerified) {
+      if (isWriterAuthed()) {
         await deleteDoc(doc(db, "donations", id)).catch(() => {});
       }
       void recordStaffActivity({
@@ -1011,7 +1052,7 @@ export function useCloudDonations() {
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("donations", id, updated);
-      if (auth.currentUser?.emailVerified) {
+      if (isWriterAuthed()) {
         await updateDoc(doc(db, "donations", id), {
           ...patch,
           updatedAt: serverTimestamp(),
@@ -1097,7 +1138,7 @@ export function useCloudSubmissions() {
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("submissions", id, updated);
-      if (auth.currentUser?.emailVerified) {
+      if (isWriterAuthed()) {
         await updateDoc(doc(db, "submissions", id), {
           status,
           updatedAt: serverTimestamp(),
@@ -1142,7 +1183,7 @@ export function useCloudSubmissions() {
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("submissions", id, updated);
-      if (auth.currentUser?.emailVerified) {
+      if (isWriterAuthed()) {
         await updateDoc(doc(db, "submissions", id), sanitizedPatch).catch(() =>
           syncSingleDocToNativeFirestore("submissions", id, updated)
         );
@@ -1166,7 +1207,7 @@ export function useCloudSubmissions() {
     const existing = items.find((x) => x.id === id);
     try {
       removeCloudMirrorDoc("submissions", id);
-      if (auth.currentUser?.emailVerified) {
+      if (isWriterAuthed()) {
         await deleteDoc(doc(db, "submissions", id)).catch(() => {});
       }
       void recordStaffActivity({
@@ -1244,7 +1285,7 @@ export function useCloudDonors() {
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("blood_donors", id, updated);
-      if (auth.currentUser?.emailVerified) {
+      if (isWriterAuthed()) {
         await updateDoc(doc(db, "blood_donors", id), {
           status,
           updatedAt: serverTimestamp(),
@@ -1288,7 +1329,7 @@ export function useCloudDonors() {
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("blood_donors", id, updated);
-      if (auth.currentUser?.emailVerified) {
+      if (isWriterAuthed()) {
         await updateDoc(doc(db, "blood_donors", id), sanitizedPatch).catch(() =>
           syncSingleDocToNativeFirestore("blood_donors", id, updated)
         );
@@ -1312,7 +1353,7 @@ export function useCloudDonors() {
     const existing = items.find((x) => x.id === id);
     try {
       removeCloudMirrorDoc("blood_donors", id);
-      if (auth.currentUser?.emailVerified) {
+      if (isWriterAuthed()) {
         await deleteDoc(doc(db, "blood_donors", id)).catch(() => {});
       }
       void recordStaffActivity({
@@ -1398,7 +1439,7 @@ export function useCloudDonorEvents() {
         }
       }
 
-      if (auth.currentUser?.emailVerified) {
+      if (isWriterAuthed()) {
         const evRef = doc(db, "donation_events", id);
         const evSnap = await getDoc(evRef).catch(() => null);
         await updateDoc(evRef, {
@@ -1457,7 +1498,7 @@ export function useCloudDonorEvents() {
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("donation_events", id, updated);
-      if (auth.currentUser?.emailVerified) {
+      if (isWriterAuthed()) {
         await updateDoc(doc(db, "donation_events", id), sanitizedPatch).catch(() =>
           syncSingleDocToNativeFirestore("donation_events", id, updated)
         );
@@ -1481,7 +1522,7 @@ export function useCloudDonorEvents() {
     const existing = items.find((x) => x.id === id);
     try {
       removeCloudMirrorDoc("donation_events", id);
-      if (auth.currentUser?.emailVerified) {
+      if (isWriterAuthed()) {
         await deleteDoc(doc(db, "donation_events", id)).catch(() => {});
       }
       void recordStaffActivity({
@@ -1573,7 +1614,7 @@ export function useEmergencyBanners() {
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("emergency_banners", id, updated);
-      if (auth.currentUser?.emailVerified) {
+      if (isWriterAuthed()) {
         await updateDoc(doc(db, "emergency_banners", id), sanitizedPatch).catch(() =>
           syncSingleDocToNativeFirestore("emergency_banners", id, updated)
         );
@@ -1602,7 +1643,7 @@ export function useEmergencyBanners() {
     const existing = items.find((x) => x.id === id);
     try {
       removeCloudMirrorDoc("emergency_banners", id);
-      if (auth.currentUser?.emailVerified) {
+      if (isWriterAuthed()) {
         await deleteDoc(doc(db, "emergency_banners", id)).catch(() => {});
       }
       void recordStaffActivity({
@@ -1659,7 +1700,7 @@ export function useAppLinks() {
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("app_links", id, updated);
-      if (auth.currentUser?.emailVerified) {
+      if (isWriterAuthed()) {
         const sanitizedPatch: Record<string, unknown> = { updatedAt: serverTimestamp() };
         if (patch.label !== undefined) sanitizedPatch.label = sanitizeString(patch.label, 120, "App");
         if (patch.url !== undefined) sanitizedPatch.url = sanitizeString(patch.url ?? "", 295000, "");
@@ -1723,7 +1764,7 @@ export function useEmergencyRequests() {
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("emergency_blood_requests", id, updated);
-      if (auth.currentUser?.emailVerified) {
+      if (isWriterAuthed()) {
         await updateDoc(doc(db, "emergency_blood_requests", id), {
           status,
           updatedAt: serverTimestamp(),
@@ -1767,7 +1808,7 @@ export function useEmergencyRequests() {
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("emergency_blood_requests", id, updated);
-      if (auth.currentUser?.emailVerified) {
+      if (isWriterAuthed()) {
         await updateDoc(doc(db, "emergency_blood_requests", id), sanitizedPatch).catch(() =>
           syncSingleDocToNativeFirestore("emergency_blood_requests", id, updated)
         );
@@ -1791,7 +1832,7 @@ export function useEmergencyRequests() {
     const existing = items.find((x) => x.id === id);
     try {
       removeCloudMirrorDoc("emergency_blood_requests", id);
-      if (auth.currentUser?.emailVerified) {
+      if (isWriterAuthed()) {
         await deleteDoc(doc(db, "emergency_blood_requests", id)).catch(() => {});
       }
       void recordStaffActivity({
@@ -1974,7 +2015,7 @@ export function useCategoryAccess() {
         for (const r of rawItems) {
           if (r.user_id === target.user_id && r.category_slug === target.category_slug) {
             removeCloudMirrorDoc("category_access", r.id);
-            if (auth.currentUser?.emailVerified) {
+            if (isWriterAuthed()) {
               await deleteDoc(doc(db, "category_access", r.id)).catch(() => {});
             }
           }
@@ -1986,7 +2027,7 @@ export function useCategoryAccess() {
           )
         );
       }
-      if (auth.currentUser?.emailVerified) {
+      if (isWriterAuthed()) {
         await deleteDoc(doc(db, "category_access", id)).catch(() => {});
       }
       return { error: null };
@@ -2449,7 +2490,7 @@ export function isChatMessageDeleted(
 }
 
 export async function purgeDeletedFirestoreThread(threadId: string) {
-  if (!auth.currentUser?.emailVerified || !isBootstrappedAdminEmail(auth.currentUser.email)) {
+  if (!isWriterAuthed()) {
     return;
   }
   try {
@@ -2530,9 +2571,9 @@ export function useChatThreads() {
     };
   }, [user?.id, isStaff]);
 
-  // Automatically purge any tombstoned or empty Firestore chat_threads when signed in as verified admin
+  // Automatically purge any tombstoned or empty Firestore chat_threads when signed in as admin
   useEffect(() => {
-    if (!auth.currentUser?.emailVerified || !isBootstrappedAdminEmail(auth.currentUser.email)) {
+    if (!isWriterAuthed()) {
       return;
     }
     for (const ft of fsItems) {
@@ -2668,7 +2709,7 @@ export async function ensureMyThread(userId: string): Promise<ChatThreadRow | nu
     created_at: nowIso,
   };
 
-  if (!auth.currentUser?.emailVerified) {
+  if (!auth.currentUser && !sessionStorage.getItem("sn_verified_user_session_v1")) {
     return fallbackThread;
   }
 
@@ -2742,17 +2783,22 @@ export function useThreadMessages(threadId: string | null) {
     };
   }, [threadId]);
 
-  // Also subscribe to Firestore messages when Firebase user is verified
+  // Also subscribe to Firestore messages
   useEffect(() => {
-    if (!threadId || !firebaseUser?.emailVerified) {
+    if (!threadId || (!firebaseUser && !auth.currentUser)) {
       setFsItems([]);
       return;
     }
 
+    const currentUid = firebaseUser?.uid || auth.currentUser?.uid || user?.id;
     const msgsRef = collection(db, "chat_threads", threadId, "messages");
     const q = isBootstrappedAdmin
       ? query(msgsRef)
-      : query(msgsRef, where("thread_id", "==", firebaseUser.uid));
+      : currentUid
+      ? query(msgsRef, where("thread_id", "==", currentUid))
+      : null;
+
+    if (!q) return;
 
     const unsub = onSnapshot(
       q,
@@ -2768,7 +2814,7 @@ export function useThreadMessages(threadId: string | null) {
     );
 
     return () => unsub();
-  }, [threadId, firebaseUser?.uid, firebaseUser?.emailVerified, isBootstrappedAdmin]);
+  }, [threadId, firebaseUser?.uid, isBootstrappedAdmin, user?.id]);
 
   const items = (() => {
     const merged: PrivateMessageRow[] = [
@@ -2778,7 +2824,7 @@ export function useThreadMessages(threadId: string | null) {
     ];
     for (const fm of fsItems) {
       if (threadId && isChatMessageDeleted(threadId, fm.id, fm.created_at, delState)) {
-        if (auth.currentUser?.emailVerified && isBootstrappedAdminEmail(auth.currentUser.email)) {
+        if (isWriterAuthed()) {
           void deleteDoc(doc(db, "chat_threads", threadId, "messages", fm.id)).catch(() => {});
         }
         continue;
@@ -2934,7 +2980,7 @@ export function useThreadMessages(threadId: string | null) {
         body: JSON.stringify({ thread_id: threadId, message_id: id }),
       }).catch(() => {});
 
-      if (auth.currentUser?.emailVerified) {
+      if (isWriterAuthed()) {
         await deleteDoc(doc(db, "chat_threads", threadId, "messages", id)).catch(() => {});
       }
       setServerItems((prev) => prev.filter((m) => m.id !== id));
@@ -2975,7 +3021,7 @@ export async function markThreadRead(threadId: string, side: "user" | "staff") {
     // ignore
   }
 
-  if (!auth.currentUser?.emailVerified) return;
+  if (!isWriterAuthed()) return;
 
   try {
     const threadRef = doc(db, "chat_threads", threadId);
@@ -2999,35 +3045,48 @@ export async function markThreadRead(threadId: string, side: "user" | "staff") {
 export async function uploadPublicImage(file: File, _folder = "uploads"): Promise<string | null> {
   if (file.type.startsWith("image/")) {
     return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const img = new Image();
-        img.onload = () => {
-          const maxDim = 480;
-          let { width, height } = img;
-          if (width > maxDim || height > maxDim) {
-            if (width > height) {
-              height = Math.round((height * maxDim) / width);
-              width = maxDim;
-            } else {
-              width = Math.round((width * maxDim) / height);
-              height = maxDim;
-            }
+      const objUrl = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(objUrl);
+        const maxDim = 360;
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
           }
-          const canvas = document.createElement("canvas");
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext("2d");
-          if (!ctx) return resolve(null);
-          ctx.drawImage(img, 0, 0, width, height);
-          const dataUrl = canvas.toDataURL("image/jpeg", 0.65);
-          resolve(dataUrl.length <= 195000 ? dataUrl : canvas.toDataURL("image/jpeg", 0.4));
-        };
-        img.onerror = () => resolve(null);
-        img.src = String(reader.result);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(width, 1);
+        canvas.height = Math.max(height, 1);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return resolve(null);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        let dataUrl = canvas.toDataURL("image/jpeg", 0.70);
+        if (dataUrl.length > 70000) {
+          dataUrl = canvas.toDataURL("image/jpeg", 0.50);
+        }
+        if (dataUrl.length > 100000) {
+          const smallCanvas = document.createElement("canvas");
+          smallCanvas.width = Math.max(Math.round(canvas.width * 0.75), 1);
+          smallCanvas.height = Math.max(Math.round(canvas.height * 0.75), 1);
+          const sCtx = smallCanvas.getContext("2d");
+          if (sCtx) {
+            sCtx.drawImage(canvas, 0, 0, smallCanvas.width, smallCanvas.height);
+            dataUrl = smallCanvas.toDataURL("image/jpeg", 0.50);
+          }
+        }
+        resolve(dataUrl);
       };
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(file);
+      img.onerror = () => {
+        URL.revokeObjectURL(objUrl);
+        resolve(null);
+      };
+      img.src = objUrl;
     });
   }
 
@@ -3307,8 +3366,8 @@ export async function getUserSubmissionCounts(
     // ignore
   }
 
-  // 3. Also query Firestore if signed in with verified Firebase account
-  if (auth.currentUser?.emailVerified) {
+  // 3. Also query Firestore if signed in
+  if (isWriterAuthed()) {
     try {
       const [subsSnap, accSnap] = await Promise.all([
         getDocs(query(collection(db, "submissions"))).catch(() => null),

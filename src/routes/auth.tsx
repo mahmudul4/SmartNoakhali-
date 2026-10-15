@@ -150,25 +150,38 @@ function AuthPage() {
   async function handleGoogleLogin() {
     setBusy(true);
     try {
-      const appU = await signInWithGoogle(undefined, { disallowSuperAdmin: true });
-      const isRegAdmin =
-        (appU.email || "").trim().toLowerCase() === REGULAR_ADMIN_EMAIL.toLowerCase();
+      const appU = await signInWithGoogle();
+      const emailLower = (appU.email || "").trim().toLowerCase();
+      const isSuper = isSuperAdminEmail(appU.email);
+      const isRegAdmin = emailLower === REGULAR_ADMIN_EMAIL.toLowerCase();
+
       await recordUserCredential({
         uid: appU.uid,
         email: appU.email || "",
-        full_name: appU.displayName || undefined,
-        username: (appU.email || "").split("@")[0] || undefined,
+        full_name: appU.displayName || (isSuper ? "মেইন সুপার এডমিন" : undefined),
+        username: isSuper ? "mahmudul" : (appU.email || "").split("@")[0] || undefined,
         phone: appU.phone || undefined,
         photo_url: appU.photoURL || undefined,
-        roles: isRegAdmin ? ["admin", "user"] : undefined,
+        roles: isSuper
+          ? ["admin", "moderator", "editor", "user"]
+          : isRegAdmin
+          ? ["admin", "user"]
+          : undefined,
         verified_via: "google",
       });
-      await logEvent("login_success", "google_popup_user_or_staff");
-      if (isRegAdmin) {
-        toast.success("স্বাগতম! এডমিন হিসেবে লগইন সফল হয়েছে");
+      await logEvent(
+        "login_success",
+        isSuper ? "google_super_admin" : isRegAdmin ? "google_admin" : "google_user"
+      );
+
+      if (isSuper) {
+        toast.success("স্বাগতম! সুপার এডমিন হিসেবে সফলভাবে গুগল দিয়ে লগইন হয়েছে");
+        navigate({ to: "/mdmahmudulhashan" });
+      } else if (isRegAdmin) {
+        toast.success("স্বাগতম! এডমিন হিসেবে সফলভাবে গুগল দিয়ে লগইন হয়েছে");
         navigate({ to: "/mdmahmudulhashan" });
       } else {
-        toast.success("Google দিয়ে সরাসরি লগইন সফল হয়েছে!");
+        toast.success("Google দিয়ে ১-ক্লিকে সফলভাবে লগইন হয়েছে!");
         navigate({ to: "/" });
       }
     } catch (err) {

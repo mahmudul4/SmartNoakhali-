@@ -32,6 +32,7 @@ import {
   ensureCurrentUserProfileDoc,
 } from "@/lib/firebase";
 import { recordUserCredential, syncVaultFromCloud } from "@/lib/admin-client";
+import { logEvent } from "@/lib/security";
 
 export type Role = "admin" | "moderator" | "editor" | "user";
 
@@ -70,7 +71,7 @@ interface AuthCtx {
   signOut: () => Promise<void>;
   signInWithGoogle: (
     loginHintEmail?: string,
-    options?: { disallowSuperAdmin?: boolean; requireSuperAdmin?: boolean }
+    options?: { requireStaff?: boolean; requireSuperAdmin?: boolean }
   ) => Promise<AppUser>;
   signInSuperAdmin: (emailOrUsername: string, password: string) => Promise<boolean>;
   signInUserOrStaff: (
@@ -100,6 +101,17 @@ interface AuthCtx {
     password: string;
   }) => Promise<{ verified: boolean; user?: AppUser }>;
   resendRealEmailVerification: () => Promise<void>;
+  updateProfileInfo: (params: {
+    displayName?: string;
+    photoURL?: string;
+    phone?: string;
+    username?: string;
+  }) => Promise<AppUser>;
+  syncGoogleProfileDetails: () => Promise<{
+    displayName: string | null;
+    photoURL: string | null;
+    email: string | null;
+  }>;
 }
 
 const Ctx = createContext<AuthCtx | null>(null);
@@ -314,7 +326,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signInWithGoogle(
     loginHintEmail?: string,
-    options?: { disallowSuperAdmin?: boolean; requireSuperAdmin?: boolean }
+    options?: { requireStaff?: boolean; requireSuperAdmin?: boolean }
   ): Promise<AppUser> {
     if (loginHintEmail) {
       googleProvider.setCustomParameters({ login_hint: loginHintEmail });
@@ -322,19 +334,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       googleProvider.setCustomParameters({ prompt: "select_account" });
     }
     const cred = await signInWithPopup(auth, googleProvider);
+    const emailLower = (cred.user.email || "").trim().toLowerCase();
     const isSuper = isSuperAdminEmail(cred.user.email);
+    const isRegAdmin = emailLower === REGULAR_ADMIN_EMAIL.toLowerCase();
 
-    if (options?.disallowSuperAdmin && isSuper) {
-      await firebaseSignOut(auth);
-      throw new Error(
-        "সুপার এডমিন সাধারণ ইউজার লগইন দিয়ে প্রবেশ করতে পারবেন না। শুধুমাত্র এডমিন প্যানেল (/mdmahmudulhashan) দিয়ে লগইন করুন।"
-      );
-    }
+    // Check vault or admin privileges if requireStaff or requireSuperAdmin requested
+    const vault = await syncVaultFromCloud();
+    const vaultEntry = vault[cred.user.uid] || (emailLower ? vault[emailLower] : undefined);
+    const isVaultStaff = Array.isArray(vaultEntry?.roles) &&
+      vaultEntry.roles.some((r: string) => ["admin", "editor", "moderator"].includes(r));
+    const hasStaffPrivilege = isSuper || isRegAdmin || isVaultStaff;
 
     if (options?.requireSuperAdmin && !isSuper) {
       await firebaseSignOut(auth);
       throw new Error(
-        "এডমিন প্যানেল দিয়ে শুধুমাত্র সুপার এডমিন লগইন করতে পারবেন! সাধারণ এডমিন, এডিটর ও মোডারেটরগণ সাধারণ ইউজার লগইন (/auth) দিয়ে প্রবেশ করুন।"
+        "এডমিন প্যানেলে এই অপশনটি শুধুমাত্র প্রধান সুপার এডমিনের জন্য সংরক্ষিত।"
+      );
+    }
+
+    if (options?.requireStaff && !hasStaffPrivilege) {
+      await firebaseSignOut(auth);
+      throw new Error(
+        "এডমিন প্যানেলে প্রবেশের জন্য আপনার অ্যাকাউন্টে এডমিন বা স্টাফ অনুমতি প্রয়োজন।"
       );
     }
 
@@ -353,26 +374,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       setLocalSuperAdmin(false);
     }
+
     try {
       await ensureCurrentUserProfileDoc(cred.user);
     } catch {
       // ignore
     }
+
     const appU = toAppUser(cred.user);
-    if (!isSuper) {
-      const isRegAdmin =
-        (appU.email || "").trim().toLowerCase() === REGULAR_ADMIN_EMAIL.toLowerCase();
-      await recordUserCredential({
-        uid: appU.uid,
-        email: appU.email || "",
-        full_name: appU.displayName || undefined,
-        username: (appU.email || "").split("@")[0] || undefined,
-        phone: appU.phone || undefined,
-        photo_url: appU.photoURL || undefined,
-        roles: isRegAdmin ? ["admin", "user"] : undefined,
-        verified_via: "google",
-      }).catch(() => {});
-    }
+
+    await recordUserCredential({
+      uid: appU.uid,
+      email: cred.user.email || "",
+      full_name: appU.displayName || (isSuper ? "মেইন সুপার এডমিন" : undefined),
+      username: isSuper ? "mahmudul" : (appU.email || "").split("@")[0] || undefined,
+      phone: appU.phone || undefined,
+      photo_url: appU.photoURL || undefined,
+      roles: isSuper
+        ? ["admin", "moderator", "editor", "user"]
+        : isRegAdmin
+        ? ["admin", "user"]
+        : isVaultStaff
+        ? (vaultEntry?.roles as Role[])
+        : ["user"],
+      verified_via: "google",
+    }).catch(() => {});
+
     return appU;
   }
 
@@ -872,6 +899,127 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { verified: true, user: appU };
   }
 
+  async function updateProfileInfo(params: {
+    displayName?: string;
+    photoURL?: string;
+    phone?: string;
+    username?: string;
+  }): Promise<AppUser> {
+    const current = auth.currentUser;
+    const targetUid = current?.uid || user?.uid || "user";
+    const cleanDisplayName =
+      params.displayName !== undefined
+        ? sanitizeString(params.displayName, 120, "")
+        : (user?.displayName || "");
+    const cleanPhotoUrl =
+      params.photoURL !== undefined
+        ? sanitizeString(params.photoURL, 500, "")
+        : (user?.photoURL || "");
+    const cleanPhone =
+      params.phone !== undefined
+        ? sanitizeString(params.phone, 30, "")
+        : (user?.phone || "");
+    const cleanUsername =
+      params.username !== undefined
+        ? sanitizeString(params.username, 60, "")
+        : (username || "");
+
+    if (current) {
+      await updateProfile(current, {
+        displayName: cleanDisplayName || undefined,
+        photoURL: cleanPhotoUrl || undefined,
+      }).catch(() => {});
+    }
+
+    if (current?.uid) {
+      try {
+        await ensureCurrentUserProfileDoc(current);
+        const userRef = doc(db, "users", current.uid);
+        await setDoc(
+          userRef,
+          {
+            full_name: cleanDisplayName,
+            username: cleanUsername,
+            phone: cleanPhone,
+            photo_url: cleanPhotoUrl,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      } catch (err) {
+        console.warn("Firestore user profile update:", err);
+      }
+    }
+
+    await recordUserCredential({
+      uid: targetUid,
+      email: current?.email || user?.email || "",
+      full_name: cleanDisplayName,
+      username: cleanUsername,
+      phone: cleanPhone,
+      photo_url: cleanPhotoUrl,
+    }).catch(() => {});
+
+    const updatedAppUser: AppUser = {
+      ...(user || {
+        id: targetUid,
+        uid: targetUid,
+        email: current?.email || null,
+        phone: cleanPhone || null,
+        displayName: cleanDisplayName,
+        photoURL: cleanPhotoUrl || null,
+        emailVerified: Boolean(current?.emailVerified),
+      }),
+      displayName: cleanDisplayName,
+      photoURL: cleanPhotoUrl || null,
+      phone: cleanPhone || null,
+    };
+
+    setUser(updatedAppUser);
+    if (cleanUsername) setUsername(cleanUsername);
+
+    if (verifiedSession) {
+      const nextSess: VerifiedSessionData = {
+        ...verifiedSession,
+        user: updatedAppUser,
+        username: cleanUsername || verifiedSession.username,
+      };
+      writeVerifiedSession(nextSess);
+      setVerifiedSession(nextSess);
+    }
+
+    await logEvent("profile_updated", `Name: ${cleanDisplayName}`);
+
+    return updatedAppUser;
+  }
+
+  async function syncGoogleProfileDetails(): Promise<{
+    displayName: string | null;
+    photoURL: string | null;
+    email: string | null;
+  }> {
+    const current = auth.currentUser;
+    const existingGoogle = current?.providerData?.find(
+      (p) => p.providerId === "google.com"
+    );
+
+    if (existingGoogle && (existingGoogle.displayName || existingGoogle.photoURL)) {
+      return {
+        displayName: existingGoogle.displayName || null,
+        photoURL: existingGoogle.photoURL || null,
+        email: existingGoogle.email || null,
+      };
+    }
+
+    googleProvider.setCustomParameters({ prompt: "select_account" });
+    const cred = await signInWithPopup(auth, googleProvider);
+    return {
+      displayName: cred.user.displayName || null,
+      photoURL: cred.user.photoURL || null,
+      email: cred.user.email || null,
+    };
+  }
+
   // Strictly enforce that ONLY mdmahmudulhashan0@gmail.com can ever be isMainAdmin (Super Admin)
   const isSignedInAsNonSuper = Boolean(
     (firebaseUser && !isSuperAdminEmail(firebaseUser.email)) ||
@@ -949,6 +1097,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     startRealEmailVerification,
     checkAndCompleteRealEmailVerification,
     resendRealEmailVerification,
+    updateProfileInfo,
+    syncGoogleProfileDetails,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

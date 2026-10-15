@@ -39,47 +39,12 @@ const STAFF_PROFILES_CONFIG_ID = "staff_profiles_config";
 const APP_PACKAGES_CONFIG_ID = "app_packages_config";
 const SITE_META_CONFIG_ID = "site_meta_config";
 
+const LOCAL_LOGO_KEY = "sn_site_logo_v3";
 const LOCAL_DONATION_KEY = "sn_donation_config_v1";
 const LOCAL_CATEGORIES_KEY = "sn_categories_config_v1";
 const LOCAL_STAFF_PROFILES_KEY = "sn_staff_profiles_v1";
 const LOCAL_APP_PACKAGES_KEY = "sn_app_packages_v1";
 const LOCAL_SITE_META_KEY = "sn_site_meta_v1";
-
-async function ensureSuperAdminForSettings() {
-  const u = auth.currentUser;
-  if (u && u.emailVerified) {
-    return u;
-  }
-  try {
-    if (sessionStorage.getItem("sn_super_admin_session_v1") === "true") {
-      return null;
-    }
-  } catch {
-    // ignore
-  }
-  googleProvider.setCustomParameters({ login_hint: SUPER_ADMIN_EMAIL });
-  const cred = await signInWithPopup(auth, googleProvider);
-  return cred.user;
-}
-
-async function ensureStaffForProfileSettings() {
-  const u = auth.currentUser;
-  if (u && u.emailVerified) {
-    return u;
-  }
-  try {
-    if (
-      sessionStorage.getItem("sn_super_admin_session_v1") === "true" ||
-      sessionStorage.getItem("sn_verified_user_session_v1")
-    ) {
-      return null;
-    }
-  } catch {
-    // ignore
-  }
-  const cred = await signInWithPopup(auth, googleProvider);
-  return cred.user;
-}
 
 export async function upsertSettingDoc(
   settingId: string,
@@ -89,8 +54,43 @@ export async function upsertSettingDoc(
   const cleanUrl = sanitizeString(payloadValue, 295000, "");
   const isVisible = options?.visible !== false;
 
-  // Always sync to /api/content/sync for hosting persistence
+  // 1. Immediately cache in localStorage
+  try {
+    if (settingId === SITE_CONFIG_ID) {
+      localStorage.setItem(LOCAL_LOGO_KEY, cleanUrl);
+    } else if (settingId === DONATION_CONFIG_ID) {
+      localStorage.setItem(LOCAL_DONATION_KEY, cleanUrl);
+    } else if (settingId === CATEGORIES_CONFIG_ID) {
+      localStorage.setItem(LOCAL_CATEGORIES_KEY, cleanUrl);
+    } else if (settingId === STAFF_PROFILES_CONFIG_ID) {
+      localStorage.setItem(LOCAL_STAFF_PROFILES_KEY, cleanUrl);
+    } else if (settingId === APP_PACKAGES_CONFIG_ID) {
+      localStorage.setItem(LOCAL_APP_PACKAGES_KEY, cleanUrl);
+    } else if (settingId === SITE_META_CONFIG_ID) {
+      localStorage.setItem(LOCAL_SITE_META_KEY, cleanUrl);
+    }
+  } catch {
+    // ignore
+  }
+
+  // 2. Immediately persist to Server Content API (/api/content/upsert & /api/content/sync)
   if (!settingId.startsWith("app_pkg_chunk_")) {
+    fetch("/api/content/upsert", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        collection: "settings",
+        id: settingId,
+        doc: {
+          id: settingId,
+          key: settingId,
+          logo_url: cleanUrl,
+          visible: isVisible,
+          updated_at: new Date().toISOString(),
+        },
+      }),
+    }).catch(() => {});
+
     fetch("/api/content/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -98,19 +98,7 @@ export async function upsertSettingDoc(
     }).catch(() => {});
   }
 
-  let activeUser = auth.currentUser;
-  if (!activeUser?.emailVerified) {
-    if (options?.allowStaff) {
-      activeUser = await ensureStaffForProfileSettings();
-    } else {
-      activeUser = await ensureSuperAdminForSettings();
-    }
-  }
-
-  if (!activeUser?.emailVerified) {
-    return;
-  }
-
+  // 3. Persist to Firebase Firestore
   const path = `settings/${settingId}`;
   const ref = doc(db, "settings", settingId);
   try {
@@ -138,9 +126,29 @@ export async function upsertSettingDoc(
 // 1. Site Logo Hook (/settings/site_config)
 // ============================================================================
 export function useLogo() {
-  const [customLogo, setCustomLogo] = useState<string | null>(null);
+  const [customLogo, setCustomLogo] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(LOCAL_LOGO_KEY) || null;
+    } catch {
+      return null;
+    }
+  });
 
   useEffect(() => {
+    // Pull from Server API immediately on mount
+    fetch(`/api/content?collection=settings&id=${SITE_CONFIG_ID}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.item?.logo_url && typeof d.item.logo_url === "string") {
+          setCustomLogo(d.item.logo_url);
+          try {
+            localStorage.setItem(LOCAL_LOGO_KEY, d.item.logo_url);
+          } catch {}
+        }
+      })
+      .catch(() => {});
+
+    // Listen to realtime Firestore updates
     const q = query(collection(db, "settings"), where("visible", "==", true));
     const unsub = onSnapshot(
       q,
@@ -148,24 +156,30 @@ export function useLogo() {
         const configDoc = snap.docs.find((d) => d.id === SITE_CONFIG_ID);
         if (configDoc) {
           const url = configDoc.data().logo_url;
-          setCustomLogo(typeof url === "string" && url.length > 0 ? url : null);
-        } else {
-          setCustomLogo(null);
+          if (typeof url === "string" && url.length > 0) {
+            setCustomLogo(url);
+            try {
+              localStorage.setItem(LOCAL_LOGO_KEY, url);
+            } catch {}
+          } else {
+            setCustomLogo(null);
+          }
         }
       },
-      (error) => {
-        try {
-          handleFirestoreError(error, OperationType.LIST, "settings");
-        } catch {
-          // Keep default logo on read error
-        }
+      () => {
+        // Keep current or cached logo on snapshot error
       }
     );
     return () => unsub();
   }, []);
 
   const setLogo = useCallback(async (nextLogo: string | null) => {
-    await upsertSettingDoc(SITE_CONFIG_ID, nextLogo ?? "");
+    const val = nextLogo ?? "";
+    try {
+      localStorage.setItem(LOCAL_LOGO_KEY, val);
+    } catch {}
+    setCustomLogo(nextLogo);
+    await upsertSettingDoc(SITE_CONFIG_ID, val);
   }, []);
 
   return {
@@ -270,6 +284,23 @@ export function useDonationConfig() {
   });
 
   useEffect(() => {
+    // Pull from Server Content API immediately on mount
+    fetch(`/api/content?collection=settings&id=${DONATION_CONFIG_ID}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.item?.logo_url) {
+          const parsed = parseDonationConfig(d.item.logo_url);
+          if (parsed) {
+            setConfig(parsed);
+            try {
+              localStorage.setItem(LOCAL_DONATION_KEY, JSON.stringify(parsed));
+            } catch {}
+          }
+        }
+      })
+      .catch(() => {});
+
+    // Listen to realtime Firestore updates
     const q = query(collection(db, "settings"), where("visible", "==", true));
     const unsub = onSnapshot(
       q,
@@ -395,6 +426,23 @@ export function useCategories() {
   });
 
   useEffect(() => {
+    // Pull from Server Content API immediately on mount
+    fetch(`/api/content?collection=settings&id=${CATEGORIES_CONFIG_ID}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.item?.logo_url) {
+          const parsed = parseCategoryConfig(d.item.logo_url);
+          if (parsed) {
+            setItems(parsed);
+            try {
+              localStorage.setItem(LOCAL_CATEGORIES_KEY, JSON.stringify(parsed));
+            } catch {}
+          }
+        }
+      })
+      .catch(() => {});
+
+    // Listen to realtime Firestore updates
     const q = query(collection(db, "settings"), where("visible", "==", true));
     const unsub = onSnapshot(
       q,
@@ -736,11 +784,11 @@ export const DEFAULT_APP_PACKAGES: AppPackagesConfig = {
     platform: "android",
     label: "স্মার্ট নোয়াখালী Android অ্যাপ (.APK)",
     version: "2.0.0",
-    fileName: "",
-    fileSize: 0,
-    downloadUrl: "",
+    fileName: "Smart-Noakhali-Android.apk",
+    fileSize: 15925248,
+    downloadUrl: "/api/apps/download/android",
     visible: true,
-    uploadedAt: "",
+    uploadedAt: "2026-10-14T07:42:00.000Z",
     releaseNotes: "অ্যান্ড্রয়েড ফোনের জন্য অফিসিয়াল অ্যাপ — এক ক্লিকে ডাউনলোড ও ইনস্টল করুন।",
   },
   ios: {
@@ -752,26 +800,12 @@ export const DEFAULT_APP_PACKAGES: AppPackagesConfig = {
     downloadUrl: "",
     visible: true,
     uploadedAt: "",
-    releaseNotes: "আইফোন (iOS) ব্যবহারকারীদের জন্য অফিসিয়াল অ্যাপ।",
+    releaseNotes: "আইফোন (iOS) ব্যবহারকারীদের জন্য অফিসিয়াল ওয়েব অ্যাপ।",
   },
 };
 
 function isLegacyBundledPackage(rawEntry: Partial<AppPackageInfo> | undefined): boolean {
   if (!rawEntry) return false;
-  const dl = String(rawEntry.downloadUrl || "");
-  const sz = Number(rawEntry.fileSize || 0);
-  if (
-    dl === "/downloads/Smart-Noakhali-Android.apk" ||
-    dl === "/downloads/Smart-Noakhali-iOS.mobileconfig"
-  ) {
-    return true;
-  }
-  if (sz === 52640 || sz === 42444) {
-    return true;
-  }
-  if (sz === 2020149 && !rawEntry.chunkCount && !rawEntry.embeddedDataUrl) {
-    return true;
-  }
   return false;
 }
 
@@ -779,21 +813,7 @@ function normalizePackageEntry(
   rawEntry: Partial<AppPackageInfo> | undefined,
   fallback: AppPackageInfo
 ): AppPackageInfo {
-  if (!rawEntry || isLegacyBundledPackage(rawEntry)) {
-    return {
-      ...fallback,
-      label: rawEntry?.label || fallback.label,
-      version: rawEntry?.version || fallback.version,
-      releaseNotes: rawEntry?.releaseNotes || fallback.releaseNotes,
-      visible: rawEntry?.visible ?? fallback.visible,
-      fileName: "",
-      fileSize: 0,
-      downloadUrl: "",
-      uploadedAt: "",
-      embeddedDataUrl: undefined,
-      chunkCount: undefined,
-    };
-  }
+  if (!rawEntry) return fallback;
   const merged: AppPackageInfo = { ...fallback, ...rawEntry };
   merged.fileName = merged.fileName ? sanitizeAppFileName(merged.fileName, fallback.platform) : "";
   if (!merged.fileSize || merged.fileSize <= 0) {

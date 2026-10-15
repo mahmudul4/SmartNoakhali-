@@ -324,8 +324,22 @@ function PersonCard({
   return (
     <div className="group w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-border/60 bg-gradient-card p-3.5 shadow-card transition hover:shadow-elevated sm:p-4">
       <div className="flex w-full min-w-0 items-center justify-between gap-2.5 sm:gap-3">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/10 text-primary sm:h-12 sm:w-12">
-          {l.photo ? <img src={l.photo} alt={l.name} className="h-full w-full rounded-full object-cover" /> : <User className="h-5 w-5 sm:h-6 sm:w-6" />}
+        <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/10 text-primary sm:h-12 sm:w-12">
+          {l.photo ? (
+            <img
+              src={l.photo}
+              alt={l.name}
+              className="h-full w-full rounded-full object-cover"
+              onError={(e) => {
+                (e.currentTarget as HTMLElement).style.display = "none";
+                const fb = (e.currentTarget.parentElement?.querySelector(".person-photo-fallback") as HTMLElement);
+                if (fb) fb.classList.remove("hidden");
+              }}
+            />
+          ) : null}
+          <div className={`person-photo-fallback flex h-full w-full items-center justify-center ${l.photo ? "hidden" : ""}`}>
+            <User className="h-5 w-5 sm:h-6 sm:w-6" />
+          </div>
         </div>
         <div className="min-w-0 flex-1 overflow-hidden">
           <p className="truncate text-sm font-bold text-foreground sm:text-base">{l.name}</p>
@@ -388,8 +402,22 @@ function BloodCard({
   return (
     <div className="w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-border/60 bg-gradient-card p-3.5 shadow-card sm:p-4">
       <div className="flex w-full min-w-0 items-center justify-between gap-2.5 sm:gap-3">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-rose-500/10 text-rose-600 ring-2 ring-rose-500/20 sm:h-12 sm:w-12">
-          {l.photo ? <img src={l.photo} alt={l.name} className="h-full w-full object-cover" /> : <Droplet className="h-5 w-5 sm:h-6 sm:w-6" />}
+        <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-rose-500/10 text-rose-600 ring-2 ring-rose-500/20 sm:h-12 sm:w-12">
+          {l.photo ? (
+            <img
+              src={l.photo}
+              alt={l.name}
+              className="h-full w-full object-cover"
+              onError={(e) => {
+                (e.currentTarget as HTMLElement).style.display = "none";
+                const fb = (e.currentTarget.parentElement?.querySelector(".blood-photo-fallback") as HTMLElement);
+                if (fb) fb.classList.remove("hidden");
+              }}
+            />
+          ) : null}
+          <div className={`blood-photo-fallback flex h-full w-full items-center justify-center ${l.photo ? "hidden" : ""}`}>
+            <Droplet className="h-5 w-5 sm:h-6 sm:w-6" />
+          </div>
         </div>
         <div className="min-w-0 flex-1 overflow-hidden">
           <div className="flex min-w-0 items-center gap-1.5">

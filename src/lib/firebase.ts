@@ -155,7 +155,7 @@ export async function ensureCurrentUserProfileDoc(
     phone?: string;
   }
 ): Promise<void> {
-  if (!u || !u.uid || !u.emailVerified) return;
+  if (!u || !u.uid) return;
 
   const existingInFlight = ensuringUserByUid.get(u.uid);
   if (existingInFlight) {
@@ -166,10 +166,11 @@ export async function ensureCurrentUserProfileDoc(
   const work = (async () => {
     const userRef = doc(db, "users", u.uid);
     const snap = await getDoc(userRef);
+    const isSuper = isSuperAdminEmail(u.email);
+    const isRegAdmin =
+      u.email?.trim().toLowerCase() === REGULAR_ADMIN_EMAIL.toLowerCase();
+
     if (!snap.exists()) {
-      const isSuper = isSuperAdminEmail(u.email);
-      const isRegAdmin =
-        u.email?.trim().toLowerCase() === REGULAR_ADMIN_EMAIL.toLowerCase();
       const emailStr = sanitizeString(
         u.email || "user@example.com",
         254,
@@ -209,13 +210,40 @@ export async function ensureCurrentUserProfileDoc(
         updatedAt: serverTimestamp(),
       });
 
-      if (isSuper) {
+      if (isSuper || isRegAdmin) {
         const adminRef = doc(db, "admins", u.uid);
         const adminSnap = await getDoc(adminRef);
         if (!adminSnap.exists()) {
           await setDoc(adminRef, {
             uid: u.uid,
             email: emailStr,
+            createdAt: serverTimestamp(),
+          });
+        }
+      }
+    } else {
+      // If user exists and is authorized admin, ensure admin roles are present
+      if (isSuper || isRegAdmin) {
+        const data = snap.data();
+        const currentRoles: string[] = Array.isArray(data?.roles) ? data.roles : [];
+        const requiredRoles = isSuper ? ["admin", "moderator", "editor", "user"] : ["admin", "user"];
+        const needsUpdate = requiredRoles.some((r) => !currentRoles.includes(r));
+        if (needsUpdate) {
+          await setDoc(
+            userRef,
+            {
+              roles: Array.from(new Set([...currentRoles, ...requiredRoles])),
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true }
+          );
+        }
+        const adminRef = doc(db, "admins", u.uid);
+        const adminSnap = await getDoc(adminRef);
+        if (!adminSnap.exists()) {
+          await setDoc(adminRef, {
+            uid: u.uid,
+            email: sanitizeString(u.email || "admin@example.com", 254),
             createdAt: serverTimestamp(),
           });
         }

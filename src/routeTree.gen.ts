@@ -22,6 +22,13 @@ import { Route as MdmahmudulhashanRouteImport } from './routes/mdmahmudulhashan'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CategorySlugRouteImport } from './routes/category.$slug'
+import { Route as ProfileRouteImport } from './routes/profile'
+
+const ProfileRoute = ProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 const SubmitInfoRoute = SubmitInfoRouteImport.update({
   id: '/submit-info',
@@ -103,6 +110,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/submit-info': typeof SubmitInfoRoute
   '/category/$slug': typeof CategorySlugRoute
+  '/profile': typeof ProfileRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -118,6 +126,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/submit-info': typeof SubmitInfoRoute
   '/category/$slug': typeof CategorySlugRoute
+  '/profile': typeof ProfileRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -134,6 +143,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/submit-info': typeof SubmitInfoRoute
   '/category/$slug': typeof CategorySlugRoute
+  '/profile': typeof ProfileRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -151,6 +161,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/submit-info'
     | '/category/$slug'
+    | '/profile'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -166,6 +177,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/submit-info'
     | '/category/$slug'
+    | '/profile'
   id:
     | '__root__'
     | '/'
@@ -181,6 +193,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/submit-info'
     | '/category/$slug'
+    | '/profile'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -197,6 +210,7 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   SubmitInfoRoute: typeof SubmitInfoRoute
   CategorySlugRoute: typeof CategorySlugRoute
+  ProfileRoute: typeof ProfileRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -292,6 +306,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CategorySlugRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/profile': {
+      id: '/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof ProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -309,6 +330,7 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   SubmitInfoRoute: SubmitInfoRoute,
   CategorySlugRoute: CategorySlugRoute,
+  ProfileRoute: ProfileRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -32,15 +32,23 @@ interface BeforeInstallPromptEvent extends Event {
 let globalDeferredPrompt: BeforeInstallPromptEvent | null = null;
 const promptListeners = new Set<(e: BeforeInstallPromptEvent | null) => void>();
 
+declare global {
+  interface Window {
+    __deferredPrompt?: BeforeInstallPromptEvent | null;
+  }
+}
+
 if (typeof window !== "undefined") {
   window.addEventListener("beforeinstallprompt", (e: Event) => {
     e.preventDefault();
     globalDeferredPrompt = e as BeforeInstallPromptEvent;
+    window.__deferredPrompt = globalDeferredPrompt;
     promptListeners.forEach((fn) => fn(globalDeferredPrompt));
   });
 
   window.addEventListener("appinstalled", () => {
     globalDeferredPrompt = null;
+    window.__deferredPrompt = null;
     promptListeners.forEach((fn) => fn(null));
   });
 }
@@ -128,12 +136,7 @@ export async function loadBinaryFromIdb(
         const res = req.result as
           | { fileSize?: number; buffer?: ArrayBuffer }
           | undefined;
-        if (
-          res?.buffer &&
-          res.buffer.byteLength > 0 &&
-          res.buffer.byteLength !== 52640 &&
-          res.buffer.byteLength !== 42444
-        ) {
+        if (res?.buffer && res.buffer.byteLength > 0) {
           if (res.buffer.byteLength === expectedSize) {
             resolve(res.buffer);
             return;
@@ -287,7 +290,7 @@ export async function downloadAppPackageBinary(opts: {
         continue;
       }
       const buf = await resp.arrayBuffer();
-      if (buf.byteLength <= 0 || buf.byteLength === 52640 || buf.byteLength === 42444) {
+      if (buf.byteLength <= 0) {
         continue;
       }
       const prefix = new TextDecoder("utf-8", { fatal: false })
@@ -399,16 +402,49 @@ export function usePWAInstall() {
   }, []);
 
   const install = async (): Promise<boolean> => {
-    const promptEvent = deferredPrompt || globalDeferredPrompt;
-    if (!promptEvent) return false;
-    await promptEvent.prompt();
-    const { outcome } = await promptEvent.userChoice;
-    if (outcome === "accepted") {
-      setIsInstalled(true);
-      globalDeferredPrompt = null;
-      setDeferredPrompt(null);
+    let promptEvent =
+      deferredPrompt ||
+      globalDeferredPrompt ||
+      (typeof window !== "undefined" ? window.__deferredPrompt : null);
+
+    // If event has not yet fired, wait up to 1500ms for it
+    if (!promptEvent) {
+      promptEvent = await new Promise<BeforeInstallPromptEvent | null>((resolve) => {
+        let t: any;
+        const handler = (e: BeforeInstallPromptEvent | null) => {
+          if (e) {
+            clearTimeout(t);
+            promptListeners.delete(handler);
+            resolve(e);
+          }
+        };
+        promptListeners.add(handler);
+        t = setTimeout(() => {
+          promptListeners.delete(handler);
+          resolve(null);
+        }, 1500);
+      });
+    }
+
+    if (promptEvent) {
+      await promptEvent.prompt();
+      const { outcome } = await promptEvent.userChoice;
+      if (outcome === "accepted") {
+        setIsInstalled(true);
+        globalDeferredPrompt = null;
+        if (typeof window !== "undefined") window.__deferredPrompt = null;
+        setDeferredPrompt(null);
+        return true;
+      }
+      return false;
+    }
+
+    // If inside an iframe (like AI Studio preview), opening top-level triggers Chrome's native install prompt
+    if (typeof window !== "undefined" && window.self !== window.top) {
+      window.open(window.location.href, "_blank");
       return true;
     }
+
     return false;
   };
 
@@ -443,96 +479,10 @@ export function useOnlineStatus() {
 }
 
 export const PWAInstallButton: React.FC = () => {
-  const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
-  const [showIOSGuide, setShowIOSGuide] = useState(false);
-
-  if (isInstalled) {
-    return null;
-  }
-
-  if (isInstallable) {
-    return (
-      <button
-        type="button"
-        onClick={() => void install()}
-        className="flex shrink-0 items-center gap-1 rounded-full bg-white/15 px-2.5 py-1.5 text-[11px] font-bold text-amber-200 ring-1 ring-amber-300/40 transition hover:bg-white/25 active:scale-95"
-        title="এক ক্লিকে অ্যাপ ইনস্টল করুন"
-      >
-        <Download className="h-3.5 w-3.5 shrink-0" />
-        <span className="hidden xs:inline sm:inline">অ্যাপ ইনস্টল</span>
-      </button>
-    );
-  }
-
-  if (isIOS) {
-    return (
-      <>
-        <button
-          type="button"
-          onClick={() => setShowIOSGuide(true)}
-          className="flex shrink-0 items-center gap-1 rounded-full bg-white/15 px-2.5 py-1.5 text-[11px] font-bold text-amber-200 ring-1 ring-amber-300/40 transition hover:bg-white/25"
-        >
-          <Smartphone className="h-3.5 w-3.5 shrink-0" />
-          <span className="hidden sm:inline">iOS অ্যাপ</span>
-        </button>
-
-        {showIOSGuide && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-            onClick={() => setShowIOSGuide(false)}
-          >
-            <div
-              className="w-full max-w-sm rounded-3xl bg-card p-5 text-foreground shadow-elevated"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between border-b border-border pb-3">
-                <h3 className="font-display text-base font-bold text-primary-deep">
-                  iPhone / iPad-এ অ্যাপ ইনস্টল করুন
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => setShowIOSGuide(false)}
-                  className="rounded-full bg-muted p-1 text-muted-foreground"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="mt-3 space-y-2.5 text-xs text-muted-foreground">
-                <p className="flex items-center gap-2">
-                  <Share className="h-4 w-4 shrink-0 text-primary" />
-                  <span>
-                    ১. Safari ব্রাউজারের নিচে <strong>Share</strong> বাটনে ট্যাপ করুন।
-                  </span>
-                </p>
-                <p className="flex items-center gap-2">
-                  <PlusSquare className="h-4 w-4 shrink-0 text-primary" />
-                  <span>
-                    ২. নিচে স্ক্রল করে <strong>Add to Home Screen</strong> নির্বাচন করুন।
-                  </span>
-                </p>
-                <p className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
-                  <span>
-                    ৩. উপরে ডান কোণায় <strong>Add</strong> ট্যাপ করলেই অ্যাপ ইনস্টল হয়ে যাবে!
-                  </span>
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowIOSGuide(false)}
-                className="mt-4 w-full rounded-2xl bg-gradient-hero py-2.5 text-xs font-bold text-white shadow-card"
-              >
-                বুঝেছি
-              </button>
-            </div>
-          </div>
-        )}
-      </>
-    );
-  }
-
   return null;
 };
+
+
 
 export const OfflineIndicator: React.FC = () => {
   const isOnline = useOnlineStatus();

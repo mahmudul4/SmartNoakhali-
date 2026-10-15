@@ -44,9 +44,11 @@ import {
   CheckCircle2,
   Sparkles,
   Database,
+  Droplet,
 } from "lucide-react";
 import { toast } from "sonner";
 import { auth, SUPER_ADMIN_EMAIL } from "@/lib/firebase";
+import { sendBrowserNotification } from "@/lib/notifications";
 import { CATEGORY_ICONS, CATEGORY_TINTS } from "@/data/categories";
 import {
   useLogo,
@@ -289,12 +291,27 @@ function AdminPinLockScreen({
 }
 
 function AdminLoginForm() {
-  const { signInSuperAdmin } = useAuth();
+  const { signInSuperAdmin, signInWithGoogle } = useAuth();
   const { logo } = useLogo();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  async function handleGoogleAdminLogin() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const appU = await signInWithGoogle(undefined, { requireStaff: true });
+      clearFailedAdminLogins();
+      await logEvent("admin_login_success", `google_${appU.email}`);
+      toast.success("স্বাগতম! গুগল দিয়ে এডমিন প্যানেলে সফলভাবে লগইন হয়েছে");
+    } catch (err: any) {
+      toast.error(err?.message || "গুগল দিয়ে এডমিন লগইন সম্পন্ন করা যায়নি");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -354,6 +371,47 @@ function AdminLoginForm() {
             alt="Smart Noakhali Logo"
             className="h-full w-full rounded-full object-contain"
           />
+        </div>
+
+        <h1 className="mb-1 text-center font-display text-lg font-bold text-primary-deep">
+          এডমিন ও স্টাফ কন্ট্রোল প্যানেল
+        </h1>
+        <p className="mb-5 text-center text-xs text-muted-foreground">
+          অনুমোদিত সুপার এডমিন ও এডমিন অ্যাকাউন্ট দিয়ে প্রবেশ করুন
+        </p>
+
+        {/* Google Admin 1-Click Login */}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={handleGoogleAdminLogin}
+          className="flex w-full items-center justify-center gap-2.5 rounded-xl border-2 border-primary/40 bg-white py-3.5 text-sm font-bold text-primary-deep shadow-card transition hover:border-primary hover:bg-primary/5 active:scale-[0.99] disabled:opacity-60"
+        >
+          <svg className="h-5 w-5" viewBox="0 0 24 24">
+            <path
+              fill="#4285F4"
+              d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
+            />
+            <path
+              fill="#34A853"
+              d="M12 24c3.3 0 6.08-1.09 8.1-2.96l-3.88-3.05c-1.1.74-2.5 1.18-4.22 1.18-3.25 0-6-2.2-6.98-5.15H1.01v3.14C3.02 21.15 7.21 24 12 24Z"
+            />
+            <path
+              fill="#FBBC05"
+              d="M5.02 14.02c-.25-.74-.39-1.54-.39-2.37 0-.83.14-1.63.39-2.37V6.14H1.01C.37 7.42 0 8.87 0 11.65s.37 4.23 1.01 5.51l4.01-3.14Z"
+            />
+            <path
+              fill="#EA4335"
+              d="M12 4.75c1.8 0 3.41.62 4.68 1.84l3.51-3.51C18.07 1.19 15.3 0 12 0 7.21 0 3.02 2.85 1.01 6.84l4.01 3.14C6 7.02 8.75 4.75 12 4.75Z"
+            />
+          </svg>
+          Google দিয়ে সরাসরি এডমিন লগইন
+        </button>
+
+        <div className="my-4 flex items-center gap-3 text-[11px] text-muted-foreground">
+          <div className="h-px flex-1 bg-border" />
+          <span>অথবা পাসওয়ার্ড দিয়ে সুপার এডমিন লগইন</span>
+          <div className="h-px flex-1 bg-border" />
         </div>
 
         <form onSubmit={onSubmit} className="space-y-3.5">
@@ -471,7 +529,7 @@ function Dashboard({
   const [refreshingDashboard, setRefreshingDashboard] = useState(false);
 
   useEffect(() => {
-    if (!isMainAdmin) return;
+    if (!isMainAdmin && !isAdmin) return;
     let cancelled = false;
     const syncUsers = async () => {
       try {
@@ -487,7 +545,7 @@ function Dashboard({
       cancelled = true;
       clearInterval(t);
     };
-  }, [isMainAdmin]);
+  }, [isMainAdmin, isAdmin]);
 
   const myStaffProfile =
     getStaffProfile(user?.id) || getStaffProfile(user?.email);
@@ -520,10 +578,11 @@ function Dashboard({
     pendingEvents.length +
     pendingEmerg.length;
 
-  // Enforce strict tab isolation so non-Super Admins cannot access Super Admin tabs
+  // Enforce tab access: Super Admins & Admins have full access to management tabs
   useEffect(() => {
+    const hasAdminAccess = isMainAdmin || isAdmin;
     if (
-      !isMainAdmin &&
+      !hasAdminAccess &&
       (tab === "activity" ||
         tab === "categories" ||
         tab === "donation" ||
@@ -534,13 +593,13 @@ function Dashboard({
     ) {
       setTab("overview");
     }
-  }, [isMainAdmin, tab]);
+  }, [isMainAdmin, isAdmin, tab]);
 
   async function handleDashboardRefresh() {
     setRefreshingDashboard(true);
     try {
       await auditHook.refresh();
-      if (isMainAdmin) {
+      if (isMainAdmin || isAdmin) {
         const list = await listUsers();
         setTotalUsersCount(list.length);
       }
@@ -680,7 +739,7 @@ function Dashboard({
         <TabBtn active={tab === "profile"} onClick={() => setTab("profile")}>
           আমার প্রোফাইল
         </TabBtn>
-        {isMainAdmin && (
+        {(isMainAdmin || isAdmin) && (
           <TabBtn active={tab === "categories"} onClick={() => setTab("categories")}>
             ক্যাটাগরি
           </TabBtn>
@@ -688,7 +747,7 @@ function Dashboard({
         <TabBtn active={tab === "info"} onClick={() => setTab("info")} badge={pendingSubs.length}>
           তথ্য
         </TabBtn>
-        {isMainAdmin && (
+        {(isMainAdmin || isAdmin) && (
           <TabBtn
             active={tab === "donation"}
             onClick={() => setTab("donation")}
@@ -728,12 +787,12 @@ function Dashboard({
         >
           লাইভ চ্যাট
         </TabBtn>
-        {isMainAdmin && (
+        {(isMainAdmin || isAdmin) && (
           <TabBtn active={tab === "apps"} onClick={() => setTab("apps")}>
             অ্যাপ আপলোড
           </TabBtn>
         )}
-        {isMainAdmin && (
+        {(isMainAdmin || isAdmin) && (
           <TabBtn
             active={tab === "users"}
             onClick={() => setTab("users")}
@@ -742,7 +801,7 @@ function Dashboard({
             ইউজার ও পাসওয়ার্ড
           </TabBtn>
         )}
-        {isMainAdmin && (
+        {(isMainAdmin || isAdmin) && (
           <TabBtn
             active={tab === "access"}
             onClick={() => setTab("access")}
@@ -751,7 +810,7 @@ function Dashboard({
             অ্যাকসেস ও রিকোয়েস্ট
           </TabBtn>
         )}
-        {isMainAdmin && (
+        {(isMainAdmin || isAdmin) && (
           <TabBtn active={tab === "settings"} onClick={() => setTab("settings")}>
             সেটিংস
           </TabBtn>
@@ -781,17 +840,17 @@ function Dashboard({
           />
         )}
 
-        {tab === "activity" && isMainAdmin && (
+        {tab === "activity" && (isMainAdmin || isAdmin) && (
           <StaffActivityAuditPanel auditHook={auditHook} />
         )}
 
         {tab === "profile" && <MyStaffProfilePanel isMainAdmin={isMainAdmin} />}
 
-        {tab === "categories" && isMainAdmin && <CategoriesEditor />}
+        {tab === "categories" && (isMainAdmin || isAdmin) && <CategoriesEditor />}
 
         {tab === "info" && <SubmissionsAdminPanel subs={subs} />}
 
-        {tab === "donation" && isMainAdmin && <DonationsAdminPanel dons={dons} />}
+        {tab === "donation" && (isMainAdmin || isAdmin) && <DonationsAdminPanel dons={dons} />}
 
         {tab === "donors" && <DonorsAdminPanel donors={donors} />}
 
@@ -800,10 +859,10 @@ function Dashboard({
         {tab === "emergency" && <EmergencyEditor />}
         {tab === "banners" && <BannersEditor />}
         {tab === "chat" && <ChatThreadsAdmin />}
-        {tab === "apps" && isMainAdmin && <AppPackagesAdminPanel />}
-        {tab === "users" && isMainAdmin && <UsersEditor />}
-        {tab === "access" && isMainAdmin && <AccessEditor />}
-        {tab === "settings" && isMainAdmin && <SettingsAdminPanel />}
+        {tab === "apps" && (isMainAdmin || isAdmin) && <AppPackagesAdminPanel />}
+        {tab === "users" && (isMainAdmin || isAdmin) && <UsersEditor />}
+        {tab === "access" && (isMainAdmin || isAdmin) && <AccessEditor />}
+        {tab === "settings" && (isMainAdmin || isAdmin) && <SettingsAdminPanel />}
         {tab === "security" && <SecurityPanel />}
       </div>
     </div>
@@ -862,7 +921,6 @@ function MyStaffProfilePanel({ isMainAdmin }: { isMainAdmin: boolean }) {
     e.target.value = "";
     if (!file || !user) return;
     if (!file.type.startsWith("image/")) return toast.error("শুধু ছবি ফাইল নির্বাচন করুন");
-    if (file.size > 5 * 1024 * 1024) return toast.error("ছবি ৫MB এর কম হতে হবে");
 
     setUploadingPhoto(true);
     try {
@@ -1147,6 +1205,9 @@ function MyStaffProfilePanel({ isMainAdmin }: { isMainAdmin: boolean }) {
                   src={st.photo_url || logo}
                   alt={st.full_name}
                   className="h-12 w-12 shrink-0 rounded-full border border-primary/30 bg-white object-cover"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = logo;
+                  }}
                 />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
@@ -2754,6 +2815,7 @@ function DonorsAdminPanel({ donors }: { donors: ReturnType<typeof useCloudDonors
   const [editing, setEditing] = useState<DonorRow | null>(null);
   const [busy, setBusy] = useState(false);
   const [approvingAll, setApprovingAll] = useState(false);
+  const [uploadingDonorPhoto, setUploadingDonorPhoto] = useState(false);
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
   const [bloodFilter, setBloodFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -2786,6 +2848,26 @@ function DonorsAdminPanel({ donors }: { donors: ReturnType<typeof useCloudDonors
     }
   }
 
+  async function handleDonorPhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !editing) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("অনুগ্রহ করে একটি ছবি ফাইল নির্বাচন করুন");
+      return;
+    }
+    setUploadingDonorPhoto(true);
+    try {
+      const url = await uploadPublicImage(file, "donors");
+      if (!url) throw new Error("ছবি প্রসেস করা যায়নি");
+      setEditing({ ...editing, photo_url: url });
+      toast.success("রক্তদাতার ছবি সফলভাবে লোড হয়েছে");
+    } catch (err: any) {
+      toast.error(err?.message || "ছবি আপলোড ব্যর্থ");
+    } finally {
+      setUploadingDonorPhoto(false);
+    }
+  }
+
   async function saveEdit() {
     if (!editing) return;
     setBusy(true);
@@ -2796,6 +2878,7 @@ function DonorsAdminPanel({ donors }: { donors: ReturnType<typeof useCloudDonors
       address: editing.address,
       total_donations: Number(editing.total_donations) || 0,
       last_donation_date: editing.last_donation_date,
+      photo_url: editing.photo_url || "",
     });
     setBusy(false);
     if (error) return toast.error(error.message);
@@ -2866,9 +2949,23 @@ function DonorsAdminPanel({ donors }: { donors: ReturnType<typeof useCloudDonors
         {(d) => (
           <div key={d.id} className="rounded-2xl bg-card p-4 shadow-card">
             <div className="flex items-start gap-3">
-              {d.photo_url && (
-                <img src={d.photo_url} alt="" className="h-12 w-12 rounded-full object-cover" />
-              )}
+              <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border border-rose-500/20 bg-rose-500/10 text-rose-600 shadow-sm">
+                {d.photo_url ? (
+                  <img
+                    src={d.photo_url}
+                    alt={d.full_name}
+                    className="h-full w-full object-cover"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLElement).style.display = "none";
+                      const fb = e.currentTarget.parentElement?.querySelector(".admin-donor-fallback") as HTMLElement;
+                      if (fb) fb.classList.remove("hidden");
+                    }}
+                  />
+                ) : null}
+                <div className={`admin-donor-fallback flex h-full w-full items-center justify-center ${d.photo_url ? "hidden" : ""}`}>
+                  <Droplet className="h-6 w-6 text-rose-600" />
+                </div>
+              </div>
               <div className="min-w-0 flex-1">
                 <p className="font-semibold">
                   {d.full_name}{" "}
@@ -2913,6 +3010,53 @@ function DonorsAdminPanel({ donors }: { donors: ReturnType<typeof useCloudDonors
             onClick={(e) => e.stopPropagation()}
           >
             <p className="font-display text-sm font-bold text-primary-deep">রক্তদাতা সম্পাদনা</p>
+
+            {/* Donor Photo Section */}
+            <div className="flex items-center gap-3 rounded-xl border border-border/70 bg-muted/30 p-2.5">
+              <div className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full border border-rose-500/30 bg-rose-500/10 text-rose-600 shadow-sm">
+                {editing.photo_url ? (
+                  <img
+                    src={editing.photo_url}
+                    alt="Donor"
+                    className="h-full w-full object-cover"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLElement).style.display = "none";
+                      const fb = e.currentTarget.parentElement?.querySelector(".edit-donor-fb") as HTMLElement;
+                      if (fb) fb.classList.remove("hidden");
+                    }}
+                  />
+                ) : null}
+                <div className={`edit-donor-fb flex h-full w-full items-center justify-center ${editing.photo_url ? "hidden" : ""}`}>
+                  <Droplet className="h-7 w-7 text-rose-600" />
+                </div>
+              </div>
+              <div className="flex-1">
+                <p className="text-xs font-semibold text-foreground">রক্তদাতার ছবি</p>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <label className="inline-flex cursor-pointer items-center gap-1 rounded-full bg-primary/10 px-3 py-1 text-[11px] font-bold text-primary-deep transition hover:bg-primary/20">
+                    <Camera className="h-3 w-3" />
+                    {uploadingDonorPhoto ? "আপলোড হচ্ছে..." : editing.photo_url ? "ছবি পরিবর্তন" : "ছবি যোগ করুন"}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      disabled={uploadingDonorPhoto}
+                      onChange={handleDonorPhotoUpload}
+                    />
+                  </label>
+                  {editing.photo_url && (
+                    <button
+                      type="button"
+                      onClick={() => setEditing({ ...editing, photo_url: "" })}
+                      className="text-[11px] font-semibold text-destructive hover:underline"
+                    >
+                      ছবি মুছুন
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
             <input
               value={editing.full_name}
               onChange={(e) => setEditing({ ...editing, full_name: e.target.value })}
@@ -3211,7 +3355,10 @@ function EmergencyEditor() {
     const res = await add(form);
     setBusy(false);
     if (!res.ok) return toast.error(res.error || "ত্রুটি");
-    toast.success("যোগ হয়েছে — অনুমোদন দিন");
+    toast.success("জরুরী রক্তের আবেদন যুক্ত হয়েছে");
+    sendBrowserNotification(`🩸 জরুরী রক্ত প্রয়োজন (${form.blood_group})`, {
+      body: `রোগী: ${form.patient_name} • ${form.hospital || "হাসপাতাল"} • ফোন: ${form.phone}`,
+    });
     setForm({ patient_name: "", phone: "", blood_group: "", hospital: "", message: "" });
   }
 
@@ -3450,7 +3597,27 @@ function UsersEditor() {
     if (!silent) setLoading(true);
     try {
       const list = await listUsers();
-      setUsers(list);
+      setUsers((prev) => {
+        const map = new Map<string, AdminUserRecord>();
+        // Add fresh items from list
+        for (const item of list) {
+          const key = (item.email || item.id || "").toLowerCase();
+          if (key && !map.has(key)) map.set(key, item);
+        }
+        // Preserve any optimistic items in prev if not yet returned
+        for (const p of prev) {
+          const key = (p.email || p.id || "").toLowerCase();
+          if (key && !map.has(key)) {
+            map.set(key, p);
+          } else if (key && map.has(key)) {
+            const existing = map.get(key)!;
+            if (p.password && (!existing.password || existing.password.includes("নিবন্ধিত"))) {
+              map.set(key, { ...existing, password: p.password });
+            }
+          }
+        }
+        return Array.from(map.values());
+      });
       setDetailsUser((prev) => {
         if (!prev) return null;
         return (
@@ -3472,27 +3639,93 @@ function UsersEditor() {
     void refresh(false);
     const timer = setInterval(() => {
       void refresh(true);
-    }, 6000);
+    }, 10000);
     return () => clearInterval(timer);
   }, []);
 
   async function handleManualSync() {
     setSyncing(true);
     try {
-      await refresh(true);
+      await refresh(false);
       toast.success("সকল ইউজার, পাসওয়ার্ড ও অ্যাকসেস সফলভাবে সিঙ্ক হয়েছে!");
     } finally {
       setSyncing(false);
     }
   }
 
+  function generateRandomPassword() {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$";
+    let pwd = "";
+    for (let i = 0; i < 10; i++) {
+      pwd += chars[Math.floor(Math.random() * chars.length)];
+    }
+    setForm((f) => ({ ...f, password: pwd }));
+    toast.info("র‍্যান্ডম পাসওয়ার্ড তৈরি হয়েছে");
+  }
+
   async function add() {
     if (!form.email || form.password.length < 6)
       return toast.error("ইমেইল ও পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর) দিন");
     setBusy(true);
+    const targetEmail = form.email.trim();
+    const createdRole = form.role;
     try {
-      await createUser({ data: form });
-      toast.success("নতুন ইউজার ও পাসওয়ার্ড তৈরি হয়েছে");
+      const res = await createUser({ data: form });
+      const nowIso = new Date().toISOString();
+      const roleBadge =
+        createdRole === "admin"
+          ? "শুধু এডমিন"
+          : createdRole === "editor"
+            ? "এডিটর"
+            : createdRole === "moderator"
+              ? "মডারেটর"
+              : "সাধারণ ইউজার";
+
+      const optimisticUser: AdminUserRecord = {
+        id: res.id,
+        email: targetEmail,
+        password: form.password,
+        photo_url: null,
+        designation: form.designation || roleBadge,
+        roles: createdRole === "user" ? ["user"] : ["user", createdRole],
+        verified_via: "email",
+        created_at: nowIso,
+        last_sign_in_at: nowIso,
+        banned_until: null,
+        profile: {
+          full_name: form.full_name || targetEmail.split("@")[0],
+          username: targetEmail.split("@")[0],
+          phone: form.phone || null,
+          suspended: false,
+          must_change_password: false,
+          photo_url: null,
+          designation: form.designation || roleBadge,
+        },
+      };
+
+      // Optimistically add to users list so it never flickers or disappears
+      setUsers((prev) => {
+        const withoutTarget = prev.filter(
+          (u) =>
+            u.id !== res.id &&
+            u.email.toLowerCase() !== targetEmail.toLowerCase()
+        );
+        const superAdmin = withoutTarget.find(
+          (u) => u.email.toLowerCase() === "mdmahmudulhashan0@gmail.com"
+        );
+        const others = withoutTarget.filter(
+          (u) => u.email.toLowerCase() !== "mdmahmudulhashan0@gmail.com"
+        );
+        return superAdmin
+          ? [superAdmin, optimisticUser, ...others]
+          : [optimisticUser, ...withoutTarget];
+      });
+
+      // Reset filters so newly created user is 100% visible
+      setRoleFilter("all");
+      setSearch("");
+      toast.success("নতুন ইউজার ও পাসওয়ার্ড সফলভাবে তৈরি হয়েছে");
+
       setForm({
         email: "",
         password: "",
@@ -3501,6 +3734,8 @@ function UsersEditor() {
         designation: "",
         role: "user",
       });
+
+      // Fetch fresh list from server (will preserve optimisticUser)
       await refresh(true);
     } catch (e) {
       toast.error((e as Error).message ?? "ত্রুটি");
@@ -3723,18 +3958,27 @@ function UsersEditor() {
             <option value="admin">এডমিন (Admin — সুপার এডমিন নয়)</option>
           </select>
         </div>
-        <button
-          disabled={busy}
-          onClick={add}
-          className="flex items-center gap-1.5 rounded-full bg-gradient-hero px-4 py-2 text-xs font-bold text-primary-foreground shadow-card disabled:opacity-60"
-        >
-          {busy ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Plus className="h-3.5 w-3.5" />
-          )}
-          ইউজার তৈরি করুন
-        </button>
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <button
+            disabled={busy}
+            onClick={add}
+            className="flex items-center gap-1.5 rounded-full bg-gradient-hero px-4 py-2 text-xs font-bold text-primary-foreground shadow-card disabled:opacity-60 transition active:scale-95"
+          >
+            {busy ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Plus className="h-3.5 w-3.5" />
+            )}
+            ইউজার তৈরি করুন
+          </button>
+          <button
+            type="button"
+            onClick={generateRandomPassword}
+            className="flex items-center gap-1.5 rounded-full border border-primary/25 bg-primary/10 px-3.5 py-2 text-xs font-semibold text-primary-deep transition hover:bg-primary/20"
+          >
+            <KeyRound className="h-3.5 w-3.5" /> শক্তিশালী পাসওয়ার্ড তৈরি করুন
+          </button>
+        </div>
       </div>
 
       {/* Filter & Search Bar */}
@@ -3829,6 +4073,9 @@ function UsersEditor() {
                         src={u.profile?.photo_url || u.photo_url || logo}
                         alt={u.profile?.full_name || u.email}
                         className="h-12 w-12 rounded-full border-2 border-primary/25 bg-white object-cover"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).src = logo;
+                        }}
                       />
                       <button
                         type="button"
@@ -3977,6 +4224,18 @@ function UsersEditor() {
                           className="rounded-lg bg-background px-2 py-1 text-[11px] font-semibold hover:bg-muted"
                         >
                           <Copy className="mr-1 inline h-3 w-3" /> কপি
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const creds = `ইউজার লগইন তথ্য:\nইমেইল: ${u.email}\nপাসওয়ার্ড: ${pwValue}`;
+                            navigator.clipboard?.writeText(creds);
+                            toast.success("লগইন তথ্য (ইমেইল ও পাসওয়ার্ড) কপি হয়েছে");
+                          }}
+                          className="rounded-lg bg-emerald-500/10 px-2 py-1 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-500/20"
+                          title="ইমেইল ও পাসওয়ার্ড একসাথে কপি করুন"
+                        >
+                          📋 ক্রেডেনশিয়াল কপি
                         </button>
                       </>
                     )}
@@ -4212,6 +4471,9 @@ function UserDetailsModal({
               src={user.profile?.photo_url || user.photo_url || logo}
               alt=""
               className="h-14 w-14 rounded-full border-2 border-primary/30 bg-white object-cover"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).src = logo;
+              }}
             />
             <div>
               <p className="font-display text-base font-bold text-primary-deep">
@@ -4996,6 +5258,9 @@ function AccessEditor() {
                       src={u?.profile?.photo_url || u?.photo_url || logo}
                       alt=""
                       className="h-10 w-10 shrink-0 rounded-full border border-primary/30 bg-white object-cover"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).src = logo;
+                      }}
                     />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-bold text-primary-deep">
@@ -5070,6 +5335,8 @@ function SettingsAdminPanel() {
 
   const [draft, setDraft] = useState<SiteMetaConfig>(meta);
   const [savingMeta, setSavingMeta] = useState(false);
+  const [logoUrlInput, setLogoUrlInput] = useState("");
+  const [updatingLogo, setUpdatingLogo] = useState(false);
 
   useEffect(() => {
     setDraft(meta);
@@ -5077,16 +5344,76 @@ function SettingsAdminPanel() {
 
   async function onLogoFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = "";
     if (!file) return;
-    if (!file.type.startsWith("image/")) return toast.error("শুধু ছবি নির্বাচন করুন");
-    if (file.size > 3 * 1024 * 1024) return toast.error("3MB এর কম হতে হবে");
-    const compressed = await uploadPublicImage(file, "logo");
-    if (!compressed) return toast.error("লোগো প্রসেস করা যায়নি");
+    if (!file.type.startsWith("image/")) return toast.error("শুধু ছবি ফাইল নির্বাচন করুন");
+
+    setUpdatingLogo(true);
     try {
-      await setLogo(compressed);
-      toast.success("লোগো Firebase-এ আপডেট হয়েছে");
-    } catch (err) {
-      toast.error((err as Error).message || "ত্রুটি");
+      // 1. Read original bit-for-bit Data URL preserving transparent PNG / vector quality
+      const rawDataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      // 2. If under 750KB, save original bit-for-bit without touching any pixels or compressing
+      if (rawDataUrl.length <= 750000) {
+        await setLogo(rawDataUrl);
+        toast.success("আসল লোগো ফাইল কোনো পরিবর্তন ছাড়া হুবহু Firebase-এ সংরক্ষিত হয়েছে!");
+        return;
+      }
+
+      // 3. For ultra-heavy files, render onto crisp canvas preserving PNG format and transparency
+      const cleanPng = await new Promise<string>((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const maxDim = 800;
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(width, 1);
+          canvas.height = Math.max(height, 1);
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return resolve(rawDataUrl);
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL("image/png"));
+        };
+        img.onerror = () => resolve(rawDataUrl);
+        img.src = rawDataUrl;
+      });
+
+      await setLogo(cleanPng);
+      toast.success("লোগো কোনো বিকৃতি ছাড়া সফলভাবে Firebase-এ আপডেট হয়েছে!");
+    } catch (err: any) {
+      toast.error(err?.message || "লোগো আপডেট ব্যর্থ হয়েছে");
+    } finally {
+      setUpdatingLogo(false);
+    }
+  }
+
+  async function handleApplyLogoUrl(e: React.FormEvent) {
+    e.preventDefault();
+    const cleanUrl = logoUrlInput.trim();
+    if (!cleanUrl) return toast.error("সঠিক ইমেজ লিঙ্ক বা URL দিন");
+    setUpdatingLogo(true);
+    try {
+      await setLogo(cleanUrl);
+      toast.success("লোগো URL সরাসরি Firebase-এ সেট হয়েছে (কোনো পরিবর্তন ছাড়া)!");
+      setLogoUrlInput("");
+    } catch (err: any) {
+      toast.error(err?.message || "লোগো আপডেট ব্যর্থ হয়েছে");
+    } finally {
+      setUpdatingLogo(false);
     }
   }
 
@@ -5130,41 +5457,105 @@ function SettingsAdminPanel() {
 
   return (
     <div className="space-y-4">
-      {/* Logo Settings */}
-      <div className="rounded-3xl bg-card p-5 shadow-card">
-        <p className="mb-3 flex items-center gap-2 font-display text-sm font-bold text-primary-deep">
-          <ImageIcon className="h-4 w-4 text-primary" /> ব্র্যান্ড ও লোগো সেটিংস (Firebase Cloud Sync)
-        </p>
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-primary/20 bg-white p-1 shadow-card">
-            <img
-              src={logo}
-              alt="Smart Noakhali Logo"
-              className="h-full w-full rounded-full object-contain"
-            />
-          </div>
+      {/* Logo & Branding Management Center */}
+      <div className="rounded-3xl border border-primary/20 bg-card p-5 shadow-card space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-3">
           <div>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              onChange={onLogoFile}
-              className="hidden"
-            />
-            <button
-              onClick={() => fileRef.current?.click()}
-              className="flex items-center gap-1.5 rounded-full bg-gradient-hero px-4 py-2 text-xs font-semibold text-primary-foreground shadow-card"
-            >
-              <Upload className="h-3.5 w-3.5" /> নতুন লোগো আপলোড
-            </button>
-            {customLogo && (
-              <button
-                onClick={() => void setLogo(null)}
-                className="mt-2 block text-xs font-semibold text-destructive"
+            <p className="flex items-center gap-2 font-display text-sm font-bold text-primary-deep">
+              <ImageIcon className="h-4 w-4 text-primary" /> ব্র্যান্ড ও লোগো কন্ট্রোল সেন্টার (Firebase Cloud Sync)
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              কোনো ডিজাইন পরিবর্তন বা কম্প্রেশন ছাড়া হুবহু আসল রেজোলিউশনে লোগো সেট করুন।
+            </p>
+          </div>
+          <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-bold text-primary-deep">
+            {customLogo ? "কাস্টম লোগো সক্রিয়" : "ডিফল্ট অফিশিয়াল লোগো"}
+          </span>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          {/* Live Preview Card */}
+          <div className="flex flex-col items-center justify-center rounded-2xl border border-border/80 bg-muted/40 p-4 text-center">
+            <p className="mb-2 text-xs font-semibold text-muted-foreground">বর্তমান লাইভ লোগো প্রিভিউ</p>
+            <div className="relative flex h-28 w-28 items-center justify-center rounded-full border-2 border-primary/30 bg-white p-1.5 shadow-md">
+              <img
+                src={logo}
+                alt="Smart Noakhali Live Logo"
+                className="h-full w-full rounded-full object-contain"
+              />
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <a
+                href={logo}
+                download="smart-noakhali-logo.png"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-3 py-1 text-[11px] font-semibold text-foreground hover:bg-muted"
               >
-                ডিফল্ট লোগো ফিরাও
+                <Download className="h-3 w-3" /> লোগো ডাউনলোড
+              </a>
+              {customLogo && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void setLogo(null);
+                    toast.success("ডিফল্ট অফিশিয়াল লোগোতে ফিরিয়ে আনা হয়েছে!");
+                  }}
+                  className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-3 py-1 text-[11px] font-semibold text-destructive hover:bg-destructive/20"
+                >
+                  <RotateCcw className="h-3 w-3" /> রিসেট
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Upload & URL Control Card */}
+          <div className="space-y-3 rounded-2xl border border-border/80 bg-background/60 p-4">
+            <div>
+              <p className="text-xs font-bold text-foreground">পদ্ধতি ১: আসল ইমেজ ফাইল আপলোড</p>
+              <p className="text-[11px] text-muted-foreground">
+                আপনার গ্যালারি বা পিসি থেকে আসল PNG বা JPG ফাইলটি সিলেক্ট করুন — এটি কোনো বিকৃতি ছাড়া সংরক্ষিত হবে।
+              </p>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                onChange={onLogoFile}
+                className="hidden"
+              />
+              <button
+                type="button"
+                disabled={updatingLogo}
+                onClick={() => fileRef.current?.click()}
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-hero py-2.5 text-xs font-bold text-white shadow transition hover:opacity-95 disabled:opacity-70"
+              >
+                <Upload className="h-4 w-4" />
+                {updatingLogo ? "লোগো প্রসেস হচ্ছে..." : "ফাইল থেকে আসল লোগো আপলোড করুন"}
               </button>
-            )}
+            </div>
+
+            <div className="border-t border-border/60 pt-3">
+              <p className="text-xs font-bold text-foreground">পদ্ধতি ২: সরাসরি ইমেজ লিংক (Direct URL)</p>
+              <p className="text-[11px] text-muted-foreground">
+                হোস্টিং বা ড্রাইভের ডিরেক্ট ইমেজ URL পেস্ট করে ১-ক্লিকে সেট করতে পারেন:
+              </p>
+              <form onSubmit={handleApplyLogoUrl} className="mt-2 flex gap-1.5">
+                <input
+                  type="url"
+                  value={logoUrlInput}
+                  onChange={(e) => setLogoUrlInput(e.target.value)}
+                  placeholder="https://example.com/logo.png"
+                  className="flex-1 rounded-xl border border-border bg-card px-3 py-1.5 text-xs outline-none focus:border-primary"
+                />
+                <button
+                  type="submit"
+                  disabled={updatingLogo || !logoUrlInput.trim()}
+                  className="rounded-xl bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground shadow hover:opacity-90 disabled:opacity-50"
+                >
+                  সেট করুন
+                </button>
+              </form>
+            </div>
           </div>
         </div>
       </div>
@@ -6081,7 +6472,10 @@ function BannersEditor() {
     const res = await add(form);
     setBusy(false);
     if (!res.ok) return toast.error(res.error || "ত্রুটি");
-    toast.success("ব্যানার যোগ হয়েছে");
+    toast.success("জরুরী ব্যানার ও নোটিফিকেশন ব্রডকাস্ট সফল হয়েছে");
+    sendBrowserNotification(`📢 ${form.title}`, {
+      body: `${form.message}${form.phone ? ` • কল: ${form.phone}` : ""}`,
+    });
     setForm({
       title: "জরুরী রক্তের প্রয়োজন",
       message: "",
@@ -6845,7 +7239,6 @@ function AdminChatPanel({
     const f = e.target.files?.[0];
     e.target.value = "";
     if (!f || !me) return;
-    if (f.size > 5 * 1024 * 1024) return toast.error("৫MB এর বেশি না");
     setBusy(true);
     const url = await uploadPublicImage(f, `chat/${thread.id}`);
     setBusy(false);

@@ -177,13 +177,24 @@ export async function syncVaultFromCloud(): Promise<Record<string, VaultUserMeta
       const data = await resp.json();
       if (Array.isArray(data.deletedIds)) {
         for (const dId of data.deletedIds) {
-          if (dId) deletedSet.add(String(dId).toLowerCase());
+          const dIdLow = String(dId).toLowerCase();
+          const existing =
+            merged[dIdLow] ||
+            Object.values(merged).find(
+              (x) =>
+                x.uid?.toLowerCase() === dIdLow || x.email?.toLowerCase() === dIdLow
+            );
+          if (!existing) {
+            deletedSet.add(dIdLow);
+          }
         }
         writeLocalDeletedUsers(Array.from(deletedSet));
       }
       if (Array.isArray(data.users)) {
         for (const u of data.users) {
           if (u && (u.email || u.uid)) {
+            if (u.uid) deletedSet.delete(u.uid.toLowerCase());
+            if (u.email) deletedSet.delete(u.email.toLowerCase());
             upsertMeta(u);
           }
         }
@@ -301,14 +312,24 @@ export async function syncVaultFromCloud(): Promise<Record<string, VaultUserMeta
     // Ignore if not signed in as staff yet
   }
 
-  // Purge any deleted users from merged vault
+  // Purge only genuinely deleted users from merged vault (never active staff or newly created/stored users)
   for (const [k, v] of Object.entries(merged)) {
     const kLow = k.toLowerCase();
     const uidLow = (v?.uid || "").toLowerCase();
     const emailLow = (v?.email || "").toLowerCase();
     if (
-      emailLow !== SUPER_ADMIN_EMAIL.toLowerCase() &&
-      (deletedSet.has(kLow) || (uidLow && deletedSet.has(uidLow)) || (emailLow && deletedSet.has(emailLow)))
+      emailLow === SUPER_ADMIN_EMAIL.toLowerCase() ||
+      emailLow === REGULAR_ADMIN_EMAIL.toLowerCase() ||
+      kLow === "super_admin_mahmudul" ||
+      kLow === "admin_mr_bear"
+    ) {
+      continue;
+    }
+    // Only delete if explicitly marked deleted and user lacks active verified credentials
+    if (
+      (deletedSet.has(kLow) || (uidLow && deletedSet.has(uidLow)) || (emailLow && deletedSet.has(emailLow))) &&
+      !v?.password &&
+      !v?.verified_via
     ) {
       delete merged[k];
     }
@@ -501,23 +522,28 @@ function tsToIso(val: unknown): string {
 
 function isVerifiedFirebaseSuperAdmin(): boolean {
   const u = auth.currentUser;
-  return Boolean(u && u.emailVerified && isSuperAdminEmail(u.email));
+  return Boolean(u && (isSuperAdminEmail(u.email) || isBootstrappedAdminEmail(u.email)));
 }
 
 function isVerifiedFirebaseBootstrappedStaff(): boolean {
   const u = auth.currentUser;
-  return Boolean(u && u.emailVerified && isBootstrappedAdminEmail(u.email));
+  return Boolean(u && isBootstrappedAdminEmail(u.email));
 }
 
 function hasActiveSuperAdminSession(): boolean {
   if (isVerifiedFirebaseSuperAdmin()) return true;
-  if (auth.currentUser && isSuperAdminEmail(auth.currentUser.email)) return true;
+  if (auth.currentUser && isBootstrappedAdminEmail(auth.currentUser.email)) return true;
   try {
     if (sessionStorage.getItem("sn_super_admin_session_v1") === "true") return true;
     const raw = sessionStorage.getItem("sn_verified_user_session_v1");
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (isSuperAdminEmail(parsed?.user?.email)) return true;
+      if (
+        isBootstrappedAdminEmail(parsed?.user?.email) ||
+        (Array.isArray(parsed?.roles) && parsed.roles.includes("admin"))
+      ) {
+        return true;
+      }
     }
   } catch {
     // ignore
@@ -529,6 +555,7 @@ async function ensureSuperAdminSignedIn() {
   if (hasActiveSuperAdminSession()) {
     return auth.currentUser;
   }
+  if (auth.currentUser) return auth.currentUser;
   googleProvider.setCustomParameters({ login_hint: SUPER_ADMIN_EMAIL });
   const cred = await signInWithPopup(auth, googleProvider);
   return cred.user;
@@ -697,7 +724,16 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
   const isUserDeleted = (id?: string | null, email?: string | null) => {
     const idLow = (id || "").toLowerCase();
     const emLow = (email || "").toLowerCase();
-    if (emLow === SUPER_ADMIN_EMAIL.toLowerCase() || idLow === "super_admin_mahmudul") {
+    if (
+      emLow === SUPER_ADMIN_EMAIL.toLowerCase() ||
+      emLow === REGULAR_ADMIN_EMAIL.toLowerCase() ||
+      idLow === "super_admin_mahmudul" ||
+      idLow === "admin_mr_bear"
+    ) {
+      return false;
+    }
+    // If active in vault, definitely NOT deleted
+    if ((idLow && vault[idLow]) || (emLow && vault[emLow])) {
       return false;
     }
     return (idLow && deletedSet.has(idLow)) || (emLow && deletedSet.has(emLow));
@@ -822,12 +858,25 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
   }
 
   const activeRows = rows.filter((r) => !isUserDeleted(r.id, r.email));
-  const seenEmails = new Set(activeRows.map((r) => r.email.toLowerCase()));
-  const seenIds = new Set(activeRows.map((r) => r.id.toLowerCase()));
+  const seenEmails = new Set(activeRows.map((r) => (r.email || "").toLowerCase()).filter(Boolean));
+  const seenIds = new Set(activeRows.map((r) => (r.id || "").toLowerCase()).filter(Boolean));
   const extraVaultRows = buildExtraVaultUsers(seenEmails, seenIds).filter(
     (u) => !isUserDeleted(u.id, u.email)
   );
-  return [...activeRows, ...extraVaultRows];
+
+  const combined = [...activeRows, ...extraVaultRows];
+  const uniqueMap = new Map<string, AdminUserRecord>();
+  for (const item of combined) {
+    if (!item) continue;
+    const emKey = (item.email || "").trim().toLowerCase();
+    const idKey = (item.id || "").trim().toLowerCase();
+    const primaryKey = emKey || idKey;
+    if (!primaryKey) continue;
+    if (!uniqueMap.has(primaryKey)) {
+      uniqueMap.set(primaryKey, item);
+    }
+  }
+  return Array.from(uniqueMap.values());
 }
 
 export async function createUser(opts?: {
@@ -849,30 +898,54 @@ export async function createUser(opts?: {
   const roles = role === "user" ? ["user"] : ["user", role];
   const username = sanitizeString(payload.email.split("@")[0] || "user", 60, "user");
   const path = `users/${id}`;
+  const cleanEmail = payload.email.trim().toLowerCase();
 
-  if (isVerifiedFirebaseSuperAdmin()) {
-    await setDoc(doc(db, "users", id), {
-      uid: id,
-      email: sanitizeString(payload.email, 254, "user@example.com"),
-      full_name: sanitizeString(payload.full_name || username, 120, username),
-      username,
-      phone: sanitizeString(payload.phone ?? "", 30, ""),
-      roles,
-      suspended: false,
-      must_change_password: false,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    }).catch((e) => handleFirestoreError(e, OperationType.CREATE, path));
+  // 1. Immediately remove from local and session deleted users so user is instantly visible
+  const prevDel = readLocalDeletedUsers().filter(
+    (x) => x !== id.toLowerCase() && x !== cleanEmail
+  );
+  writeLocalDeletedUsers(prevDel);
 
-    if (role === "admin") {
-      await setDoc(doc(db, "admins", id), {
+  // Permanently un-delete on server store so server never flags them as deleted
+  try {
+    await fetch("/api/auth/undelete-user", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: id, email: cleanEmail }),
+    });
+  } catch {
+    // Non-fatal
+  }
+
+  // 2. Always attempt to write to Firestore if any authenticated Firebase user exists
+  if (auth.currentUser) {
+    try {
+      await setDoc(doc(db, "users", id), {
         uid: id,
         email: sanitizeString(payload.email, 254, "user@example.com"),
+        full_name: sanitizeString(payload.full_name || username, 120, username),
+        username,
+        phone: sanitizeString(payload.phone ?? "", 30, ""),
+        roles,
+        suspended: false,
+        must_change_password: false,
         createdAt: serverTimestamp(),
-      }).catch((e) => handleFirestoreError(e, OperationType.CREATE, `admins/${id}`));
+        updatedAt: serverTimestamp(),
+      });
+
+      if (role === "admin") {
+        await setDoc(doc(db, "admins", id), {
+          uid: id,
+          email: sanitizeString(payload.email, 254, "user@example.com"),
+          createdAt: serverTimestamp(),
+        });
+      }
+    } catch (e) {
+      console.warn("Firestore user creation write note:", e);
     }
   }
 
+  // 3. Immediately record user credentials locally and in Express server store
   await recordUserCredential({
     uid: id,
     email: payload.email,

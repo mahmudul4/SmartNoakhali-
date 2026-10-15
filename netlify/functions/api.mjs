@@ -671,8 +671,85 @@ export async function handler(event) {
 
   // 8. Content store endpoints
   if (method === "GET" && apiPath === "/api/content") {
-    return jsonResponse(200, readJsonStore("content_store.json", {}));
+    const store = readJsonStore("content_store.json", {});
+    const params = event.queryStringParameters || {};
+    const collection = params.collection ? String(params.collection).trim() : null;
+    const id = params.id ? String(params.id).trim() : null;
+
+    if (collection) {
+      const mirror = store.cloud_mirror?.collections || {};
+      const colMap = (mirror[collection] || store[collection] || {});
+      if (id) {
+        let item = colMap[id] || null;
+        if (!item && collection === "settings" && store[id]) {
+          item = { id, key: id, logo_url: store[id], visible: true, updated_at: new Date().toISOString() };
+        }
+        return jsonResponse(200, { ok: true, item });
+      }
+      return jsonResponse(200, { ok: true, items: Object.values(colMap) });
+    }
+    return jsonResponse(200, store);
   }
+
+  if (method === "POST" && apiPath === "/api/content/upsert") {
+    const { collection, id, doc } = body || {};
+    if (!collection || !id || !doc) {
+      return jsonResponse(400, { error: "Missing collection, id, or doc" });
+    }
+    const store = readJsonStore("content_store.json", {});
+    const mirror = store.cloud_mirror || {
+      collections: {},
+      deletedIds: {},
+      updatedAt: new Date().toISOString(),
+    };
+    mirror.collections = mirror.collections || {};
+    mirror.collections[collection] = mirror.collections[collection] || {};
+    const savedDoc = {
+      ...doc,
+      id,
+      created_at: String(doc.created_at || new Date().toISOString()),
+      updated_at: String(doc.updated_at || new Date().toISOString()),
+    };
+    mirror.collections[collection][id] = savedDoc;
+    if (mirror.deletedIds?.[collection]) {
+      delete mirror.deletedIds[collection][id];
+    }
+    store.cloud_mirror = mirror;
+    if (collection === "settings") {
+      store[id] = doc.logo_url !== undefined ? doc.logo_url : doc;
+    }
+    store.updatedAt = new Date().toISOString();
+    writeJsonStore("content_store.json", store);
+    return jsonResponse(200, { ok: true, doc: savedDoc });
+  }
+
+  if (method === "POST" && apiPath === "/api/content/delete") {
+    const { collection, id } = body || {};
+    if (!collection || !id) {
+      return jsonResponse(400, { error: "Missing collection or id" });
+    }
+    const store = readJsonStore("content_store.json", {});
+    const mirror = store.cloud_mirror || {
+      collections: {},
+      deletedIds: {},
+      updatedAt: new Date().toISOString(),
+    };
+    mirror.collections = mirror.collections || {};
+    mirror.deletedIds = mirror.deletedIds || {};
+    mirror.deletedIds[collection] = mirror.deletedIds[collection] || {};
+    mirror.deletedIds[collection][id] = new Date().toISOString();
+    if (mirror.collections[collection]) {
+      delete mirror.collections[collection][id];
+    }
+    store.cloud_mirror = mirror;
+    if (collection === "settings") {
+      delete store[id];
+    }
+    store.updatedAt = new Date().toISOString();
+    writeJsonStore("content_store.json", store);
+    return jsonResponse(200, { ok: true });
+  }
+
   if (method === "POST" && apiPath === "/api/content/sync") {
     const current = readJsonStore("content_store.json", {});
     const merged = { ...current, ...body, updatedAt: new Date().toISOString() };

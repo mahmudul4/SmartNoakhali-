@@ -1,0 +1,23 @@
+{
+  "updatedAt": "2026-10-12T21:42:26.134Z",
+  "cloud_mirror": {
+    "collections": {
+      "settings": {},
+      "submissions": {},
+      "blood_donors": {},
+      "donations": {},
+      "donation_events": {},
+      "emergency_banners": {},
+      "emergency_blood_requests": {},
+      "category_access": {},
+      "category_requests": {},
+      "payment_requests": {}
+    },
+    "deletedIds": {
+      "settings": {
+        "test_ping": "2026-10-12T21:42:26.134Z"
+      }
+    },
+    "updatedAt": "2026-10-12T14:30:00.000Z"
+  }
+}

@@ -1,1 +1,15 @@
-{}
+{
+  "android": {
+    "platform": "android",
+    "fileName": "Smart-Noakhali-v2.0.apk",
+    "fileSize": 15925248,
+    "version": "2.0.0",
+    "label": "স্মার্ট নোয়াখালী Android অ্যাপ (.APK)",
+    "releaseNotes": "অ্যান্ড্রয়েড ফোনের জন্য অফিসিয়াল অ্যাপ — এক ক্লিকে ডাউনলোড ও ইনস্টল করুন।",
+    "visible": true,
+    "mimeType": "application/vnd.android.package-archive",
+    "uploadedAt": "2026-10-12T14:30:00.000Z",
+    "savedFile": "Smart-Noakhali-v2.0.apk",
+    "downloadUrl": "/api/apps/download/android"
+  }
+}

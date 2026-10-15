@@ -31,7 +31,6 @@ function SubmitInfo() {
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (f.size > 4 * 1024 * 1024) return toast.error("ছবি 4MB এর কম হতে হবে");
     setUploading(true);
     const url = await uploadPublicImage(f, "submissions");
     setUploading(false);
@@ -102,7 +101,25 @@ function SubmitInfo() {
             <span className="flex-1 text-muted-foreground">{uploading ? "আপলোড হচ্ছে..." : form.image_url ? "ছবি যোগ হয়েছে" : "ছবি বাছাই করুন"}</span>
             <input type="file" accept="image/*" className="hidden" onChange={onFile} />
           </label>
-          {form.image_url && <img src={form.image_url} alt="" className="mt-2 h-24 w-24 rounded-lg object-cover" />}
+          {form.image_url && (
+            <div className="mt-2 flex items-center gap-3">
+              <img
+                src={form.image_url}
+                alt=""
+                className="h-20 w-20 rounded-lg border object-cover"
+                onError={(e) => {
+                  (e.currentTarget as HTMLElement).style.display = "none";
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, image_url: "" })}
+                className="text-xs font-semibold text-destructive hover:underline"
+              >
+                ছবি মুছে ফেলুন
+              </button>
+            </div>
+          )}
         </Field>
         <button type="submit" disabled={submitting} className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-hero py-3 font-semibold text-primary-foreground shadow-elevated disabled:opacity-60">
           <Send className="h-4 w-4" /> {submitting ? "জমা হচ্ছে..." : "জমা দিন"}
