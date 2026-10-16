@@ -15,11 +15,13 @@ function About() {
 
       <div className="overflow-hidden rounded-3xl bg-gradient-hero p-6 text-primary-foreground shadow-elevated">
         <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center">
-          <img
-            src={logo}
-            alt="Smart Noakhali Logo"
-            className="h-20 w-20 shrink-0 rounded-full bg-white object-contain p-1 ring-2 ring-gold shadow-gold"
-          />
+          <div className="h-20 w-20 shrink-0 flex items-center justify-center p-1">
+            <img
+              src={logo}
+              alt="Smart Noakhali Logo"
+              className="h-full w-full object-contain"
+            />
+          </div>
           <div>
             <h1 className="font-display text-2xl font-bold">আমাদের সেবা — স্মার্ট নোয়াখালী</h1>
             <p className="mt-2 text-sm opacity-90 leading-relaxed">

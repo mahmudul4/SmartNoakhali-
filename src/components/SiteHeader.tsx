@@ -15,15 +15,10 @@ export function SiteHeader() {
   const { isAuthed, isStaff, isAdmin, isMainAdmin, user, signOut } = useAuth();
 
   const handleHeaderLogout = async () => {
-    const wasSuper = isMainAdmin;
     setOpen(false);
     await signOut();
     toast.success("সফলভাবে লগআউট হয়েছে");
-    if (wasSuper) {
-      navigate({ to: "/mdmahmudulhashan", replace: true });
-    } else {
-      navigate({ to: "/auth", replace: true });
-    }
+    navigate({ to: "/", replace: true });
   };
 
   return (
@@ -35,11 +30,13 @@ export function SiteHeader() {
           </SheetTrigger>
           <SheetContent side="left" className="w-72 max-w-[85vw] overflow-y-auto border-sidebar-border bg-sidebar text-sidebar-foreground">
             <div className="mb-6 mt-2 flex items-center gap-3">
-              <img
-                src={logo}
-                alt="Smart Noakhali Logo"
-                className="h-14 w-14 shrink-0 rounded-full bg-white object-contain p-0.5 ring-2 ring-gold shadow-gold"
-              />
+              <div className="h-14 w-14 shrink-0 flex items-center justify-center p-0.5">
+                <img
+                  src={logo}
+                  alt="Smart Noakhali Logo"
+                  className="h-full w-full object-contain"
+                />
+              </div>
               <div className="min-w-0">
                 <p className="font-brand text-xl font-black tracking-wide text-brand-shimmer">
                   Smart Noakhali
@@ -103,12 +100,11 @@ export function SiteHeader() {
         </Sheet>
 
         <Link to="/" className="group flex min-w-0 flex-1 items-center justify-center gap-2.5">
-          <div className="relative shrink-0">
-            <div className="absolute -inset-0.5 rounded-full bg-gradient-to-tr from-amber-400 via-yellow-200 to-emerald-300 opacity-85 blur-[2px] transition duration-300 group-hover:opacity-100" />
+          <div className="relative h-10 w-10 shrink-0 sm:h-11 sm:w-11 flex items-center justify-center">
             <img
               src={logo}
               alt="Smart Noakhali Logo"
-              className="relative h-10 w-10 shrink-0 rounded-full bg-white object-contain p-0.5 ring-2 ring-amber-300 shadow-gold transition-transform duration-200 group-hover:scale-105 sm:h-11 sm:w-11"
+              className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-105"
             />
           </div>
           <div className="min-w-0 text-left leading-none">

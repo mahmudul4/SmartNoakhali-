@@ -82,11 +82,11 @@ function AppDownloadPage() {
       {/* Main Header Banner */}
       <div className="mb-6 overflow-hidden rounded-3xl bg-gradient-hero p-5 text-primary-foreground shadow-elevated sm:p-6">
         <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center">
-          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-white p-1.5 shadow-gold ring-2 ring-gold">
+          <div className="flex h-16 w-16 shrink-0 items-center justify-center p-1">
             <img
               src={logo}
-              alt="Smart Noakhali"
-              className="h-full w-full rounded-xl object-contain"
+              alt="Smart Noakhali Logo"
+              className="h-full w-full object-contain"
             />
           </div>
           <div className="flex-1">

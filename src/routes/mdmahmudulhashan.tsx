@@ -176,16 +176,13 @@ function AdminPage() {
   }
 
   const handleLogout = async () => {
-    const wasSuper = isMainAdmin;
     wasAuthedRef.current = false;
-    wasNonSuperStaffRef.current = !wasSuper;
+    wasNonSuperStaffRef.current = false;
     setAdminPanelLocked(false);
     setScreenLocked(false);
     await signOut();
     toast.success("সফলভাবে লগআউট হয়েছে");
-    if (!wasSuper) {
-      navigate({ to: "/auth", replace: true });
-    }
+    navigate({ to: "/", replace: true });
   };
 
   const activePin = user?.id ? getAdminSecurityPin(user.id) : "";
@@ -352,11 +349,11 @@ function AdminLoginForm() {
   return (
     <div className="mx-auto max-w-md px-4 pt-12 pb-20">
       <div className="rounded-3xl bg-gradient-card p-6 shadow-elevated">
-        <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-white p-1 ring-2 ring-gold shadow-gold">
+        <div className="mx-auto mb-5 flex h-24 w-24 items-center justify-center p-1">
           <img
             src={logo}
             alt="Smart Noakhali Logo"
-            className="h-full w-full rounded-full object-contain"
+            className="h-full w-full object-contain"
           />
         </div>
 
@@ -531,19 +528,23 @@ function Dashboard({
     pendingEvents.length +
     pendingEmerg.length;
 
-  // Enforce tab access: Super Admins & Admins have full access to management tabs
+  // Enforce tab access: ONLY Main Admin can access: donation, apps, users, access, settings, security
   useEffect(() => {
+    const mainAdminOnlyTabs: Tab[] = [
+      "donation",
+      "apps",
+      "users",
+      "access",
+      "settings",
+      "security",
+    ];
+    if (!isMainAdmin && mainAdminOnlyTabs.includes(tab)) {
+      setTab("overview");
+      return;
+    }
+
     const hasAdminAccess = isMainAdmin || isAdmin;
-    if (
-      !hasAdminAccess &&
-      (tab === "activity" ||
-        tab === "categories" ||
-        tab === "donation" ||
-        tab === "users" ||
-        tab === "access" ||
-        tab === "apps" ||
-        tab === "settings")
-    ) {
+    if (!hasAdminAccess && (tab === "activity" || tab === "categories")) {
       setTab("overview");
     }
   }, [isMainAdmin, isAdmin, tab]);
@@ -700,7 +701,7 @@ function Dashboard({
         <TabBtn active={tab === "info"} onClick={() => setTab("info")} badge={pendingSubs.length}>
           তথ্য
         </TabBtn>
-        {(isMainAdmin || isAdmin) && (
+        {isMainAdmin && (
           <TabBtn
             active={tab === "donation"}
             onClick={() => setTab("donation")}
@@ -740,12 +741,12 @@ function Dashboard({
         >
           লাইভ চ্যাট
         </TabBtn>
-        {(isMainAdmin || isAdmin) && (
+        {isMainAdmin && (
           <TabBtn active={tab === "apps"} onClick={() => setTab("apps")}>
             অ্যাপ আপলোড
           </TabBtn>
         )}
-        {(isMainAdmin || isAdmin) && (
+        {isMainAdmin && (
           <TabBtn
             active={tab === "users"}
             onClick={() => setTab("users")}
@@ -754,7 +755,7 @@ function Dashboard({
             ইউজার ও পাসওয়ার্ড
           </TabBtn>
         )}
-        {(isMainAdmin || isAdmin) && (
+        {isMainAdmin && (
           <TabBtn
             active={tab === "access"}
             onClick={() => setTab("access")}
@@ -763,14 +764,16 @@ function Dashboard({
             অ্যাকসেস ও রিকোয়েস্ট
           </TabBtn>
         )}
-        {(isMainAdmin || isAdmin) && (
+        {isMainAdmin && (
           <TabBtn active={tab === "settings"} onClick={() => setTab("settings")}>
             সেটিংস
           </TabBtn>
         )}
-        <TabBtn active={tab === "security"} onClick={() => setTab("security")}>
-          নিরাপত্তা
-        </TabBtn>
+        {isMainAdmin && (
+          <TabBtn active={tab === "security"} onClick={() => setTab("security")}>
+            নিরাপত্তা
+          </TabBtn>
+        )}
       </div>
 
       {/* Active Tab Content */}
@@ -803,7 +806,7 @@ function Dashboard({
 
         {tab === "info" && <SubmissionsAdminPanel subs={subs} />}
 
-        {tab === "donation" && (isMainAdmin || isAdmin) && <DonationsAdminPanel dons={dons} />}
+        {tab === "donation" && isMainAdmin && <DonationsAdminPanel dons={dons} />}
 
         {tab === "donors" && <DonorsAdminPanel donors={donors} />}
 
@@ -812,11 +815,11 @@ function Dashboard({
         {tab === "emergency" && <EmergencyEditor />}
         {tab === "banners" && <BannersEditor />}
         {tab === "chat" && <ChatThreadsAdmin />}
-        {tab === "apps" && (isMainAdmin || isAdmin) && <AppPackagesAdminPanel />}
-        {tab === "users" && (isMainAdmin || isAdmin) && <UsersEditor />}
-        {tab === "access" && (isMainAdmin || isAdmin) && <AccessEditor />}
-        {tab === "settings" && (isMainAdmin || isAdmin) && <SettingsAdminPanel />}
-        {tab === "security" && <SecurityPanel />}
+        {tab === "apps" && isMainAdmin && <AppPackagesAdminPanel />}
+        {tab === "users" && isMainAdmin && <UsersEditor />}
+        {tab === "access" && isMainAdmin && <AccessEditor />}
+        {tab === "settings" && isMainAdmin && <SettingsAdminPanel />}
+        {tab === "security" && isMainAdmin && <SecurityPanel />}
       </div>
     </div>
   );
@@ -5437,11 +5440,11 @@ function SettingsAdminPanel() {
           {/* Live Preview Card */}
           <div className="flex flex-col items-center justify-center rounded-2xl border border-border/80 bg-muted/40 p-4 text-center">
             <p className="mb-2 text-xs font-semibold text-muted-foreground">বর্তমান লাইভ লোগো প্রিভিউ</p>
-            <div className="relative flex h-28 w-28 items-center justify-center rounded-full border-2 border-primary/30 bg-white p-1.5 shadow-md">
+            <div className="relative flex h-28 w-28 items-center justify-center p-1">
               <img
                 src={logo}
                 alt="Smart Noakhali Live Logo"
-                className="h-full w-full rounded-full object-contain"
+                className="h-full w-full object-contain"
               />
             </div>
             <div className="mt-3 flex items-center gap-2">

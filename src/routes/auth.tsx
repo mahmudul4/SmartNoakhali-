@@ -297,11 +297,11 @@ function AuthPage() {
         <ArrowLeft className="h-4 w-4" /> হোমে ফিরে যান
       </Link>
       <div className="rounded-3xl bg-gradient-card p-6 shadow-elevated">
-        <div className="mx-auto mb-3 flex h-20 w-20 items-center justify-center rounded-full bg-white p-1 ring-2 ring-gold shadow-gold">
+        <div className="mx-auto mb-3 flex h-24 w-24 items-center justify-center p-1">
           <img
             src={logo}
             alt="Smart Noakhali Logo"
-            className="h-full w-full rounded-full object-contain"
+            className="h-full w-full object-contain"
           />
         </div>
 
