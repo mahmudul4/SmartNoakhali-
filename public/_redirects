@@ -1,3 +1,3 @@
-# Cloudflare Pages / Netlify SPA Routing
-/downloads/*  /downloads/:splat  200
-/*            /index.html        200
+# Cloudflare Pages / Workers SPA Routing
+# Note: Cloudflare Pages and Workers Static Assets handle SPA fallback natively.
+# Catch-all rewrite rules like '/* /index.html 200' cause Cloudflare validation error 100324 (infinite loop) and are not needed.
