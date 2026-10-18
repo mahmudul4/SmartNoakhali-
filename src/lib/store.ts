@@ -107,23 +107,19 @@ export async function upsertSettingDoc(
   const path = `settings/${settingId}`;
   const ref = doc(db, "settings", settingId);
   try {
-    const snap = await getDoc(ref);
-    if (!snap.exists()) {
-      await setDoc(ref, {
+    await setDoc(
+      ref,
+      {
         key: settingId,
         logo_url: cleanUrl,
         visible: isVisible,
         updatedAt: serverTimestamp(),
-      });
-    } else {
-      await updateDoc(ref, {
-        logo_url: cleanUrl,
-        visible: isVisible,
-        updatedAt: serverTimestamp(),
-      });
-    }
+      },
+      { merge: true }
+    );
   } catch (e) {
-    console.warn(`Firestore settings sync skipped for ${path}:`, e);
+    console.error(`Firestore settings sync failed for ${path}:`, e);
+    throw e;
   }
 }
 

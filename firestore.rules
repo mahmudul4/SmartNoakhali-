@@ -98,7 +98,8 @@ service cloud.firestore {
     match /donations/{donationId} {
       allow get, list: if true;
       allow create: if isValidId(donationId);
-      allow update, delete: if isStaff() || isBootstrappedAdmin() || isAdmin();
+      allow update: if isStaff() || isBootstrappedAdmin() || isAdmin() || (isSignedIn() && existing().author_id == request.auth.uid);
+      allow delete: if isStaff() || isBootstrappedAdmin() || isAdmin();
     }
 
     // =========================================================
@@ -107,7 +108,8 @@ service cloud.firestore {
     match /submissions/{submissionId} {
       allow get, list: if true;
       allow create: if isValidId(submissionId);
-      allow update, delete: if isStaff() || isBootstrappedAdmin() || isAdmin();
+      allow update: if isStaff() || isBootstrappedAdmin() || isAdmin() || (isSignedIn() && existing().author_id == request.auth.uid);
+      allow delete: if isStaff() || isBootstrappedAdmin() || isAdmin();
     }
 
     // =========================================================
@@ -116,7 +118,8 @@ service cloud.firestore {
     match /blood_donors/{donorId} {
       allow get, list: if true;
       allow create: if isValidId(donorId);
-      allow update, delete: if isStaff() || isBootstrappedAdmin() || isAdmin();
+      allow update: if isStaff() || isBootstrappedAdmin() || isAdmin() || (isSignedIn() && existing().author_id == request.auth.uid);
+      allow delete: if isStaff() || isBootstrappedAdmin() || isAdmin();
     }
 
     // =========================================================
@@ -125,7 +128,8 @@ service cloud.firestore {
     match /donation_events/{eventId} {
       allow get, list: if true;
       allow create: if isValidId(eventId);
-      allow update, delete: if isStaff() || isBootstrappedAdmin() || isAdmin();
+      allow update: if isStaff() || isBootstrappedAdmin() || isAdmin() || (isSignedIn() && existing().author_id == request.auth.uid);
+      allow delete: if isStaff() || isBootstrappedAdmin() || isAdmin();
     }
 
     // =========================================================
@@ -150,7 +154,8 @@ service cloud.firestore {
     match /emergency_blood_requests/{requestId} {
       allow get, list: if true;
       allow create: if isValidId(requestId);
-      allow update, delete: if isStaff() || isBootstrappedAdmin() || isAdmin();
+      allow update: if isStaff() || isBootstrappedAdmin() || isAdmin() || (isSignedIn() && existing().author_id == request.auth.uid);
+      allow delete: if isStaff() || isBootstrappedAdmin() || isAdmin();
     }
 
     // =========================================================

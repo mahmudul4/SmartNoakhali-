@@ -719,8 +719,15 @@ async function syncSingleDocToNativeFirestore(
       }
       return true;
     }
-  } catch {
-    // Will retry or stay persisted in mirror
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const code = (err as { code?: string })?.code;
+    if (code === "permission-denied" || msg.includes("insufficient permissions") || msg.includes("PERMISSION_DENIED")) {
+      console.warn(`[Firestore Sync] Write skipped for ${collectionName}/${id}: unauthenticated or insufficient permissions`);
+      return false;
+    }
+    console.error(`[Firestore Sync] Failed to persist ${collectionName}/${id}:`, err);
+    return false;
   }
   return false;
 }
@@ -763,8 +770,8 @@ function useFirestoreRealtime<
 
   const superOnlyCollections = ["donations", "category_access", "app_links"];
   const canQueryUnfiltered = superOnlyCollections.includes(collectionName)
-    ? isFirebaseVerifiedSuperAdmin
-    : isFirebaseVerifiedAdmin;
+    ? Boolean(isFirebaseVerifiedSuperAdmin || isMainAdmin)
+    : Boolean(isFirebaseVerifiedAdmin || isMainAdmin || isAdmin || isStaff);
 
   const canSeeAllInUI = superOnlyCollections.includes(collectionName)
     ? isMainAdmin
@@ -852,20 +859,26 @@ function useFirestoreRealtime<
   // 3. Background Auto-Sync: Push any unsynced mirror items or deletions to Native Firestore
   useEffect(() => {
     if (collectionName === "chat_threads") return;
+    const canSyncCatalog = Boolean(
+      isBootstrappedAdminEmail(auth.currentUser?.email) ||
+      isMainAdmin ||
+      isStaff ||
+      isAdmin
+    );
+    if (!canSyncCatalog) return;
+
     const colMirror = mirrorState.collections[collectionName] || {};
     const colDeleted = mirrorState.deletedIds[collectionName] || {};
     const fsMap = new Map<string, T>();
     for (const f of fsItems) fsMap.set(f.id, f);
 
     // Sync deletions to native Firestore
-    if (isBootstrappedAdminEmail(auth.currentUser?.email) || isMainAdmin) {
-      for (const [delId, delAt] of Object.entries(colDeleted)) {
-        const fsDoc = fsMap.get(delId);
-        if (fsDoc) {
-          const fsUpd = String(fsDoc.updated_at || fsDoc.created_at || "");
-          if (!fsUpd || fsUpd <= delAt) {
-            void deleteDoc(doc(db, collectionName, delId)).catch(() => {});
-          }
+    for (const [delId, delAt] of Object.entries(colDeleted)) {
+      const fsDoc = fsMap.get(delId);
+      if (fsDoc) {
+        const fsUpd = String(fsDoc.updated_at || fsDoc.created_at || "");
+        if (!fsUpd || fsUpd <= delAt) {
+          void deleteDoc(doc(db, collectionName, delId)).catch(() => {});
         }
       }
     }
@@ -877,10 +890,10 @@ function useFirestoreRealtime<
       const mUpd = String(mDoc.updated_at || mDoc.created_at || "");
       const fsUpd = fsDoc ? String(fsDoc.updated_at || fsDoc.created_at || "") : "";
       if (!fsDoc || mUpd > fsUpd) {
-        void syncSingleDocToNativeFirestore(collectionName, docId, mDoc);
+        void syncSingleDocToNativeFirestore(collectionName, docId, mDoc).catch(() => {});
       }
     }
-  }, [collectionName, fsItems, mirrorState, isMainAdmin]);
+  }, [collectionName, fsItems, mirrorState, isMainAdmin, isStaff, isAdmin]);
 
   // 4. Merge Native Firestore + Mirror State + Tombstones + Role Filtering
   const items = (() => {
@@ -1685,7 +1698,7 @@ export function useAppLinks() {
       ];
       defaults.forEach((d) => {
         upsertCloudMirrorDoc("app_links", d.id, d);
-        void syncSingleDocToNativeFirestore("app_links", d.id, d);
+        void syncSingleDocToNativeFirestore("app_links", d.id, d).catch(() => {});
       });
     }
   }, [loading, items.length, isMainAdmin]);
