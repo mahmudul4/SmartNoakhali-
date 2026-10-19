@@ -9,7 +9,7 @@ export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "Smart Noakhali — নোয়াখালীর ডিজিটাল সেবা ডিরেক্টরি" },
-      { name: "description", content: "জনপ্রতিনিধি, পুলিশ, ডাক্তার, রক্তদাতা সহ নোয়াখালীর সকল জরুরী যোগাযোগ এক অ্যাপে।" },
+      { name: "description", content: "আইনজীবী, পুলিশ, ডাক্তার, রক্তদাতা সহ নোয়াখালীর সকল জরুরী যোগাযোগ এক অ্যাপে।" },
     ],
   }),
   component: Index,
@@ -39,7 +39,7 @@ function Index() {
             এক ক্লিকে সকল<br />জরুরী যোগাযোগ
           </h1>
           <p className="mt-2 text-sm opacity-90">
-            জনপ্রতিনিধি • ডাক্তার • রক্তদাতা • পুলিশ • ফায়ার সার্ভিস সহ আরও অনেক কিছু
+            আইনজীবী • ডাক্তার • রক্তদাতা • পুলিশ • ফায়ার সার্ভিস সহ আরও অনেক কিছু
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <a href="tel:999" className="flex items-center gap-2 rounded-full bg-gradient-gold px-4 py-2 text-xs font-bold text-primary-deep shadow-gold">
