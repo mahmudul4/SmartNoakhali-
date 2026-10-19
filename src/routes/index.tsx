@@ -70,26 +70,31 @@ function Index() {
         <span className="text-xs text-muted-foreground">{filtered.length} টি</span>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4 sm:gap-3">
         {filtered.map((c) => {
           const Icon = c.icon;
           const inner = (
-            <div className="group relative h-full w-full min-w-0 overflow-hidden rounded-2xl bg-gradient-card p-4 shadow-card transition active:scale-[0.97] hover:shadow-elevated">
-              <div className={`mb-3 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${c.tint} text-primary-deep`}>
+            <div className="group relative flex h-full w-full min-w-0 flex-col items-center justify-center rounded-2xl border border-border/80 bg-card p-2.5 text-center shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-elevated active:scale-95 sm:p-3.5">
+              <div className={`mb-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${c.tint} text-primary-deep shadow-xs sm:h-11 sm:w-11`}>
                 <Icon className="h-5 w-5" />
               </div>
-              <p className="truncate font-semibold leading-snug text-foreground">{c.bn}</p>
-              <p className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">{c.description}</p>
-              <ChevronRight className="absolute right-2 top-2 h-4 w-4 text-muted-foreground/40 transition group-hover:translate-x-0.5 group-hover:text-primary" />
+              <p className="line-clamp-2 w-full text-center font-display text-[12px] font-bold leading-tight text-foreground sm:text-[13px] break-words">
+                {c.bn}
+              </p>
+              {c.description && (
+                <p className="mt-1 hidden w-full line-clamp-1 text-[10.5px] text-muted-foreground sm:block">
+                  {c.description}
+                </p>
+              )}
             </div>
           );
-          if (c.slug === "submit-info") return <Link key={c.slug} to="/submit-info" className="min-w-0">{inner}</Link>;
-          if (c.slug === "about") return <Link key={c.slug} to="/about" className="min-w-0">{inner}</Link>;
-          if (c.slug === "board-result") return <Link key={c.slug} to="/board-result" className="min-w-0">{inner}</Link>;
-          if (c.slug === "donation") return <Link key={c.slug} to="/donation" className="min-w-0">{inner}</Link>;
-          if (c.slug === "blood-donor") return <Link key={c.slug} to="/blood-donor" className="min-w-0">{inner}</Link>;
+          if (c.slug === "submit-info") return <Link key={c.slug} to="/submit-info" className="min-w-0 flex flex-col">{inner}</Link>;
+          if (c.slug === "about") return <Link key={c.slug} to="/about" className="min-w-0 flex flex-col">{inner}</Link>;
+          if (c.slug === "board-result") return <Link key={c.slug} to="/board-result" className="min-w-0 flex flex-col">{inner}</Link>;
+          if (c.slug === "donation") return <Link key={c.slug} to="/donation" className="min-w-0 flex flex-col">{inner}</Link>;
+          if (c.slug === "blood-donor") return <Link key={c.slug} to="/blood-donor" className="min-w-0 flex flex-col">{inner}</Link>;
           return (
-            <Link key={c.slug} to="/category/$slug" params={{ slug: c.slug }} className="min-w-0">{inner}</Link>
+            <Link key={c.slug} to="/category/$slug" params={{ slug: c.slug }} className="min-w-0 flex flex-col">{inner}</Link>
           );
         })}
       </div>

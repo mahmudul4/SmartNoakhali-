@@ -520,7 +520,7 @@ async function syncSingleDocToNativeFirestore(
   collectionName: string,
   id: string,
   item: Record<string, any>
-): Promise<boolean> {
+): Promise<{ ok: boolean; error?: string }> {
   const u = auth.currentUser;
   const isSuperSession =
     sessionStorage.getItem("sn_super_admin_session_v1") === "true" ||
@@ -565,7 +565,7 @@ async function syncSingleDocToNativeFirestore(
       };
       if (!exists) await setDoc(ref, payload);
       else if (isSuper) await updateDoc(ref, payload);
-      return true;
+      return { ok: true };
     }
 
     if (collectionName === "submissions") {
@@ -591,7 +591,7 @@ async function syncSingleDocToNativeFirestore(
       };
       if (!exists) await setDoc(ref, payload);
       else await updateDoc(ref, payload);
-      return true;
+      return { ok: true };
     }
 
     if (collectionName === "blood_donors") {
@@ -620,7 +620,7 @@ async function syncSingleDocToNativeFirestore(
       };
       if (!exists) await setDoc(ref, payload);
       else await updateDoc(ref, payload);
-      return true;
+      return { ok: true };
     }
 
     if (collectionName === "donation_events") {
@@ -645,7 +645,7 @@ async function syncSingleDocToNativeFirestore(
       };
       if (!exists) await setDoc(ref, payload);
       else await updateDoc(ref, payload);
-      return true;
+      return { ok: true };
     }
 
     if (collectionName === "emergency_banners") {
@@ -663,11 +663,11 @@ async function syncSingleDocToNativeFirestore(
       };
       if (!exists) await setDoc(ref, payload);
       else await updateDoc(ref, payload);
-      return true;
+      return { ok: true };
     }
 
     if (collectionName === "app_links") {
-      if (!isSuperSession) return false;
+      if (!isSuperSession) return { ok: false, error: "অনুমতি নেই" };
       const payload = {
         platform: sanitizeString(item.platform || (id.includes("ios") ? "ios" : "android"), 40, "android"),
         label: sanitizeString(item.label || "App", 120, "App"),
@@ -679,7 +679,7 @@ async function syncSingleDocToNativeFirestore(
       };
       if (!exists) await setDoc(ref, payload);
       else await updateDoc(ref, payload);
-      return true;
+      return { ok: true };
     }
 
     if (collectionName === "emergency_blood_requests") {
@@ -705,11 +705,11 @@ async function syncSingleDocToNativeFirestore(
       };
       if (!exists) await setDoc(ref, payload);
       else await updateDoc(ref, payload);
-      return true;
+      return { ok: true };
     }
 
     if (collectionName === "category_access") {
-      if (!isSuperSession) return false;
+      if (!isSuperSession) return { ok: false, error: "অনুমতি নেই" };
       if (!exists) {
         await setDoc(ref, {
           user_id: sanitizeString(item.user_id, 128, ""),
@@ -717,19 +717,19 @@ async function syncSingleDocToNativeFirestore(
           createdAt: serverTimestamp(),
         });
       }
-      return true;
+      return { ok: true };
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     const code = (err as { code?: string })?.code;
     if (code === "permission-denied" || msg.includes("insufficient permissions") || msg.includes("PERMISSION_DENIED")) {
       console.warn(`[Firestore Sync] Write skipped for ${collectionName}/${id}: unauthenticated or insufficient permissions`);
-      return false;
+      return { ok: false, error: "অনুমতি নেই বা পর্যাপ্ত পারমিশন নেই (Missing or insufficient permissions)" };
     }
     console.error(`[Firestore Sync] Failed to persist ${collectionName}/${id}:`, err);
-    return false;
+    return { ok: false, error: msg || "Firebase-এ সংরক্ষণ ব্যর্থ হয়েছে।" };
   }
-  return false;
+  return { ok: false, error: "অজানা ত্রুটি" };
 }
 
 type FilterMode = "moderated" | "visible" | "user_owned";
@@ -989,7 +989,10 @@ export function useCloudDonations() {
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("donations", id, row);
-      await syncSingleDocToNativeFirestore("donations", id, row);
+      const syncRes = await syncSingleDocToNativeFirestore("donations", id, row);
+      if (!syncRes.ok) {
+        return { ok: false, error: syncRes.error || "Firebase-এ অনুদানের তথ্য সংরক্ষণ ব্যর্থ হয়েছে" };
+      }
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : "ত্রুটি" };
@@ -1123,7 +1126,10 @@ export function useCloudSubmissions() {
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("submissions", id, row);
-      await syncSingleDocToNativeFirestore("submissions", id, row);
+      const syncRes = await syncSingleDocToNativeFirestore("submissions", id, row);
+      if (!syncRes.ok) {
+        return { ok: false, error: syncRes.error || "Firebase-এ তথ্য সংরক্ষণ ব্যর্থ হয়েছে" };
+      }
       if (s.status === "approved" || actor.isStaff) {
         void recordStaffActivity({
           action_type: "create",
@@ -1281,7 +1287,10 @@ export function useCloudDonors() {
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("blood_donors", id, row);
-      await syncSingleDocToNativeFirestore("blood_donors", id, row);
+      const syncRes = await syncSingleDocToNativeFirestore("blood_donors", id, row);
+      if (!syncRes.ok) {
+        return { ok: false, error: syncRes.error || "Firebase-এ রক্তদাতার তথ্য সংরক্ষণ ব্যর্থ হয়েছে" };
+      }
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : "ত্রুটি" };
@@ -1421,7 +1430,10 @@ export function useCloudDonorEvents() {
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("donation_events", id, row);
-      await syncSingleDocToNativeFirestore("donation_events", id, row);
+      const syncRes = await syncSingleDocToNativeFirestore("donation_events", id, row);
+      if (!syncRes.ok) {
+        return { error: { message: syncRes.error || "Firebase-এ ইভেন্ট সংরক্ষণ ব্যর্থ হয়েছে" } };
+      }
       return { error: null };
     } catch (e) {
       return { error: { message: (e as Error).message } };
@@ -1760,7 +1772,10 @@ export function useEmergencyRequests() {
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("emergency_blood_requests", id, row);
-      await syncSingleDocToNativeFirestore("emergency_blood_requests", id, row);
+      const syncRes = await syncSingleDocToNativeFirestore("emergency_blood_requests", id, row);
+      if (!syncRes.ok) {
+        return { ok: false, error: syncRes.error || "Firebase-এ রক্তের অনুরোধ সংরক্ষণ ব্যর্থ হয়েছে" };
+      }
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : "ত্রুটি" };
@@ -2118,6 +2133,22 @@ export function useCategoryRequests() {
       updated_at: nowIso,
     };
     upsertCloudMirrorDoc("category_requests", id, entry);
+    try {
+      await setDoc(doc(db, "category_requests", id), {
+        id,
+        user_id: entry.userId,
+        user_name: entry.userName,
+        user_phone: entry.userPhone,
+        category_slug: entry.categorySlug,
+        category_bn: entry.categoryBn,
+        reason: entry.reason,
+        status: "pending",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.warn("Firestore category_request write:", e);
+    }
     return { ok: true, id };
   };
 
@@ -2131,6 +2162,12 @@ export function useCategoryRequests() {
       updated_at: nowIso,
     };
     upsertCloudMirrorDoc("category_requests", id, updated);
+    if (isWriterAuthed()) {
+      await updateDoc(doc(db, "category_requests", id), {
+        status: "approved",
+        updatedAt: serverTimestamp(),
+      }).catch(() => {});
+    }
     void recordStaffActivity({
       action_type: "approve",
       action_label: "ক্যাটাগরি অ্যাকসেস রিকোয়েস্ট অনুমোদন করেছে",
@@ -2152,6 +2189,12 @@ export function useCategoryRequests() {
       updated_at: nowIso,
     };
     upsertCloudMirrorDoc("category_requests", id, updated);
+    if (isWriterAuthed()) {
+      await updateDoc(doc(db, "category_requests", id), {
+        status: "rejected",
+        updatedAt: serverTimestamp(),
+      }).catch(() => {});
+    }
     void recordStaffActivity({
       action_type: "reject",
       action_label: "ক্যাটাগরি অ্যাকসেস রিকোয়েস্ট বাতিল করেছে",
@@ -2166,6 +2209,9 @@ export function useCategoryRequests() {
   const deleteCategoryRequest = async (id: string) => {
     const existing = requests.find((r) => r.id === id);
     removeCloudMirrorDoc("category_requests", id);
+    if (isWriterAuthed()) {
+      void deleteDoc(doc(db, "category_requests", id)).catch(() => {});
+    }
     if (existing) {
       void recordStaffActivity({
         action_type: "delete",
@@ -2258,6 +2304,23 @@ export function usePaymentRequests() {
       updated_at: nowIso,
     };
     upsertCloudMirrorDoc("payment_requests", id, entry);
+    try {
+      await setDoc(doc(db, "payment_requests", id), {
+        id,
+        user_id: entry.userId,
+        user_name: entry.userName,
+        user_phone: entry.userPhone,
+        sender_phone: entry.senderPhone,
+        amount: entry.amount,
+        method: entry.method,
+        trx_id: entry.trxId,
+        status: "pending",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.warn("Firestore payment_request write:", e);
+    }
     return { ok: true, id };
   };
 
@@ -2271,6 +2334,12 @@ export function usePaymentRequests() {
       updated_at: nowIso,
     };
     upsertCloudMirrorDoc("payment_requests", id, updated);
+    if (isWriterAuthed()) {
+      await updateDoc(doc(db, "payment_requests", id), {
+        status: "approved",
+        updatedAt: serverTimestamp(),
+      }).catch(() => {});
+    }
     void recordStaffActivity({
       action_type: "approve",
       action_label: "সাবস্ক্রিপশন পেমেন্ট রিকোয়েস্ট অনুমোদন করেছে",
@@ -2292,6 +2361,12 @@ export function usePaymentRequests() {
       updated_at: nowIso,
     };
     upsertCloudMirrorDoc("payment_requests", id, updated);
+    if (isWriterAuthed()) {
+      await updateDoc(doc(db, "payment_requests", id), {
+        status: "rejected",
+        updatedAt: serverTimestamp(),
+      }).catch(() => {});
+    }
     void recordStaffActivity({
       action_type: "reject",
       action_label: "সাবস্ক্রিপশন পেমেন্ট রিকোয়েস্ট বাতিল করেছে",
@@ -2306,6 +2381,9 @@ export function usePaymentRequests() {
   const deleteRequest = async (id: string) => {
     const existing = requests.find((r) => r.id === id);
     removeCloudMirrorDoc("payment_requests", id);
+    if (isWriterAuthed()) {
+      void deleteDoc(doc(db, "payment_requests", id)).catch(() => {});
+    }
     if (existing) {
       void recordStaffActivity({
         action_type: "delete",

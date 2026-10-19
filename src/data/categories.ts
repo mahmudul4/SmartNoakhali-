@@ -4,6 +4,7 @@ import {
   Accessibility, Plane, HeartHandshake, FileText, Star, Send, Info,
   HandCoins, MessageCircle, Smartphone, Globe, Landmark, Briefcase,
   Hospital, Car, BookOpen, Award, HelpCircle, MapPin, Heart,
+  Truck, Scale, Hotel, Camera, Package, Bus, Train, Fuel, Layers,
   type LucideIcon,
 } from "lucide-react";
 
@@ -56,6 +57,15 @@ export const CATEGORY_ICONS: Record<string, LucideIcon> = {
   HelpCircle,
   MapPin,
   Heart,
+  Truck,
+  Scale,
+  Hotel,
+  Camera,
+  Package,
+  Bus,
+  Train,
+  Fuel,
+  Layers,
 };
 
 export const CATEGORY_TINTS: Array<{ label: string; value: string }> = [

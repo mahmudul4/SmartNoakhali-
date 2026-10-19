@@ -105,7 +105,7 @@
   /* Gradients & shadows */
   --gradient-hero: linear-gradient(135deg, oklch(0.27 0.07 162) 0%, oklch(0.38 0.09 162) 60%, oklch(0.55 0.13 162) 100%);
   --gradient-gold: linear-gradient(135deg, oklch(0.82 0.14 88) 0%, oklch(0.72 0.14 75) 100%);
-  --gradient-card: linear-gradient(180deg, oklch(1 0 0) 0%, oklch(0.97 0.015 130) 100%);
+  --gradient-card: linear-gradient(180deg, oklch(1 0 0) 0%, oklch(0.985 0.003 95) 100%);
   --shadow-card: 0 1px 2px oklch(0.27 0.07 162 / 0.06), 0 8px 24px -12px oklch(0.27 0.07 162 / 0.18);
   --shadow-elevated: 0 10px 40px -12px oklch(0.27 0.07 162 / 0.35);
   --shadow-gold: 0 8px 28px -10px oklch(0.78 0.13 85 / 0.55);

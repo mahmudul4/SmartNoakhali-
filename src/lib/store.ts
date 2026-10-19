@@ -373,6 +373,44 @@ const DEFAULT_CATEGORY_ITEMS: CategoryConfigItem[] = defaultCategories
     sort_order: idx + 1,
   }));
 
+const DEFAULT_CATEGORY_FALLBACKS: Record<string, { iconName: string; tint: string; description: string }> = {
+  doctor: { iconName: "Stethoscope", tint: "from-teal-500/15 to-teal-700/10", description: "চিকিৎসক ও বিশেষজ্ঞ" },
+  hospital: { iconName: "Building2", tint: "from-sky-500/15 to-sky-700/10", description: "হাসপাতাল ও ক্লিনিক" },
+  ambulance: { iconName: "Truck", tint: "from-red-500/15 to-red-700/10", description: "জরুরী অ্যাম্বুলেন্স" },
+  "blood-donor": { iconName: "Droplet", tint: "from-rose-500/20 to-rose-700/10", description: "স্বেচ্ছা রক্তদাতাদের তালিকা" },
+  police: { iconName: "Shield", tint: "from-blue-500/15 to-blue-700/10", description: "থানা ও পুলিশ ফাঁড়ি" },
+  "fire-service": { iconName: "Flame", tint: "from-orange-500/15 to-red-600/10", description: "অগ্নিনির্বাপন ও উদ্ধার" },
+  fire: { iconName: "Flame", tint: "from-orange-500/15 to-red-600/10", description: "অগ্নিনির্বাপন ও উদ্ধার" },
+  electricity: { iconName: "Zap", tint: "from-yellow-500/15 to-yellow-700/10", description: "বিদ্যুৎ অভিযোগ ও সেবা" },
+  electrician: { iconName: "Zap", tint: "from-yellow-500/15 to-yellow-700/10", description: "বৈদ্যুতিক মিস্ত্রি" },
+  journalist: { iconName: "Newspaper", tint: "from-slate-500/15 to-slate-700/10", description: "স্থানীয় সংবাদকর্মী ও প্রেস" },
+  lawyer: { iconName: "Scale", tint: "from-indigo-500/15 to-indigo-700/10", description: "আইনজীবী ও নোটারি" },
+  education: { iconName: "GraduationCap", tint: "from-emerald-500/15 to-emerald-700/10", description: "শিক্ষা প্রতিষ্ঠান" },
+  school: { iconName: "GraduationCap", tint: "from-indigo-500/15 to-indigo-700/10", description: "শিক্ষা প্রতিষ্ঠান" },
+  hotel: { iconName: "Hotel", tint: "from-amber-500/15 to-amber-700/10", description: "হোটেল ও রেস্টুরেন্ট" },
+  "tourist-spot": { iconName: "Camera", tint: "from-pink-500/15 to-pink-700/10", description: "দর্শনীয় স্থান ও পার্ক" },
+  courier: { iconName: "Package", tint: "from-violet-500/15 to-violet-700/10", description: "কুরিয়ার ও পার্সেল" },
+  bus: { iconName: "Bus", tint: "from-cyan-500/15 to-cyan-700/10", description: "বাস সার্ভিস ও কাউন্টার" },
+  train: { iconName: "Train", tint: "from-sky-500/15 to-sky-700/10", description: "ট্রেন সময়সূচী ও স্টেশন" },
+  "rent-a-car": { iconName: "Car", tint: "from-stone-500/15 to-stone-700/10", description: "রেন্ট-এ-কার ও মাইক্রোবাস" },
+  garage: { iconName: "Wrench", tint: "from-zinc-500/15 to-zinc-700/10", description: "গাড়ি মেরামত" },
+  gas: { iconName: "Fuel", tint: "from-orange-500/15 to-red-600/10", description: "গ্যাস ও এলপিজি সিলিন্ডার" },
+  bank: { iconName: "Landmark", tint: "from-emerald-600/15 to-teal-700/10", description: "ব্যাংক ও এটিএম বুথ" },
+  service: { iconName: "Layers", tint: "from-teal-500/15 to-emerald-700/10", description: "অন্যান্য জরুরি সেবা" },
+  janapratinidhi: { iconName: "Users", tint: "from-emerald-500/15 to-emerald-700/10", description: "ইউনিয়ন ও পৌর জনপ্রতিনিধি" },
+  helpline: { iconName: "PhoneCall", tint: "from-emerald-600/20 to-emerald-800/10", description: "জরুরী হেল্পলাইন" },
+  "electricity-office": { iconName: "Building2", tint: "from-sky-500/15 to-sky-700/10", description: "পল্লী বিদ্যুৎ সমিতি" },
+  mason: { iconName: "HardHat", tint: "from-stone-500/15 to-stone-700/10", description: "নির্মাণ মিস্ত্রি" },
+  disabled: { iconName: "Accessibility", tint: "from-violet-500/15 to-violet-700/10", description: "প্রতিবন্ধী সেবা" },
+  expatriate: { iconName: "Plane", tint: "from-cyan-500/15 to-cyan-700/10", description: "প্রবাসী তথ্য" },
+  "service-org": { iconName: "HeartHandshake", tint: "from-pink-500/15 to-pink-700/10", description: "সেবামূলক সংগঠন" },
+  "board-result": { iconName: "FileText", tint: "from-emerald-500/15 to-teal-700/10", description: "পরীক্ষার ফলাফল" },
+  "special-persons": { iconName: "Star", tint: "from-amber-400/20 to-amber-600/10", description: "বিশেষ ব্যাক্তিবর্গ" },
+  donation: { iconName: "HandCoins", tint: "from-emerald-500/20 to-amber-500/10", description: "অনুদান দিন ও তালিকা দেখুন" },
+  "submit-info": { iconName: "Send", tint: "from-emerald-500/20 to-emerald-700/10", description: "নতুন তথ্য জমা দিন" },
+  about: { iconName: "Info", tint: "from-emerald-600/15 to-emerald-800/10", description: "আমাদের সম্পর্কে" },
+};
+
 function parseCategoryConfig(raw: string | null | undefined): CategoryConfigItem[] | null {
   if (!raw) return null;
   try {
@@ -386,16 +424,30 @@ function parseCategoryConfig(raw: string | null | undefined): CategoryConfigItem
             item.slug !== "chat" &&
             item.slug !== "app-download"
         )
-        .map((item, idx) => ({
-          slug: String(item.slug),
-          bn: String(item.bn || item.slug),
-          en: String(item.en || item.slug),
-          iconName: String(item.iconName || "Users"),
-          tint: String(item.tint || "from-emerald-500/15 to-emerald-700/10"),
-          description: String(item.description || ""),
-          visible: item.visible !== false,
-          sort_order: typeof item.sort_order === "number" ? item.sort_order : idx + 1,
-        }));
+        .map((item, idx) => {
+          const slug = String(item.slug);
+          const fallback = DEFAULT_CATEGORY_FALLBACKS[slug] || defaultCategories.find((d) => d.slug === slug);
+          const rawIcon = String(item.iconName || item.icon || "");
+          const iconName = (rawIcon && rawIcon !== "Users" && CATEGORY_ICONS[rawIcon])
+            ? rawIcon
+            : (fallback && CATEGORY_ICONS[fallback.iconName] ? fallback.iconName : (rawIcon || "Users"));
+          const rawTint = String(item.tint || "");
+          const tint = (rawTint && rawTint !== "from-emerald-500/15 to-emerald-700/10")
+            ? rawTint
+            : (fallback?.tint || "from-emerald-500/15 to-emerald-700/10");
+          const description = String(item.description || fallback?.description || "");
+
+          return {
+            slug,
+            bn: String(item.bn || item.slug),
+            en: String(item.en || item.slug),
+            iconName,
+            tint,
+            description,
+            visible: item.visible !== false,
+            sort_order: typeof item.sort_order === "number" ? item.sort_order : idx + 1,
+          };
+        });
     }
   } catch {
     // ignore
@@ -404,15 +456,24 @@ function parseCategoryConfig(raw: string | null | undefined): CategoryConfigItem
 }
 
 function toResolvedCategory(item: CategoryConfigItem): Category {
-  const IconComp = CATEGORY_ICONS[item.iconName] || CATEGORY_ICONS.Users;
+  const fallback = DEFAULT_CATEGORY_FALLBACKS[item.slug];
+  const iconKey = (item.iconName && item.iconName !== "Users" && CATEGORY_ICONS[item.iconName])
+    ? item.iconName
+    : (fallback?.iconName && CATEGORY_ICONS[fallback.iconName] ? fallback.iconName : (item.iconName || "Users"));
+  const IconComp = CATEGORY_ICONS[iconKey] || CATEGORY_ICONS.Users;
+  const tint = (item.tint && item.tint !== "from-emerald-500/15 to-emerald-700/10")
+    ? item.tint
+    : (fallback?.tint || item.tint || "from-emerald-500/15 to-emerald-700/10");
+  const description = item.description || fallback?.description || "";
+
   return {
     slug: item.slug,
     bn: item.bn,
     en: item.en,
     icon: IconComp,
-    iconName: item.iconName,
-    tint: item.tint,
-    description: item.description,
+    iconName: iconKey,
+    tint,
+    description,
     visible: item.visible,
     sort_order: item.sort_order,
   };
