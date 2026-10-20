@@ -134,7 +134,16 @@ function readLocalStaffProfiles(): Record<
   return {};
 }
 
-export async function syncVaultFromCloud(): Promise<Record<string, VaultUserMeta>> {
+let lastVaultSyncAt = 0;
+let cachedVaultResult: Record<string, VaultUserMeta> = {};
+
+export async function syncVaultFromCloud(force = false): Promise<Record<string, VaultUserMeta>> {
+  const now = Date.now();
+  if (!force && now - lastVaultSyncAt < 30000 && Object.keys(cachedVaultResult).length > 0) {
+    return cachedVaultResult;
+  }
+  lastVaultSyncAt = now;
+
   const local = readLocalVault();
   let merged: Record<string, VaultUserMeta> = { ...local };
   const deletedSet = new Set<string>(readLocalDeletedUsers());
@@ -336,6 +345,7 @@ export async function syncVaultFromCloud(): Promise<Record<string, VaultUserMeta
   }
 
   writeLocalVault(merged);
+  cachedVaultResult = merged;
   return merged;
 }
 

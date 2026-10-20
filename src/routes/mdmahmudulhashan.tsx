@@ -536,7 +536,7 @@ function Dashboard({
       }
     };
     void syncUsers();
-    const t = setInterval(syncUsers, 8000);
+    const t = setInterval(syncUsers, 60000);
     return () => {
       cancelled = true;
       clearInterval(t);
@@ -4895,7 +4895,7 @@ function AccessEditor() {
 
   useEffect(() => {
     void refreshUsers();
-    const timer = setInterval(refreshUsers, 6000);
+    const timer = setInterval(refreshUsers, 60000);
     return () => clearInterval(timer);
   }, []);
 

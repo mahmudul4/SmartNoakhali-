@@ -84,13 +84,26 @@ export interface FirestoreErrorInfo {
   };
 }
 
+export function isFirestoreQuotaError(error: unknown): boolean {
+  if (!error) return false;
+  const code = (error as { code?: string })?.code;
+  const msg = error instanceof Error ? error.message : String(error);
+  return (
+    code === "resource-exhausted" ||
+    msg.toLowerCase().includes("quota") ||
+    msg.toLowerCase().includes("resource-exhausted")
+  );
+}
+
 export function handleFirestoreError(
   error: unknown,
   operationType: OperationType,
   path: string | null
 ): never {
+  const errStr = error instanceof Error ? error.message : String(error);
+  const isQuota = isFirestoreQuotaError(error);
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errStr,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -106,7 +119,11 @@ export function handleFirestoreError(
     operationType,
     path,
   };
-  console.error("Firestore Error: ", JSON.stringify(errInfo));
+  if (isQuota) {
+    console.warn(`[Firestore Quota] Quota exceeded on ${operationType} ${path || ""}: ${errStr}`);
+  } else {
+    console.error("Firestore Error: ", JSON.stringify(errInfo));
+  }
   throw new Error(JSON.stringify(errInfo));
 }
 
@@ -115,6 +132,10 @@ async function testConnection() {
   try {
     await getDocFromServer(doc(db, "test", "connection"));
   } catch (error) {
+    if (isFirestoreQuotaError(error)) {
+      console.warn("Firestore daily quota limit reached; running in cached mode.");
+      return;
+    }
     if (
       error instanceof Error &&
       error.message.includes("the client is offline")
@@ -164,89 +185,97 @@ export async function ensureCurrentUserProfileDoc(
   }
 
   const work = (async () => {
-    const userRef = doc(db, "users", u.uid);
-    const snap = await getDoc(userRef);
-    const isSuper = isSuperAdminEmail(u.email);
-    const isRegAdmin =
-      u.email?.trim().toLowerCase() === REGULAR_ADMIN_EMAIL.toLowerCase();
+    try {
+      const userRef = doc(db, "users", u.uid);
+      const snap = await getDoc(userRef);
+      const isSuper = isSuperAdminEmail(u.email);
+      const isRegAdmin =
+        u.email?.trim().toLowerCase() === REGULAR_ADMIN_EMAIL.toLowerCase();
 
-    if (!snap.exists()) {
-      const emailStr = sanitizeString(
-        u.email || "user@example.com",
-        254,
-        "user@example.com"
-      );
-      const defaultUsername = sanitizeString(
-        (
-          extraMeta?.username ||
-          u.email?.split("@")[0] ||
-          u.displayName ||
+      if (!snap.exists()) {
+        const emailStr = sanitizeString(
+          u.email || "user@example.com",
+          254,
+          "user@example.com"
+        );
+        const defaultUsername = sanitizeString(
+          (
+            extraMeta?.username ||
+            u.email?.split("@")[0] ||
+            u.displayName ||
+            "user"
+          ).replace(/[^a-zA-Z0-9_-]/g, "_"),
+          60,
           "user"
-        ).replace(/[^a-zA-Z0-9_-]/g, "_"),
-        60,
-        "user"
-      );
-      const defaultFullName = sanitizeString(
-        extraMeta?.full_name || u.displayName || defaultUsername,
-        120,
-        defaultUsername
-      );
-      const initialRoles = isSuper
-        ? ["admin", "moderator", "editor", "user"]
-        : isRegAdmin
-        ? ["admin", "user"]
-        : ["user"];
+        );
+        const defaultFullName = sanitizeString(
+          extraMeta?.full_name || u.displayName || defaultUsername,
+          120,
+          defaultUsername
+        );
+        const initialRoles = isSuper
+          ? ["admin", "moderator", "editor", "user"]
+          : isRegAdmin
+          ? ["admin", "user"]
+          : ["user"];
 
-      await setDoc(userRef, {
-        uid: u.uid,
-        email: emailStr,
-        full_name: defaultFullName,
-        username: isSuper ? "mahmudul" : defaultUsername,
-        phone: sanitizeString(extraMeta?.phone || u.phoneNumber || "", 30, ""),
-        roles: initialRoles,
-        suspended: false,
-        must_change_password: false,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+        await setDoc(userRef, {
+          uid: u.uid,
+          email: emailStr,
+          full_name: defaultFullName,
+          username: isSuper ? "mahmudul" : defaultUsername,
+          phone: sanitizeString(extraMeta?.phone || u.phoneNumber || "", 30, ""),
+          roles: initialRoles,
+          suspended: false,
+          must_change_password: false,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
 
-      if (isSuper || isRegAdmin) {
-        const adminRef = doc(db, "admins", u.uid);
-        const adminSnap = await getDoc(adminRef);
-        if (!adminSnap.exists()) {
-          await setDoc(adminRef, {
-            uid: u.uid,
-            email: emailStr,
-            createdAt: serverTimestamp(),
-          });
+        if (isSuper || isRegAdmin) {
+          const adminRef = doc(db, "admins", u.uid);
+          const adminSnap = await getDoc(adminRef);
+          if (!adminSnap.exists()) {
+            await setDoc(adminRef, {
+              uid: u.uid,
+              email: emailStr,
+              createdAt: serverTimestamp(),
+            });
+          }
+        }
+      } else {
+        // If user exists and is authorized admin, ensure admin roles are present
+        if (isSuper || isRegAdmin) {
+          const data = snap.data();
+          const currentRoles: string[] = Array.isArray(data?.roles) ? data.roles : [];
+          const requiredRoles = isSuper ? ["admin", "moderator", "editor", "user"] : ["admin", "user"];
+          const needsUpdate = requiredRoles.some((r) => !currentRoles.includes(r));
+          if (needsUpdate) {
+            await setDoc(
+              userRef,
+              {
+                roles: Array.from(new Set([...currentRoles, ...requiredRoles])),
+                updatedAt: serverTimestamp(),
+              },
+              { merge: true }
+            );
+          }
+          const adminRef = doc(db, "admins", u.uid);
+          const adminSnap = await getDoc(adminRef);
+          if (!adminSnap.exists()) {
+            await setDoc(adminRef, {
+              uid: u.uid,
+              email: sanitizeString(u.email || "admin@example.com", 254),
+              createdAt: serverTimestamp(),
+            });
+          }
         }
       }
-    } else {
-      // If user exists and is authorized admin, ensure admin roles are present
-      if (isSuper || isRegAdmin) {
-        const data = snap.data();
-        const currentRoles: string[] = Array.isArray(data?.roles) ? data.roles : [];
-        const requiredRoles = isSuper ? ["admin", "moderator", "editor", "user"] : ["admin", "user"];
-        const needsUpdate = requiredRoles.some((r) => !currentRoles.includes(r));
-        if (needsUpdate) {
-          await setDoc(
-            userRef,
-            {
-              roles: Array.from(new Set([...currentRoles, ...requiredRoles])),
-              updatedAt: serverTimestamp(),
-            },
-            { merge: true }
-          );
-        }
-        const adminRef = doc(db, "admins", u.uid);
-        const adminSnap = await getDoc(adminRef);
-        if (!adminSnap.exists()) {
-          await setDoc(adminRef, {
-            uid: u.uid,
-            email: sanitizeString(u.email || "admin@example.com", 254),
-            createdAt: serverTimestamp(),
-          });
-        }
+    } catch (err) {
+      if (isFirestoreQuotaError(err)) {
+        console.warn("[Auth] Firestore daily quota reached during profile sync; skipping background write.");
+      } else {
+        console.warn("[Auth] Profile sync error:", err);
       }
     }
   })();

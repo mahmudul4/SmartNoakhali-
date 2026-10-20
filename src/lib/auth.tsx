@@ -28,6 +28,7 @@ import {
   isBootstrappedAdminEmail,
   OperationType,
   handleFirestoreError,
+  isFirestoreQuotaError,
   sanitizeString,
   ensureCurrentUserProfileDoc,
 } from "@/lib/firebase";
@@ -300,20 +301,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setLoading(false);
         },
         (error) => {
-          try {
-            handleFirestoreError(error, OperationType.GET, userPath);
-          } catch {
-            setRoles(
-              isSuper
-                ? ["admin", "moderator", "editor", "user"]
-                : isRegularBootstrappedAdmin
-                ? ["admin", "user"]
-                : vaultRoles.length > 0
-                ? (Array.from(new Set([...vaultRoles, "user"])) as Role[])
-                : ["user"]
-            );
-            setLoading(false);
+          if (!isFirestoreQuotaError(error)) {
+            try {
+              handleFirestoreError(error, OperationType.GET, userPath);
+            } catch {
+              // ignore
+            }
+          } else {
+            console.warn("[Auth] Firestore quota exceeded while listening to user profile; using cached roles.");
           }
+          setRoles(
+            isSuper
+              ? ["admin", "moderator", "editor", "user"]
+              : isRegularBootstrappedAdmin
+              ? ["admin", "user"]
+              : vaultRoles.length > 0
+              ? (Array.from(new Set([...vaultRoles, "user"])) as Role[])
+              : ["user"]
+          );
+          setLoading(false);
         }
       );
     });

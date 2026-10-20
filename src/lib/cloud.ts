@@ -354,6 +354,7 @@ export function mergeCloudMirrorState(incoming: Partial<CloudMirrorState> | null
   return next;
 }
 
+let lastFirestoreMirrorBackupAt = 0;
 async function persistCloudMirrorEverywhere(state: CloudMirrorState) {
   // 1. Sync to Hosting API (/api/content/sync)
   try {
@@ -366,7 +367,11 @@ async function persistCloudMirrorEverywhere(state: CloudMirrorState) {
     // ignore
   }
 
-  // 2. Sync compact mirror to Firebase Firestore (/settings/staff_profiles_config)
+  // 2. Sync compact mirror to Firebase Firestore occasionally (at most once every 10 minutes to save quota)
+  const now = Date.now();
+  if (now - lastFirestoreMirrorBackupAt < 600000) return;
+  lastFirestoreMirrorBackupAt = now;
+
   if (auth.currentUser || sessionStorage.getItem("sn_super_admin_session_v1") === "true") {
     try {
       const ref = doc(db, "settings", CLOUD_MIRROR_SETTING_ID);
@@ -477,13 +482,15 @@ export function removeCloudMirrorDoc(collectionName: string, id: string) {
 }
 
 let lastMirrorPullAt = 0;
+let lastFirestoreMirrorPullAt = 0;
 export async function pullCloudMirrorFromRemote(): Promise<CloudMirrorState> {
   const now = Date.now();
-  if (now - lastMirrorPullAt < 1800) {
+  if (now - lastMirrorPullAt < 5000) {
     return readLocalCloudMirror();
   }
   lastMirrorPullAt = now;
 
+  let pulledFromHosting = false;
   // 1. Pull from Hosting API (/api/content)
   try {
     const resp = await fetch("/api/content");
@@ -491,26 +498,30 @@ export async function pullCloudMirrorFromRemote(): Promise<CloudMirrorState> {
       const data = await resp.json();
       if (data?.cloud_mirror) {
         mergeCloudMirrorState(data.cloud_mirror);
+        pulledFromHosting = true;
       }
     }
   } catch {
     // ignore
   }
 
-  // 2. Pull from Firestore settings (/settings/staff_profiles_config)
-  try {
-    const snap = await getDoc(doc(db, "settings", CLOUD_MIRROR_SETTING_ID));
-    if (snap.exists()) {
-      const raw = snap.data().logo_url;
-      if (typeof raw === "string" && raw.trim()) {
-        const parsed = JSON.parse(raw);
-        if (parsed?._cloudMirror) {
-          mergeCloudMirrorState(parsed._cloudMirror);
+  // 2. Pull from Firestore settings only if hosting is unavailable and at most once every 10 minutes
+  if (!pulledFromHosting && now - lastFirestoreMirrorPullAt > 600000) {
+    lastFirestoreMirrorPullAt = now;
+    try {
+      const snap = await getDoc(doc(db, "settings", CLOUD_MIRROR_SETTING_ID));
+      if (snap.exists()) {
+        const raw = snap.data().logo_url;
+        if (typeof raw === "string" && raw.trim()) {
+          const parsed = JSON.parse(raw);
+          if (parsed?._cloudMirror) {
+            mergeCloudMirrorState(parsed._cloudMirror);
+          }
         }
       }
+    } catch {
+      // ignore
     }
-  } catch {
-    // ignore
   }
 
   return readLocalCloudMirror();
@@ -722,6 +733,10 @@ async function syncSingleDocToNativeFirestore(
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     const code = (err as { code?: string })?.code;
+    if (code === "resource-exhausted" || msg.includes("Quota limit exceeded") || msg.toLowerCase().includes("quota")) {
+      console.warn(`[Firestore Sync] Daily write quota limit reached for ${collectionName}/${id}. Preserved in local and server mirror.`);
+      return { ok: true };
+    }
     if (code === "permission-denied" || msg.includes("insufficient permissions") || msg.includes("PERMISSION_DENIED")) {
       console.warn(`[Firestore Sync] Write skipped for ${collectionName}/${id}: unauthenticated or insufficient permissions`);
       return { ok: false, error: "অনুমতি নেই বা পর্যাপ্ত পারমিশন নেই (Missing or insufficient permissions)" };
@@ -796,7 +811,7 @@ function useFirestoreRealtime<
       void pullCloudMirrorFromRemote().then((s) => {
         if (active) setMirrorState(s);
       });
-    }, 3500);
+    }, 60000);
 
     return () => {
       active = false;
@@ -839,7 +854,8 @@ function useFirestoreRealtime<
         setFsItems(list);
         setLoading(false);
       },
-      () => {
+      (err) => {
+        // When quota is exhausted, onSnapshot throws resource-exhausted. Fall back smoothly to cached mirror state.
         setLoading(false);
       }
     );
@@ -855,45 +871,6 @@ function useFirestoreRealtime<
     canQueryUnfiltered,
     isMainAdmin,
   ]);
-
-  // 3. Background Auto-Sync: Push any unsynced mirror items or deletions to Native Firestore
-  useEffect(() => {
-    if (collectionName === "chat_threads") return;
-    const canSyncCatalog = Boolean(
-      isBootstrappedAdminEmail(auth.currentUser?.email) ||
-      isMainAdmin ||
-      isStaff ||
-      isAdmin
-    );
-    if (!canSyncCatalog) return;
-
-    const colMirror = mirrorState.collections[collectionName] || {};
-    const colDeleted = mirrorState.deletedIds[collectionName] || {};
-    const fsMap = new Map<string, T>();
-    for (const f of fsItems) fsMap.set(f.id, f);
-
-    // Sync deletions to native Firestore
-    for (const [delId, delAt] of Object.entries(colDeleted)) {
-      const fsDoc = fsMap.get(delId);
-      if (fsDoc) {
-        const fsUpd = String(fsDoc.updated_at || fsDoc.created_at || "");
-        if (!fsUpd || fsUpd <= delAt) {
-          void deleteDoc(doc(db, collectionName, delId)).catch(() => {});
-        }
-      }
-    }
-
-    // Sync creations / updates to native Firestore
-    for (const [docId, mDoc] of Object.entries(colMirror)) {
-      if (colDeleted[docId]) continue;
-      const fsDoc = fsMap.get(docId);
-      const mUpd = String(mDoc.updated_at || mDoc.created_at || "");
-      const fsUpd = fsDoc ? String(fsDoc.updated_at || fsDoc.created_at || "") : "";
-      if (!fsDoc || mUpd > fsUpd) {
-        void syncSingleDocToNativeFirestore(collectionName, docId, mDoc).catch(() => {});
-      }
-    }
-  }, [collectionName, fsItems, mirrorState, isMainAdmin, isStaff, isAdmin]);
 
   // 4. Merge Native Firestore + Mirror State + Tombstones + Role Filtering
   const items = (() => {
@@ -2103,7 +2080,7 @@ export function useCategoryRequests() {
     window.addEventListener("sn-cloud-mirror-updated", sync);
     const timer = setInterval(() => {
       void pullCloudMirrorFromRemote().then(sync);
-    }, 3500);
+    }, 60000);
     return () => {
       window.removeEventListener("sn-cloud-mirror-updated", sync);
       clearInterval(timer);
@@ -2272,7 +2249,7 @@ export function usePaymentRequests() {
     window.addEventListener("sn-cloud-mirror-updated", sync);
     const timer = setInterval(() => {
       void pullCloudMirrorFromRemote().then(sync);
-    }, 3500);
+    }, 60000);
     return () => {
       window.removeEventListener("sn-cloud-mirror-updated", sync);
       clearInterval(timer);
