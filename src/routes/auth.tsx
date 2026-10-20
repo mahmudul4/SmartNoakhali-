@@ -139,13 +139,13 @@ function AuthPage() {
 
   useEffect(() => {
     if (isAuthed) {
-      if (isMainAdmin || isStaff) {
+      if (isMainAdmin) {
         navigate({ to: "/mdmahmudulhashan" });
       } else {
         navigate({ to: "/" });
       }
     }
-  }, [isAuthed, isStaff, isMainAdmin, navigate]);
+  }, [isAuthed, isMainAdmin, navigate]);
 
   async function handleGoogleLogin() {
     setBusy(true);
@@ -165,20 +165,17 @@ function AuthPage() {
         roles: isSuper
           ? ["admin", "moderator", "editor", "user"]
           : isRegAdmin
-          ? ["admin", "user"]
+          ? ["editor", "user"]
           : undefined,
         verified_via: "google",
       });
       await logEvent(
         "login_success",
-        isSuper ? "google_super_admin" : isRegAdmin ? "google_admin" : "google_user"
+        isSuper ? "google_super_admin" : isRegAdmin ? "google_editor" : "google_user"
       );
 
       if (isSuper) {
         toast.success("স্বাগতম! সুপার এডমিন হিসেবে সফলভাবে গুগল দিয়ে লগইন হয়েছে");
-        navigate({ to: "/mdmahmudulhashan" });
-      } else if (isRegAdmin) {
-        toast.success("স্বাগতম! এডমিন হিসেবে সফলভাবে গুগল দিয়ে লগইন হয়েছে");
         navigate({ to: "/mdmahmudulhashan" });
       } else {
         toast.success("Google দিয়ে ১-ক্লিকে সফলভাবে লগইন হয়েছে!");

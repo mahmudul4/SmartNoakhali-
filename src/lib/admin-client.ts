@@ -642,11 +642,11 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
     designation:
       defaultRegularAdminProfile?.designation ||
       defaultRegularAdminVault?.designation ||
-      "এডমিন (সীমিত অ্যাকসেস)",
+      "এডিটর (সাধারণ এডমিন)",
     created_at: defaultRegularAdminVault?.updated_at || new Date().toISOString(),
     last_sign_in_at: defaultRegularAdminVault?.updated_at || new Date().toISOString(),
     banned_until: defaultRegularAdminVault?.suspended ? "suspended" : null,
-    roles: defaultRegularAdminVault?.roles || ["admin", "user"],
+    roles: defaultRegularAdminVault?.roles || ["editor", "user"],
     profile: {
       full_name:
         defaultRegularAdminProfile?.full_name ||
@@ -797,8 +797,8 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
           : ["user"];
     const roles = isSuper
       ? Array.from(new Set([...rawRoles, "admin", "moderator", "editor", "user"]))
-      : isRegularBootstrapped && !rawRoles.includes("admin")
-      ? Array.from(new Set([...rawRoles, "admin"]))
+      : isRegularBootstrapped && !rawRoles.includes("editor")
+      ? Array.from(new Set([...rawRoles, "editor"]))
       : rawRoles;
     const suspended = isSuper ? false : Boolean(vMeta?.suspended ?? data.suspended);
 

@@ -22,8 +22,13 @@ const envConfig = {
     import.meta.env.VITE_FIREBASE_DATABASE_ID || firebaseConfig.firestoreDatabaseId,
 };
 
+const isNamedCustomDb =
+  Boolean(envConfig.firestoreDatabaseId) &&
+  envConfig.firestoreDatabaseId !== "(default)" &&
+  !envConfig.firestoreDatabaseId.startsWith("ai-studio-abc-");
+
 const app = initializeApp(envConfig);
-export const db = envConfig.firestoreDatabaseId
+export const db = isNamedCustomDb
   ? getFirestore(app, envConfig.firestoreDatabaseId)
   : getFirestore(app);
 export const auth = getAuth(app);
@@ -41,7 +46,7 @@ export const BOOTSTRAPPED_ADMIN_EMAILS = [
 
 /**
  * Returns true ONLY for the immutable Main Super Admin (mdmahmudulhashan0@gmail.com).
- * mr.bear444plus@gmail.com is a regular Admin, NOT Super Admin.
+ * Ordinary admins receive only Editor permissions.
  */
 export function isSuperAdminEmail(email: string | null | undefined): boolean {
   if (!email) return false;
@@ -49,9 +54,7 @@ export function isSuperAdminEmail(email: string | null | undefined): boolean {
 }
 
 /**
- * Returns true if the email belongs to a bootstrapped admin/staff account
- * (either Super Admin mdmahmudulhashan0@gmail.com or Regular Admin mr.bear444plus@gmail.com)
- * for Firestore query compatibility.
+ * Returns true if the email belongs to a recognized staff/editor account.
  */
 export function isBootstrappedAdminEmail(email: string | null | undefined): boolean {
   if (!email) return false;
@@ -216,7 +219,7 @@ export async function ensureCurrentUserProfileDoc(
         const initialRoles = isSuper
           ? ["admin", "moderator", "editor", "user"]
           : isRegAdmin
-          ? ["admin", "user"]
+          ? ["editor", "user"]
           : ["user"];
 
         await setDoc(userRef, {
@@ -232,7 +235,7 @@ export async function ensureCurrentUserProfileDoc(
           updatedAt: serverTimestamp(),
         });
 
-        if (isSuper || isRegAdmin) {
+        if (isSuper) {
           const adminRef = doc(db, "admins", u.uid);
           const adminSnap = await getDoc(adminRef);
           if (!adminSnap.exists()) {
@@ -244,11 +247,11 @@ export async function ensureCurrentUserProfileDoc(
           }
         }
       } else {
-        // If user exists and is authorized admin, ensure admin roles are present
-        if (isSuper || isRegAdmin) {
+        // If user exists and is authorized super admin, ensure admin roles are present
+        if (isSuper) {
           const data = snap.data();
           const currentRoles: string[] = Array.isArray(data?.roles) ? data.roles : [];
-          const requiredRoles = isSuper ? ["admin", "moderator", "editor", "user"] : ["admin", "user"];
+          const requiredRoles = ["admin", "moderator", "editor", "user"];
           const needsUpdate = requiredRoles.some((r) => !currentRoles.includes(r));
           if (needsUpdate) {
             await setDoc(

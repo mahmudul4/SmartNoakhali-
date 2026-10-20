@@ -734,11 +734,11 @@ async function syncSingleDocToNativeFirestore(
     const msg = err instanceof Error ? err.message : String(err);
     const code = (err as { code?: string })?.code;
     if (code === "resource-exhausted" || msg.includes("Quota limit exceeded") || msg.toLowerCase().includes("quota")) {
-      console.warn(`[Firestore Sync] Daily write quota limit reached for ${collectionName}/${id}. Preserved in local and server mirror.`);
-      return { ok: true };
+      console.error(`[Firestore Sync] Daily write quota limit reached for ${collectionName}/${id}:`, err);
+      return { ok: false, error: "Firebase কোটা সীমা অতিক্রান্ত হয়েছে (Quota exceeded)। দয়া করে পরে চেষ্টা করুন।" };
     }
     if (code === "permission-denied" || msg.includes("insufficient permissions") || msg.includes("PERMISSION_DENIED")) {
-      console.warn(`[Firestore Sync] Write skipped for ${collectionName}/${id}: unauthenticated or insufficient permissions`);
+      console.warn(`[Firestore Sync] Write rejected for ${collectionName}/${id}: insufficient permissions`);
       return { ok: false, error: "অনুমতি নেই বা পর্যাপ্ত পারমিশন নেই (Missing or insufficient permissions)" };
     }
     console.error(`[Firestore Sync] Failed to persist ${collectionName}/${id}:`, err);

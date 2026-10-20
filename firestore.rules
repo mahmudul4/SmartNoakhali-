@@ -22,51 +22,31 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isVerifiedUser() {
-      return isSignedIn();
-    }
-
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Main Super Admin
-    function isSuperAdmin() {
+    // Main Admin: ONLY mdmahmudulhashan0@gmail.com
+    function isMainAdmin() {
+      return isSignedIn() && request.auth.token.email.lower() == "mdmahmudulhashan0@gmail.com";
+    }
+
+    // Editor / Ordinary Admin permissions check
+    // Ordinary admins get only Editor permissions.
+    // They are identified either by having 'editor' or 'admin' in /users/{uid}.data.roles or being Main Admin.
+    function isEditor() {
       return isSignedIn() && (
-        request.auth.token.email == "mdmahmudulhashan0@gmail.com" ||
-        request.auth.token.email == "mr.bear444plus@gmail.com"
+        isMainAdmin() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
+          'editor' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles ||
+          'admin' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles
+        ))
       );
     }
 
-    // Bootstrapped Admin/Staff
-    function isBootstrappedAdmin() {
-      return isSuperAdmin() || (
-        isSignedIn() && (
-          request.auth.token.email == "mr.bear444plus@gmail.com" ||
-          request.auth.token.email == "mdmahmudulhashan0@gmail.com"
-        )
-      );
-    }
-
-    // Full Admin Check
-    function isAdmin() {
-      return isBootstrappedAdmin() || (
-        isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-      );
-    }
-
-    // Staff Check
-    function isStaff() {
-      return isAdmin() || (
-        isSignedIn() && (
-          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
-            'admin' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles ||
-            'editor' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles ||
-            'moderator' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles
-          )) ||
-          isBootstrappedAdmin()
-        )
-      );
+    // Global Safety Net (default deny)
+    match /{document=**} {
+      allow read, write: if false;
     }
 
     // =========================================================
@@ -74,21 +54,21 @@ service cloud.firestore {
     // =========================================================
     match /admins/{adminId} {
       allow get, list: if isSignedIn();
-      allow write: if isBootstrappedAdmin() || isAdmin();
+      allow write: if isMainAdmin();
     }
 
     // =========================================================
     // 2. /users/{userId} & Subcollection /security_events
     // =========================================================
     match /users/{userId} {
-      allow get: if isOwner(userId) || isStaff();
-      allow list: if isStaff();
-      allow create: if isOwner(userId) || isStaff();
-      allow update: if isOwner(userId) || isStaff();
-      allow delete: if isAdmin() || isBootstrappedAdmin();
+      allow get: if isOwner(userId) || isEditor();
+      allow list: if isMainAdmin();
+      allow create: if isOwner(userId) && (!('roles' in incoming()) || incoming().roles == ['user']);
+      allow update: if isMainAdmin() || (isOwner(userId) && (!incoming().diff(existing()).affectedKeys().hasAny(['roles', 'suspended', 'email'])));
+      allow delete: if isMainAdmin();
 
       match /security_events/{eventId} {
-        allow read, write: if isOwner(userId) || isStaff();
+        allow read, write: if isOwner(userId) || isMainAdmin();
       }
     }
 
@@ -98,8 +78,7 @@ service cloud.firestore {
     match /donations/{donationId} {
       allow get, list: if true;
       allow create: if isValidId(donationId);
-      allow update: if isStaff() || isBootstrappedAdmin() || isAdmin() || (isSignedIn() && existing().author_id == request.auth.uid);
-      allow delete: if isStaff() || isBootstrappedAdmin() || isAdmin();
+      allow update, delete: if isMainAdmin();
     }
 
     // =========================================================
@@ -108,8 +87,8 @@ service cloud.firestore {
     match /submissions/{submissionId} {
       allow get, list: if true;
       allow create: if isValidId(submissionId);
-      allow update: if isStaff() || isBootstrappedAdmin() || isAdmin() || (isSignedIn() && existing().author_id == request.auth.uid);
-      allow delete: if isStaff() || isBootstrappedAdmin() || isAdmin();
+      allow update: if isEditor() || (isSignedIn() && existing().author_id == request.auth.uid);
+      allow delete: if isEditor();
     }
 
     // =========================================================
@@ -118,8 +97,8 @@ service cloud.firestore {
     match /blood_donors/{donorId} {
       allow get, list: if true;
       allow create: if isValidId(donorId);
-      allow update: if isStaff() || isBootstrappedAdmin() || isAdmin() || (isSignedIn() && existing().author_id == request.auth.uid);
-      allow delete: if isStaff() || isBootstrappedAdmin() || isAdmin();
+      allow update: if isEditor() || (isSignedIn() && existing().author_id == request.auth.uid);
+      allow delete: if isEditor();
     }
 
     // =========================================================
@@ -128,8 +107,7 @@ service cloud.firestore {
     match /donation_events/{eventId} {
       allow get, list: if true;
       allow create: if isValidId(eventId);
-      allow update: if isStaff() || isBootstrappedAdmin() || isAdmin() || (isSignedIn() && existing().author_id == request.auth.uid);
-      allow delete: if isStaff() || isBootstrappedAdmin() || isAdmin();
+      allow update, delete: if isEditor();
     }
 
     // =========================================================
@@ -137,7 +115,7 @@ service cloud.firestore {
     // =========================================================
     match /emergency_banners/{bannerId} {
       allow get, list: if true;
-      allow write: if isStaff() || isBootstrappedAdmin() || isAdmin();
+      allow write: if isEditor();
     }
 
     // =========================================================
@@ -145,7 +123,7 @@ service cloud.firestore {
     // =========================================================
     match /app_links/{linkId} {
       allow get, list: if true;
-      allow write: if isStaff() || isBootstrappedAdmin() || isAdmin();
+      allow write: if isMainAdmin();
     }
 
     // =========================================================
@@ -154,16 +132,16 @@ service cloud.firestore {
     match /emergency_blood_requests/{requestId} {
       allow get, list: if true;
       allow create: if isValidId(requestId);
-      allow update: if isStaff() || isBootstrappedAdmin() || isAdmin() || (isSignedIn() && existing().author_id == request.auth.uid);
-      allow delete: if isStaff() || isBootstrappedAdmin() || isAdmin();
+      allow update: if isEditor() || (isSignedIn() && existing().author_id == request.auth.uid);
+      allow delete: if isEditor();
     }
 
     // =========================================================
     // 10. /category_access/{accessId}
     // =========================================================
     match /category_access/{accessId} {
-      allow get, list: if (isSignedIn() && existing().user_id == request.auth.uid) || isStaff() || isBootstrappedAdmin();
-      allow write: if isStaff() || isBootstrappedAdmin();
+      allow get, list: if (isSignedIn() && existing().user_id == request.auth.uid) || isMainAdmin();
+      allow write: if isMainAdmin();
     }
 
     // =========================================================
@@ -172,7 +150,7 @@ service cloud.firestore {
     match /category_requests/{requestId} {
       allow get, list: if isSignedIn();
       allow create: if isSignedIn();
-      allow update, delete: if isStaff() || isBootstrappedAdmin() || isAdmin();
+      allow update, delete: if isMainAdmin();
     }
 
     // =========================================================
@@ -181,7 +159,7 @@ service cloud.firestore {
     match /payment_requests/{requestId} {
       allow get, list: if isSignedIn();
       allow create: if isSignedIn();
-      allow update, delete: if isStaff() || isBootstrappedAdmin() || isAdmin();
+      allow update, delete: if isMainAdmin();
     }
 
     // =========================================================
@@ -189,8 +167,7 @@ service cloud.firestore {
     // =========================================================
     match /settings/{settingId} {
       allow get, list: if true;
-      allow create, update: if true;
-      allow delete: if isStaff() || isBootstrappedAdmin() || isAdmin();
+      allow write: if isMainAdmin();
     }
 
     // =========================================================
@@ -198,21 +175,21 @@ service cloud.firestore {
     // =========================================================
     match /categories/{categoryId} {
       allow get, list: if true;
-      allow write: if isStaff() || isBootstrappedAdmin() || isAdmin();
+      allow write: if isEditor();
     }
 
     // =========================================================
     // 15. /chat_threads/{threadId} & Subcollection /messages
     // =========================================================
     match /chat_threads/{threadId} {
-      allow get, list: if isSignedIn() || isStaff();
-      allow create, update: if isSignedIn() || isStaff();
-      allow delete: if isStaff() || isBootstrappedAdmin() || isAdmin();
+      allow get, list: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isMainAdmin();
 
       match /messages/{messageId} {
-        allow get, list: if isSignedIn() || isStaff();
-        allow create: if isSignedIn() || isStaff();
-        allow update, delete: if isStaff() || isBootstrappedAdmin() || isAdmin();
+        allow get, list: if isSignedIn();
+        allow create, update: if isSignedIn();
+        allow delete: if isMainAdmin();
       }
     }
   }

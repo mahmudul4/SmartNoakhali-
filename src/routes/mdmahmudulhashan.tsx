@@ -132,52 +132,71 @@ export const Route = createFileRoute("/mdmahmudulhashan")({
 
 function AdminPage() {
   const navigate = useNavigate();
-  const { isAuthed, isAdmin, isEditor, isModerator, isMainAdmin, loading, signOut, user } =
-    useAuth();
-  const isStaff = isAdmin || isEditor || isModerator || isMainAdmin;
-  const wasAuthedRef = useRef(false);
-  const wasNonSuperStaffRef = useRef(false);
+  const { isAuthed, isMainAdmin, loading, signOut, user } = useAuth();
   const [screenLocked, setScreenLocked] = useState(() => isAdminPanelLocked());
-
-  useEffect(() => {
-    if (isAuthed && isStaff) {
-      wasAuthedRef.current = true;
-      wasNonSuperStaffRef.current = !isMainAdmin;
-    } else if (isAuthed && !isStaff && !loading) {
-      // Regular logged-in user should not see Super Admin login page
-      navigate({ to: "/auth", replace: true });
-    } else if (wasAuthedRef.current && !loading && !isAuthed) {
-      wasAuthedRef.current = false;
-      if (wasNonSuperStaffRef.current) {
-        navigate({ to: "/auth", replace: true });
-      }
-    }
-  }, [isAuthed, isStaff, isMainAdmin, loading, navigate]);
 
   if (loading) {
     return (
-      <div className="px-4 py-12 text-center text-sm text-muted-foreground">
-        <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin text-primary" />
-        এডমিন সিকিউরিটি যাচাই হচ্ছে...
+      <div className="px-4 py-16 text-center text-sm text-muted-foreground">
+        <Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin text-primary" />
+        মেইন এডমিন সিকিউরিটি যাচাই হচ্ছে...
       </div>
     );
   }
 
-  if (!isAuthed || !isStaff) {
-    if (wasNonSuperStaffRef.current || (isAuthed && !isStaff)) {
-      return (
-        <div className="px-4 py-12 text-center text-sm text-muted-foreground">
-          <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin text-primary" />
-          লগইন পেজে নিয়ে যাওয়া হচ্ছে...
+  // 1. If logged in as ordinary admin, editor, or regular user: STRICT ACCESS DENIED
+  if (isAuthed && !isMainAdmin) {
+    return (
+      <div className="mx-auto max-w-md px-4 pt-16 pb-20 text-center">
+        <div className="rounded-3xl border border-destructive/25 bg-destructive/5 p-8 shadow-sm">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-destructive/15 text-destructive">
+            <ShieldAlert className="h-7 w-7" />
+          </div>
+          <h2 className="font-display text-lg font-bold text-destructive">
+            অ্যাকসেস প্রত্যাখ্যাত (403 Forbidden)
+          </h2>
+          <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
+            মেইন এডমিন প্যানেল (<span className="font-mono font-semibold text-foreground">/mdmahmudulhashan</span>) শুধুমাত্র স্মার্ট নোয়াখালীর প্রধান এডমিন (<strong>{SUPER_ADMIN_EMAIL}</strong>)-এর জন্য সংরক্ষিত।
+          </p>
+          <div className="mt-3.5 rounded-xl border border-border bg-card p-3 text-xs text-left">
+            <span className="text-muted-foreground text-[11px]">আপনার বর্তমান অ্যাকাউন্ট:</span>
+            <p className="font-mono font-semibold text-foreground break-all">{user?.email || "সাধারণ ব্যবহারকারী"}</p>
+            <span className="inline-block mt-1.5 rounded-full bg-amber-500/15 text-amber-700 px-2 py-0.5 text-[10px] font-bold">
+              সাধারণ এডমিন / এডিটর
+            </span>
+          </div>
+          <p className="mt-3 text-[11px] text-muted-foreground">
+            সাধারণ এডমিন ও এডিটরদের এই প্যানেলে প্রবেশের কোনো অনুমতি নেই।
+          </p>
+          <div className="mt-5 flex flex-col gap-2">
+            <Link
+              to="/"
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground shadow-sm transition hover:bg-primary/90"
+            >
+              হোম পেজে ফিরে যান
+            </Link>
+            <button
+              type="button"
+              onClick={async () => {
+                await signOut();
+                navigate({ to: "/auth", replace: true });
+              }}
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-4 py-2 text-xs font-semibold text-muted-foreground transition hover:bg-muted"
+            >
+              অন্য একাউন্ট দিয়ে লগইন করুন
+            </button>
+          </div>
         </div>
-      );
-    }
+      </div>
+    );
+  }
+
+  // 2. If unauthenticated visitor: show AdminLoginForm with access notice
+  if (!isAuthed) {
     return <AdminLoginForm />;
   }
 
   const handleLogout = async () => {
-    wasAuthedRef.current = false;
-    wasNonSuperStaffRef.current = false;
     setAdminPanelLocked(false);
     setScreenLocked(false);
     await signOut();
@@ -454,6 +473,15 @@ function AdminLoginForm() {
           </svg>
           Google দিয়ে সরাসরি এডমিন সাইন-ইন
         </button>
+
+        <div className="mt-5 pt-4 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
+          <Link to="/" className="hover:text-primary transition-colors">
+            ← হোম পেজে ফিরে যান
+          </Link>
+          <Link to="/auth" className="hover:text-primary font-medium transition-colors">
+            সাধারণ ইউজার লগইন →
+          </Link>
+        </div>
       </div>
     </div>
   );

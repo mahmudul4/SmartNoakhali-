@@ -70,7 +70,7 @@ export function SiteHeader() {
                   );
                 })}
               <div className="my-2 h-px bg-sidebar-border" />
-              {isAuthed && isStaff && (
+              {isAuthed && isMainAdmin && (
                 <Link
                   to="/mdmahmudulhashan"
                   onClick={() => setOpen(false)}
@@ -122,7 +122,7 @@ export function SiteHeader() {
 
         <div className="flex shrink-0 items-center gap-1.5">
           <NotificationBell />
-          {isAuthed && isStaff && (
+          {isAuthed && isMainAdmin && (
             <Link
               to="/mdmahmudulhashan"
               className="flex shrink-0 items-center gap-1 rounded-full border border-gold/50 bg-white/10 px-2.5 py-1.5 text-[11px] font-bold text-gold transition hover:bg-white/20"

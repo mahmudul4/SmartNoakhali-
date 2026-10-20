@@ -248,7 +248,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           isSuper
             ? ["admin", "moderator", "editor", "user"]
             : isRegularBootstrappedAdmin
-            ? ["admin", "user"]
+            ? ["editor", "user"]
             : vaultRoles.length > 0
             ? (Array.from(new Set([...vaultRoles, "user"])) as Role[])
             : ["user"]
@@ -282,7 +282,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const effectiveRoles: Role[] = isSuper
               ? (Array.from(new Set([...docRoles, "admin", "moderator", "editor", "user"])) as Role[])
               : isRegularBootstrappedAdmin
-              ? (Array.from(new Set([...docRoles, ...vaultRoles, "admin"])) as Role[])
+              ? (Array.from(new Set([...docRoles, ...vaultRoles, "editor"])) as Role[])
               : (Array.from(new Set([...docRoles, ...vaultRoles])) as Role[]);
             setRoles(effectiveRoles);
             setUsername(typeof data.username === "string" ? data.username : vaultEntry?.username || null);
@@ -291,7 +291,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               isSuper
                 ? ["admin", "moderator", "editor", "user"]
                 : isRegularBootstrappedAdmin
-                ? ["admin", "user"]
+                ? ["editor", "user"]
                 : vaultRoles.length > 0
                 ? (Array.from(new Set([...vaultRoles, "user"])) as Role[])
                 : ["user"]
@@ -314,7 +314,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             isSuper
               ? ["admin", "moderator", "editor", "user"]
               : isRegularBootstrappedAdmin
-              ? ["admin", "user"]
+              ? ["editor", "user"]
               : vaultRoles.length > 0
               ? (Array.from(new Set([...vaultRoles, "user"])) as Role[])
               : ["user"]
@@ -596,7 +596,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const cred = await signInWithEmailAndPassword(auth, targetEmail, password);
       const isRegAdmin = targetEmail.toLowerCase() === REGULAR_ADMIN_EMAIL.toLowerCase();
       const resolvedRoles: Role[] = isRegAdmin
-        ? ["admin", "user"]
+        ? ["editor", "user"]
         : lookupUser?.roles?.length
         ? (Array.from(new Set([...lookupUser.roles, "user"])) as Role[])
         : ["user"];
@@ -1053,10 +1053,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     ? (Array.from(new Set([...baseRoles, "admin", "moderator", "editor", "user"])) as Role[])
     : baseRoles;
 
-  const isAdmin = isBootstrappedMain || effectiveRoles.includes("admin");
-  const isModerator = isAdmin || effectiveRoles.includes("moderator");
-  const isEditor = isAdmin || effectiveRoles.includes("editor");
-  const isStaff = isBootstrappedMain || isAdmin || isEditor || isModerator;
+  const isAdmin = isBootstrappedMain;
+  const isEditor = isBootstrappedMain || effectiveRoles.includes("editor") || effectiveRoles.includes("admin");
+  const isModerator = isBootstrappedMain || effectiveRoles.includes("moderator");
+  const isStaff = isBootstrappedMain || isEditor || isModerator;
   const isMainAdmin = isBootstrappedMain;
 
   const value: AuthCtx = {
