@@ -732,9 +732,24 @@
         }
       },
       "required": ["key", "logo_url", "visible", "updatedAt"]
+    },
+    "Test": {
+      "title": "Test",
+      "description": "Health check document used for Firestore connection testing on app initialization.",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "description": "Connection test status indicator."
+        }
+      }
     }
   },
   "firestore": {
+    "/test/{docId}": {
+      "schema": "Test",
+      "description": "Health check document path used to validate Firestore connectivity on boot."
+    },
     "/settings/{settingId}": {
       "schema": "SiteSetting",
       "description": "Global site settings such as logo configuration."

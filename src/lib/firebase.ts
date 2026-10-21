@@ -143,7 +143,18 @@ async function testConnection() {
       error instanceof Error &&
       error.message.includes("the client is offline")
     ) {
-      console.error("Please check your Firebase configuration.");
+      // Allow browser WebChannel connection to complete handshake and retry once
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await getDocFromServer(doc(db, "test", "connection"));
+      } catch (retryError) {
+        if (
+          retryError instanceof Error &&
+          retryError.message.includes("the client is offline")
+        ) {
+          console.error("Please check your Firebase configuration.");
+        }
+      }
     }
   }
 }

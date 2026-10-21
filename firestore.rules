@@ -49,6 +49,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Health check for connection validation
+    match /test/{docId} {
+      allow get: if true;
+    }
+
     // =========================================================
     // 1. /admins/{adminId}
     // =========================================================
