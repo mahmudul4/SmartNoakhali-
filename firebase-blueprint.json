@@ -743,12 +743,83 @@
           "description": "Connection test status indicator."
         }
       }
+    },
+    "Task": {
+      "title": "Task",
+      "description": "User and staff task items persisted with full offline support.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Unique identifier of the task."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Title of the task."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Detailed description or notes for the task."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["todo", "in_progress", "completed"],
+          "description": "Current status of the task."
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["low", "medium", "high"],
+          "description": "Priority level of the task."
+        },
+        "dueDate": {
+          "type": "string",
+          "description": "Target completion date for the task."
+        },
+        "assignedTo": {
+          "type": "string",
+          "description": "User or staff member assigned to this task."
+        },
+        "assignedToEmail": {
+          "type": "string",
+          "format": "email",
+          "description": "Email of assigned user or staff."
+        },
+        "createdByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Firebase Auth UID of the task creator."
+        },
+        "createdByEmail": {
+          "type": "string",
+          "format": "email",
+          "description": "Email address of the task creator."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp."
+        }
+      },
+      "required": ["id", "title", "status", "createdByUid", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
     "/test/{docId}": {
       "schema": "Test",
       "description": "Health check document path used to validate Firestore connectivity on boot."
+    },
+    "/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "User and staff task items persisted with full offline support."
     },
     "/settings/{settingId}": {
       "schema": "SiteSetting",

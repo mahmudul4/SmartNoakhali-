@@ -55,6 +55,16 @@ service cloud.firestore {
     }
 
     // =========================================================
+    // Tasks: /tasks/{taskId} (Offline persistent user & staff tasks)
+    // =========================================================
+    match /tasks/{taskId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && incoming().createdByUid == request.auth.uid;
+      allow update: if isSignedIn();
+      allow delete: if isEditor() || (isSignedIn() && existing().createdByUid == request.auth.uid);
+    }
+
+    // =========================================================
     // 1. /admins/{adminId}
     // =========================================================
     match /admins/{adminId} {

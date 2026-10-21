@@ -1,7 +1,12 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, type User } from "firebase/auth";
 import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   getFirestore,
+  enableNetwork,
+  disableNetwork,
   doc,
   getDoc,
   setDoc,
@@ -29,9 +34,27 @@ const isNamedCustomDb =
   !envConfig.firestoreDatabaseId.startsWith("ai-studio-abc-");
 
 const app = initializeApp(envConfig);
-export const db = isNamedCustomDb
-  ? getFirestore(app, envConfig.firestoreDatabaseId)
-  : getFirestore(app);
+
+function initFirestoreInstance() {
+  const customDbId = isNamedCustomDb ? envConfig.firestoreDatabaseId : undefined;
+  try {
+    return initializeFirestore(
+      app,
+      {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager(),
+        }),
+      },
+      customDbId
+    );
+  } catch (err) {
+    console.warn("Falling back to standard Firestore instance:", err);
+    return customDbId ? getFirestore(app, customDbId) : getFirestore(app);
+  }
+}
+
+export const db = initFirestoreInstance();
+export { enableNetwork, disableNetwork };
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
@@ -134,6 +157,10 @@ export function handleFirestoreError(
 
 // Validate connection to Firestore on boot
 async function testConnection() {
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    // Browser is offline; persistentLocalCache provides offline access without error
+    return;
+  }
   try {
     await getDocFromServer(doc(db, "test", "connection"));
   } catch (error) {
@@ -145,6 +172,9 @@ async function testConnection() {
       error instanceof Error &&
       error.message.includes("the client is offline")
     ) {
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        return;
+      }
       // Allow browser WebChannel connection to complete handshake and retry once
       try {
         await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -154,6 +184,9 @@ async function testConnection() {
           retryError instanceof Error &&
           retryError.message.includes("the client is offline")
         ) {
+          if (typeof navigator !== "undefined" && !navigator.onLine) {
+            return;
+          }
           console.error("Please check your Firebase configuration.");
         }
       }
