@@ -1,3 +1,8 @@
+# Canonical Domain 301 Redirects: enforce non-www smartnoakhali.com
+https://www.smartnoakhali.com/* https://smartnoakhali.com/:splat 301!
+http://www.smartnoakhali.com/* https://smartnoakhali.com/:splat 301!
+http://smartnoakhali.com/* https://smartnoakhali.com/:splat 301!
+
 # Cloudflare Pages / Workers SPA Routing
 # Note: Cloudflare Pages and Workers Static Assets handle SPA fallback natively.
 # Catch-all rewrite rules like '/* /index.html 200' cause Cloudflare validation error 100324 (infinite loop) and are not needed.

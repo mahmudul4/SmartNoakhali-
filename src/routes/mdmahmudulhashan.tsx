@@ -109,6 +109,9 @@ import {
 } from "@/lib/staff-audit";
 import { AttachmentView, VoiceRecorderButton } from "@/routes/chat";
 import { SecurityPanel } from "@/components/security/SecurityPanel";
+import { RolePermissionsManager } from "@/components/RolePermissionsManager";
+import { WebsiteBrandingManager } from "@/components/WebsiteBrandingManager";
+import { useRolePermissions } from "@/lib/permissions";
 import {
   getLoginLockoutRemainingSeconds,
   recordFailedAdminLogin,
@@ -132,20 +135,21 @@ export const Route = createFileRoute("/mdmahmudulhashan")({
 
 function AdminPage() {
   const navigate = useNavigate();
-  const { isAuthed, isMainAdmin, loading, signOut, user } = useAuth();
+  const { isAuthed, isMainAdmin, isAdmin, isEditor, isModerator, isStaff, loading, signOut, user } = useAuth();
   const [screenLocked, setScreenLocked] = useState(() => isAdminPanelLocked());
 
   if (loading) {
     return (
       <div className="px-4 py-16 text-center text-sm text-muted-foreground">
         <Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin text-primary" />
-        মেইন এডমিন সিকিউরিটি যাচাই হচ্ছে...
+        এডমিন ও স্টাফ এক্সেস যাচাই হচ্ছে...
       </div>
     );
   }
 
-  // 1. If logged in as ordinary admin, editor, or regular user: STRICT ACCESS DENIED
-  if (isAuthed && !isMainAdmin) {
+  // 1. If authenticated as an ordinary user without staff/admin privileges: Access Denied
+  const isAuthorized = isMainAdmin || isAdmin || isEditor || isModerator || isStaff;
+  if (isAuthed && !isAuthorized) {
     return (
       <div className="mx-auto max-w-md px-4 pt-16 pb-20 text-center">
         <div className="rounded-3xl border border-destructive/25 bg-destructive/5 p-8 shadow-sm">
@@ -156,17 +160,17 @@ function AdminPage() {
             অ্যাকসেস প্রত্যাখ্যাত (403 Forbidden)
           </h2>
           <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
-            মেইন এডমিন প্যানেল (<span className="font-mono font-semibold text-foreground">/mdmahmudulhashan</span>) শুধুমাত্র স্মার্ট নোয়াখালীর প্রধান এডমিন (<strong>{SUPER_ADMIN_EMAIL}</strong>)-এর জন্য সংরক্ষিত।
+            এডমিন ড্যাশবোর্ড (<span className="font-mono font-semibold text-foreground">/mdmahmudulhashan</span>) শুধুমাত্র অনুমোদিত এডমিন ও স্টাফ সদস্যদের জন্য সংরক্ষিত।
           </p>
           <div className="mt-3.5 rounded-xl border border-border bg-card p-3 text-xs text-left">
             <span className="text-muted-foreground text-[11px]">আপনার বর্তমান অ্যাকাউন্ট:</span>
             <p className="font-mono font-semibold text-foreground break-all">{user?.email || "সাধারণ ব্যবহারকারী"}</p>
-            <span className="inline-block mt-1.5 rounded-full bg-amber-500/15 text-amber-700 px-2 py-0.5 text-[10px] font-bold">
-              সাধারণ এডমিন / এডিটর
+            <span className="inline-block mt-1.5 rounded-full bg-muted text-muted-foreground px-2 py-0.5 text-[10px] font-bold">
+              সাধারণ ইউজার (স্টাফ পারমিশন নেই)
             </span>
           </div>
           <p className="mt-3 text-[11px] text-muted-foreground">
-            সাধারণ এডমিন ও এডিটরদের এই প্যানেলে প্রবেশের কোনো অনুমতি নেই।
+            আপনার একাউন্টে কোনো এডমিন বা এডিটর ভূমিকা বরাদ্দ নেই। অ্যাক্সেসের জন্য প্রধান এডমিনের সাথে যোগাযোগ করুন।
           </p>
           <div className="mt-5 flex flex-col gap-2">
             <Link
@@ -489,6 +493,8 @@ function AdminLoginForm() {
 
 type Tab =
   | "overview"
+  | "roles"
+  | "branding"
   | "activity"
   | "profile"
   | "categories"
@@ -528,6 +534,7 @@ function Dashboard({
   onLockScreen: () => void;
 }) {
   const { user, isAdmin, isEditor, isModerator } = useAuth();
+  const { hasPermission } = useRolePermissions();
   const { categories, allCategories } = useCategories();
   const { getStaffProfile } = useStaffProfiles();
   const subs = useCloudSubmissions();
@@ -602,14 +609,14 @@ function Dashboard({
     pendingEvents.length +
     pendingEmerg.length;
 
-  // Enforce tab access: ONLY Main Admin can access: donation, apps, users, access, settings, security
+  // Enforce dynamic tab access based on permissions
   useEffect(() => {
     const mainAdminOnlyTabs: Tab[] = [
+      "roles",
       "donation",
       "apps",
       "users",
       "access",
-      "settings",
       "security",
     ];
     if (!isMainAdmin && mainAdminOnlyTabs.includes(tab)) {
@@ -617,11 +624,26 @@ function Dashboard({
       return;
     }
 
-    const hasAdminAccess = isMainAdmin || isAdmin;
-    if (!hasAdminAccess && (tab === "activity" || tab === "categories")) {
+    if (tab === "branding" && !isMainAdmin && !hasPermission("upload_branding")) {
       setTab("overview");
+      return;
     }
-  }, [isMainAdmin, isAdmin, tab]);
+
+    if (tab === "settings" && !isMainAdmin && !hasPermission("manage_settings")) {
+      setTab("overview");
+      return;
+    }
+
+    if (tab === "categories" && !isMainAdmin && !hasPermission("manage_categories")) {
+      setTab("overview");
+      return;
+    }
+
+    if (tab === "activity" && !isMainAdmin && !hasPermission("view_reports")) {
+      setTab("overview");
+      return;
+    }
+  }, [isMainAdmin, isAdmin, tab, hasPermission]);
 
   async function handleDashboardRefresh() {
     setRefreshingDashboard(true);
@@ -756,6 +778,16 @@ function Dashboard({
           ড্যাশবোর্ড
         </TabBtn>
         {isMainAdmin && (
+          <TabBtn active={tab === "roles"} onClick={() => setTab("roles")}>
+            🛡️ রোল ও পারমিশন
+          </TabBtn>
+        )}
+        {(isMainAdmin || hasPermission("upload_branding")) && (
+          <TabBtn active={tab === "branding"} onClick={() => setTab("branding")}>
+            🎨 ওয়েবসাইট ব্র্যান্ডিং
+          </TabBtn>
+        )}
+        {(isMainAdmin || hasPermission("view_reports")) && (
           <TabBtn
             active={tab === "activity"}
             onClick={() => setTab("activity")}
@@ -767,14 +799,16 @@ function Dashboard({
         <TabBtn active={tab === "profile"} onClick={() => setTab("profile")}>
           আমার প্রোফাইল
         </TabBtn>
-        {(isMainAdmin || isAdmin) && (
+        {(isMainAdmin || hasPermission("manage_categories")) && (
           <TabBtn active={tab === "categories"} onClick={() => setTab("categories")}>
             ক্যাটাগরি
           </TabBtn>
         )}
-        <TabBtn active={tab === "info"} onClick={() => setTab("info")} badge={pendingSubs.length}>
-          তথ্য
-        </TabBtn>
+        {(isMainAdmin || hasPermission("create_edit_content") || hasPermission("moderate_submissions")) && (
+          <TabBtn active={tab === "info"} onClick={() => setTab("info")} badge={pendingSubs.length}>
+            তথ্য
+          </TabBtn>
+        )}
         {isMainAdmin && (
           <TabBtn
             active={tab === "donation"}
@@ -784,30 +818,38 @@ function Dashboard({
             অনুদান
           </TabBtn>
         )}
-        <TabBtn
-          active={tab === "donors"}
-          onClick={() => setTab("donors")}
-          badge={pendingDonors.length}
-        >
-          দাতা
-        </TabBtn>
-        <TabBtn
-          active={tab === "events"}
-          onClick={() => setTab("events")}
-          badge={pendingEvents.length}
-        >
-          রক্তদান
-        </TabBtn>
-        <TabBtn
-          active={tab === "emergency"}
-          onClick={() => setTab("emergency")}
-          badge={pendingEmerg.length}
-        >
-          জরুরী
-        </TabBtn>
-        <TabBtn active={tab === "banners"} onClick={() => setTab("banners")}>
-          ব্যানার
-        </TabBtn>
+        {(isMainAdmin || hasPermission("create_edit_content") || hasPermission("publish_content")) && (
+          <TabBtn
+            active={tab === "donors"}
+            onClick={() => setTab("donors")}
+            badge={pendingDonors.length}
+          >
+            দাতা
+          </TabBtn>
+        )}
+        {(isMainAdmin || hasPermission("create_edit_content") || hasPermission("publish_content")) && (
+          <TabBtn
+            active={tab === "events"}
+            onClick={() => setTab("events")}
+            badge={pendingEvents.length}
+          >
+            রক্তদান
+          </TabBtn>
+        )}
+        {(isMainAdmin || hasPermission("moderate_submissions")) && (
+          <TabBtn
+            active={tab === "emergency"}
+            onClick={() => setTab("emergency")}
+            badge={pendingEmerg.length}
+          >
+            জরুরী
+          </TabBtn>
+        )}
+        {(isMainAdmin || hasPermission("publish_content") || hasPermission("manage_settings")) && (
+          <TabBtn active={tab === "banners"} onClick={() => setTab("banners")}>
+            ব্যানার
+          </TabBtn>
+        )}
         <TabBtn
           active={tab === "chat"}
           onClick={() => setTab("chat")}
@@ -820,7 +862,7 @@ function Dashboard({
             অ্যাপ আপলোড
           </TabBtn>
         )}
-        {isMainAdmin && (
+        {(isMainAdmin || hasPermission("manage_users")) && (
           <TabBtn
             active={tab === "users"}
             onClick={() => setTab("users")}
@@ -838,7 +880,7 @@ function Dashboard({
             অ্যাকসেস ও রিকোয়েস্ট
           </TabBtn>
         )}
-        {isMainAdmin && (
+        {(isMainAdmin || hasPermission("manage_settings")) && (
           <TabBtn active={tab === "settings"} onClick={() => setTab("settings")}>
             সেটিংস
           </TabBtn>
@@ -870,29 +912,56 @@ function Dashboard({
           />
         )}
 
-        {tab === "activity" && (isMainAdmin || isAdmin) && (
+        {tab === "roles" && isMainAdmin && <RolePermissionsManager />}
+
+        {tab === "branding" && (isMainAdmin || hasPermission("upload_branding")) && (
+          <WebsiteBrandingManager />
+        )}
+
+        {tab === "activity" && (isMainAdmin || hasPermission("view_reports")) && (
           <StaffActivityAuditPanel auditHook={auditHook} />
         )}
 
         {tab === "profile" && <MyStaffProfilePanel isMainAdmin={isMainAdmin} />}
 
-        {tab === "categories" && (isMainAdmin || isAdmin) && <CategoriesEditor />}
+        {tab === "categories" && (isMainAdmin || hasPermission("manage_categories")) && (
+          <CategoriesEditor />
+        )}
 
-        {tab === "info" && <SubmissionsAdminPanel subs={subs} />}
+        {tab === "info" && (isMainAdmin || hasPermission("create_edit_content") || hasPermission("moderate_submissions")) && (
+          <SubmissionsAdminPanel subs={subs} />
+        )}
 
         {tab === "donation" && isMainAdmin && <DonationsAdminPanel dons={dons} />}
 
-        {tab === "donors" && <DonorsAdminPanel donors={donors} />}
+        {tab === "donors" && (isMainAdmin || hasPermission("create_edit_content") || hasPermission("publish_content")) && (
+          <DonorsAdminPanel donors={donors} />
+        )}
 
-        {tab === "events" && <EventsAdminPanel events={events} donors={donors} />}
+        {tab === "events" && (isMainAdmin || hasPermission("create_edit_content") || hasPermission("publish_content")) && (
+          <EventsAdminPanel events={events} donors={donors} />
+        )}
 
-        {tab === "emergency" && <EmergencyEditor />}
-        {tab === "banners" && <BannersEditor />}
+        {tab === "emergency" && (isMainAdmin || hasPermission("moderate_submissions")) && (
+          <EmergencyEditor />
+        )}
+
+        {tab === "banners" && (isMainAdmin || hasPermission("publish_content") || hasPermission("manage_settings")) && (
+          <BannersEditor />
+        )}
+
         {tab === "chat" && <ChatThreadsAdmin />}
+
         {tab === "apps" && isMainAdmin && <AppPackagesAdminPanel />}
-        {tab === "users" && isMainAdmin && <UsersEditor />}
+
+        {tab === "users" && (isMainAdmin || hasPermission("manage_users")) && <UsersEditor />}
+
         {tab === "access" && isMainAdmin && <AccessEditor />}
-        {tab === "settings" && isMainAdmin && <SettingsAdminPanel />}
+
+        {tab === "settings" && (isMainAdmin || hasPermission("manage_settings")) && (
+          <SettingsAdminPanel />
+        )}
+
         {tab === "security" && isMainAdmin && <SecurityPanel />}
       </div>
     </div>
@@ -6153,6 +6222,20 @@ function OverviewPanel({
             icon={<UserCircle2 className="h-4 w-4" />}
             label="আমার প্রোফাইল ও ফটো"
           />
+          {isMainAdmin && (
+            <QuickAction
+              onClick={() => onJump("roles")}
+              icon={<ShieldCheck className="h-4 w-4" />}
+              label="রোল ও পারমিশন"
+            />
+          )}
+          {isMainAdmin && (
+            <QuickAction
+              onClick={() => onJump("branding")}
+              icon={<ImageIcon className="h-4 w-4" />}
+              label="ব্র্যান্ডিং ও লোগো"
+            />
+          )}
           {isMainAdmin && (
             <QuickAction
               onClick={() => onJump("activity")}

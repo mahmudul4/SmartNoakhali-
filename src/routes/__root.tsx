@@ -42,6 +42,9 @@ export const Route = createRootRoute({
       { name: "twitter:title", content: "Smart Noakhali — স্মার্ট নোয়াখালী" },
       { name: "twitter:description", content: "নোয়াখালীর সকল জরুরী সেবা, আইনজীবী, ডাক্তার, রক্তদাতা ও তথ্য এক জায়গায়।" },
     ],
+    links: [
+      { rel: "canonical", href: "https://smartnoakhali.com" },
+    ],
   }),
   component: RootComponent,
   notFoundComponent: NotFoundComponent,

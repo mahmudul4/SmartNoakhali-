@@ -104,6 +104,7 @@ export const categories: Category[] = [
   { slug: "service-org", bn: "সেবা সংগঠন", en: "Service Org", icon: HeartHandshake, iconName: "HeartHandshake", tint: "from-pink-500/15 to-pink-700/10", description: "সেবামূলক সংগঠন" },
   { slug: "board-result", bn: "বোর্ড রেজাল্ট", en: "Board Result", icon: FileText, iconName: "FileText", tint: "from-emerald-500/15 to-teal-700/10", description: "পরীক্ষার ফলাফল" },
   { slug: "special-persons", bn: "বিশেষ ব্যাক্তিবর্গ", en: "Notable People", icon: Star, iconName: "Star", tint: "from-amber-400/20 to-amber-600/10", description: "বিশেষ ব্যাক্তিবর্গ" },
+  { slug: "lawyer", bn: "আইনজীবী", en: "Lawyers", icon: Scale, iconName: "Scale", tint: "from-indigo-500/15 to-indigo-700/10", description: "আইনজীবী ও নোটারি পাবলিক" },
   { slug: "donation", bn: "অনুদান", en: "Donation", icon: HandCoins, iconName: "HandCoins", tint: "from-emerald-500/20 to-amber-500/10", description: "অনুদান দিন ও তালিকা দেখুন" },
   { slug: "submit-info", bn: "তথ্য দিন", en: "Submit Info", icon: Send, iconName: "Send", tint: "from-emerald-500/20 to-emerald-700/10", description: "নতুন তথ্য জমা দিন" },
   { slug: "about", bn: "আমাদের সেবা", en: "About", icon: Info, iconName: "Info", tint: "from-emerald-600/15 to-emerald-800/10", description: "আমাদের সম্পর্কে" },

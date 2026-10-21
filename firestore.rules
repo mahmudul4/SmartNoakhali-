@@ -172,7 +172,7 @@ service cloud.firestore {
     // =========================================================
     match /settings/{settingId} {
       allow get, list: if true;
-      allow write: if isMainAdmin();
+      allow write: if isMainAdmin() || (settingId == "categories_config" && isEditor());
     }
 
     // =========================================================

@@ -32,14 +32,14 @@ import { clearBinaryFromIdb, saveBinaryToIdb, sanitizeAppFileName } from "@/lib/
 
 export const defaultLogo: string = defaultLogoUrl;
 
-const SITE_CONFIG_ID = "site_config";
+export const SITE_CONFIG_ID = "site_config";
 const DONATION_CONFIG_ID = "donation_config";
 const CATEGORIES_CONFIG_ID = "categories_config";
 const STAFF_PROFILES_CONFIG_ID = "staff_profiles_config";
 const APP_PACKAGES_CONFIG_ID = "app_packages_config";
 const SITE_META_CONFIG_ID = "site_meta_config";
 
-const LOCAL_LOGO_KEY = "sn_site_logo_v3";
+export const LOCAL_LOGO_KEY = "sn_site_logo_v3";
 const LOCAL_DONATION_KEY = "sn_donation_config_v1";
 const LOCAL_CATEGORIES_KEY = "sn_categories_config_v1";
 const LOCAL_STAFF_PROFILES_KEY = "sn_staff_profiles_v1";

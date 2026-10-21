@@ -425,6 +425,16 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
+  // 301 Canonical redirect: enforce authoritative non-www smartnoakhali.com
+  app.use((req, res, next) => {
+    const host = (req.headers.host || "").toLowerCase();
+    if (host.startsWith("www.smartnoakhali.com")) {
+      const url = req.url || "/";
+      return res.redirect(301, `https://smartnoakhali.com${url}`);
+    }
+    next();
+  });
+
   // Support large file uploads for direct Android (.apk) and iOS (.ipa) app packages
   app.use(express.json({ limit: "120mb" }));
   app.use(express.urlencoded({ extended: true, limit: "120mb" }));
