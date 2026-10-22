@@ -7,7 +7,7 @@
     "dev": "tsx server.ts",
     "start": "tsx server.ts",
     "build": "vite build",
-    "postbuild": "cp dist/index.html dist/200.html",
+    "postbuild": "node -e \"const fs = require('fs'); if (fs.existsSync('dist/index.html')) fs.copyFileSync('dist/index.html', 'dist/200.html');\"",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
@@ -47,6 +47,7 @@
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2",
-    "vite-plugin-pwa": "^2.0.0"
+    "vite-plugin-pwa": "^2.0.0",
+    "wrangler": "^4.151.3"
   }
 }

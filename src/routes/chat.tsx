@@ -103,7 +103,7 @@ const QUICK_PROMPTS = [
 ];
 
 function ChatPage() {
-  const { user, isAuthed, isStaff, signInWithGoogle } = useAuth();
+  const { user, isAuthed, isStaff } = useAuth();
   const { getStaffProfile } = useStaffProfiles();
   const { logo } = useLogo();
   const { meta } = useSiteMetaConfig();
@@ -430,13 +430,12 @@ function ChatPage() {
               >
                 {showGuestMetaEdit ? "বন্ধ করুন" : "নাম/ফোন সেট করুন"}
               </button>
-              <button
-                type="button"
-                onClick={() => void signInWithGoogle().catch((e) => toast.error(e?.message || "লগইন ব্যর্থ"))}
-                className="inline-flex items-center gap-1 rounded-lg bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground shadow-sm"
+              <Link
+                to="/auth"
+                className="inline-flex items-center gap-1 rounded-lg bg-primary px-2.5 py-1 text-[10px] font-bold text-primary-foreground shadow-sm"
               >
-                <LogIn className="h-3 w-3" /> ১-ক্লিকে গুগল লগইন
-              </button>
+                <LogIn className="h-3 w-3" /> লগইন করুন
+              </Link>
             </div>
           </div>
         )}

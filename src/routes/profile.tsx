@@ -34,7 +34,7 @@ export const Route = createFileRoute("/profile")({
   head: () => ({
     meta: [
       { title: "আমার প্রোফাইল ও অ্যাকাউন্ট অ্যাক্টিভিটি — স্মার্ট নোয়াখালী" },
-      { name: "description", content: "আপনার প্রোফাইল তথ্য দেখুন, গুগল অ্যাকাউন্ট থেকে সিঙ্ক করুন এবং অ্যাকাউন্ট অ্যাক্টিভিটি পর্যবেক্ষণ করুন।" },
+      { name: "description", content: "আপনার প্রোফাইল তথ্য দেখুন, পাসওয়ার্ড পরিবর্তন করুন এবং অ্যাকাউন্ট অ্যাক্টিভিটি পর্যবেক্ষণ করুন।" },
     ],
   }),
   component: ProfilePage,
@@ -98,7 +98,6 @@ function ProfilePage() {
     username,
     signOut,
     updateProfileInfo,
-    syncGoogleProfileDetails,
   } = useAuth();
 
   const { items: submissions } = useCloudSubmissions();
@@ -110,7 +109,6 @@ function ProfilePage() {
   const [photoURL, setPhotoURL] = useState("");
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [syncingGoogle, setSyncingGoogle] = useState(false);
 
   // Security activity state
   const [activities, setActivities] = useState<SecurityEventItem[]>([]);
@@ -176,10 +174,6 @@ function ProfilePage() {
     return false;
   });
 
-  const isGoogleLinked = Boolean(
-    firebaseUser?.providerData?.some((p) => p.providerId === "google.com")
-  );
-
   const isSuper = isSuperAdminEmail(user.email);
   const isRegularAdmin = (user.email || "").trim().toLowerCase() === REGULAR_ADMIN_EMAIL.toLowerCase();
 
@@ -205,39 +199,6 @@ function ProfilePage() {
       toast.error(err?.message || "প্রোফাইল আপডেট করতে সমস্যা হয়েছে");
     } finally {
       setSaving(false);
-    }
-  };
-
-  // 1-Click Sync from Google Account
-  const handleSyncGoogle = async () => {
-    setSyncingGoogle(true);
-    try {
-      const gData = await syncGoogleProfileDetails();
-      if (!gData.displayName && !gData.photoURL) {
-        toast.info("গুগল অ্যাকাউন্ট থেকে কোনো নতুন তথ্য পাওয়া যায়নি");
-        return;
-      }
-
-      if (gData.displayName) {
-        setDisplayName(gData.displayName);
-      }
-      if (gData.photoURL) {
-        setPhotoURL(gData.photoURL);
-      }
-
-      // Auto save the synced Google details
-      await updateProfileInfo({
-        displayName: gData.displayName || displayName,
-        photoURL: gData.photoURL || photoURL,
-      });
-
-      setIsEditing(false);
-      toast.success("গুগল অ্যাকাউন্ট থেকে নাম ও প্রোফাইল ছবি সফলভাবে সিঙ্ক ও আপডেট হয়েছে! 🎉");
-      void loadActivities();
-    } catch (err: any) {
-      toast.error(err?.message || "গুগল থেকে তথ্য সিঙ্ক করা সম্ভব হয়নি");
-    } finally {
-      setSyncingGoogle(false);
     }
   };
 
@@ -297,31 +258,6 @@ function ProfilePage() {
                 </div>
               )}
             </div>
-            {isGoogleLinked && (
-              <span
-                className="absolute bottom-1 right-1 flex h-7 w-7 items-center justify-center rounded-full bg-white p-1 shadow-md ring-2 ring-background"
-                title="Google ভেরিফাইড একাউন্ট"
-              >
-                <svg className="h-full w-full" viewBox="0 0 24 24">
-                  <path
-                    fill="#4285F4"
-                    d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 24c3.3 0 6.08-1.09 8.1-2.96l-3.88-3.05c-1.1.74-2.5 1.18-4.22 1.18-3.25 0-6-2.2-6.98-5.15H1.01v3.14C3.02 21.15 7.21 24 12 24Z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.02 14.02c-.25-.74-.39-1.54-.39-2.37 0-.83.14-1.63.39-2.37V6.14H1.01C.37 7.42 0 8.87 0 11.65s.37 4.23 1.01 5.51l4.01-3.14Z"
-                  />
-                  <path
-                    fill="#EA4335"
-                    d="M12 4.75c1.8 0 3.41.62 4.68 1.84l3.51-3.51C18.07 1.19 15.3 0 12 0 7.21 0 3.02 2.85 1.01 6.84l4.01 3.14C6 7.02 8.75 4.75 12 4.75Z"
-                  />
-                </svg>
-              </span>
-            )}
           </div>
 
           {/* User Details */}
@@ -374,43 +310,12 @@ function ProfilePage() {
               )}
               <div className="flex items-center gap-1.5">
                 <Globe className="h-3.5 w-3.5 text-primary" />
-                <span>{isGoogleLinked ? "Google Authentication" : "Email / Mobile"}</span>
+                <span>{user.email ? "ইমেইল ও পাসওয়ার্ড" : "মোবাইল একাউন্ট"}</span>
               </div>
             </div>
 
             {/* Quick Action Buttons */}
             <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5 sm:justify-start">
-              <button
-                type="button"
-                disabled={syncingGoogle}
-                onClick={handleSyncGoogle}
-                className="inline-flex items-center gap-2 rounded-xl border-2 border-primary/30 bg-white px-3.5 py-2 text-xs font-bold text-primary-deep shadow-sm transition hover:border-primary hover:bg-primary/5 active:scale-95 disabled:opacity-60"
-              >
-                {syncingGoogle ? (
-                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                ) : (
-                  <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24">
-                    <path
-                      fill="#4285F4"
-                      d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
-                    />
-                    <path
-                      fill="#34A853"
-                      d="M12 24c3.3 0 6.08-1.09 8.1-2.96l-3.88-3.05c-1.1.74-2.5 1.18-4.22 1.18-3.25 0-6-2.2-6.98-5.15H1.01v3.14C3.02 21.15 7.21 24 12 24Z"
-                    />
-                    <path
-                      fill="#FBBC05"
-                      d="M5.02 14.02c-.25-.74-.39-1.54-.39-2.37 0-.83.14-1.63.39-2.37V6.14H1.01C.37 7.42 0 8.87 0 11.65s.37 4.23 1.01 5.51l4.01-3.14Z"
-                    />
-                    <path
-                      fill="#EA4335"
-                      d="M12 4.75c1.8 0 3.41.62 4.68 1.84l3.51-3.51C18.07 1.19 15.3 0 12 0 7.21 0 3.02 2.85 1.01 6.84l4.01 3.14C6 7.02 8.75 4.75 12 4.75Z"
-                    />
-                  </svg>
-                )}
-                <span>Google একাউন্ট থেকে নাম ও ছবি সিঙ্ক করুন</span>
-              </button>
-
               <button
                 type="button"
                 onClick={() => setIsEditing((prev) => !prev)}
@@ -527,7 +432,7 @@ function ProfilePage() {
         <div className="rounded-2xl border border-border/80 bg-gradient-card p-4 text-center shadow-card">
           <p className="text-[11px] font-semibold text-muted-foreground">সাইন-ইন মাধ্যম</p>
           <p className="mt-1 font-display text-base font-bold text-primary-deep">
-            {isGoogleLinked ? "গুগল সাইন-ইন" : "পাসওয়ার্ড"}
+            {user.email ? "ইমেইল ও পাসওয়ার্ড" : "মোবাইল নম্বর"}
           </p>
         </div>
 

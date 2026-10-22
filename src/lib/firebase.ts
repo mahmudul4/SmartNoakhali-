@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, type User } from "firebase/auth";
+import { getAuth, type User } from "firebase/auth";
 import {
   initializeFirestore,
   persistentLocalCache,
@@ -57,10 +57,8 @@ export const db = initFirestoreInstance();
 export { enableNetwork, disableNetwork };
 export const auth = getAuth(app);
 export const storage = getStorage(app);
-export const googleProvider = new GoogleAuthProvider();
 
 export const SUPER_ADMIN_EMAIL = "mdmahmudulhashan0@gmail.com";
-export const SUPER_ADMIN_PASSWORD = "MahMuduL0@#";
 export const REGULAR_ADMIN_EMAIL = "mr.bear444plus@gmail.com";
 export const BOOTSTRAPPED_ADMIN_EMAIL = REGULAR_ADMIN_EMAIL;
 

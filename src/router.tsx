@@ -61,6 +61,24 @@ export const getRouter = () => {
     scrollRestoration: true,
     defaultPreloadStaleTime: 0,
     defaultErrorComponent: DefaultErrorComponent,
+    defaultNotFoundComponent: () => (
+      <div className="flex min-h-[65vh] flex-col items-center justify-center px-4 py-16 text-center">
+        <h1 className="font-display text-2xl font-bold text-foreground">
+          404 — পৃষ্ঠাটি পাওয়া যায়নি
+        </h1>
+        <p className="mt-2 max-w-sm text-xs text-muted-foreground leading-relaxed">
+          অনুরোধকৃত পেজটি খুঁজে পাওয়া যায়নি।
+        </p>
+        <div className="mt-6">
+          <a
+            href="/"
+            className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground shadow-sm transition hover:bg-primary/90"
+          >
+            হোমপেজে ফিরে যান
+          </a>
+        </div>
+      </div>
+    ),
   });
 
   return router;

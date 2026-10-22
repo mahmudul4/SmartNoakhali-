@@ -74,7 +74,7 @@ const QUICK_AI_PROMPTS = [
 ];
 
 export function FloatingLiveChat() {
-  const { user, isAuthed, isStaff, signInWithGoogle } = useAuth();
+  const { user, isAuthed, isStaff } = useAuth();
   const { getStaffProfile } = useStaffProfiles();
   const { logo } = useLogo();
   const { meta } = useSiteMetaConfig();
@@ -582,13 +582,12 @@ export function FloatingLiveChat() {
                       >
                         {showGuestEdit ? "সম্পন্ন" : "নাম লিখুন"}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => void signInWithGoogle().catch((e) => toast.error(e?.message || "লগইন ব্যর্থ"))}
-                        className="rounded bg-primary px-1.5 py-0.5 text-[9px] font-bold text-primary-foreground"
+                      <a
+                        href="/auth"
+                        className="rounded bg-primary px-2 py-0.5 text-[9px] font-bold text-primary-foreground"
                       >
-                        গুগল লগইন
-                      </button>
+                        লগইন করুন
+                      </a>
                     </div>
                   </div>
                   {showGuestEdit && (

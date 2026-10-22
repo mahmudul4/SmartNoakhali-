@@ -1,8 +1,4 @@
-# Canonical Domain 301 Redirects: enforce non-www smartnoakhali.com
-https://www.smartnoakhali.com/* https://smartnoakhali.com/:splat 301!
-http://www.smartnoakhali.com/* https://smartnoakhali.com/:splat 301!
-http://smartnoakhali.com/* https://smartnoakhali.com/:splat 301!
-
-# Cloudflare Pages / Workers SPA Routing
-# Note: Cloudflare Pages and Workers Static Assets handle SPA fallback natively.
-# Catch-all rewrite rules like '/* /index.html 200' cause Cloudflare validation error 100324 (infinite loop) and are not needed.
+# Cloudflare Pages / Static SPA Routing Configuration
+# Note: Cloudflare Pages handles SPA client routing automatically via 200.html (created in postbuild).
+# Cross-domain canonical redirects (www -> non-www) are handled in Cloudflare Dashboard -> Rules -> Redirect Rules.
+# Any source path in _redirects must start with '/' and must not contain a protocol or domain name.

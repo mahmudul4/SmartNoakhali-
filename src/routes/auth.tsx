@@ -119,7 +119,6 @@ function AuthPage() {
     isAuthed,
     isStaff,
     isMainAdmin,
-    signInWithGoogle,
     signInUserOrStaff,
     completeVerifiedSignup,
   } = useAuth();
@@ -139,54 +138,13 @@ function AuthPage() {
 
   useEffect(() => {
     if (isAuthed) {
-      if (isMainAdmin) {
+      if (isMainAdmin || isStaff) {
         navigate({ to: "/mdmahmudulhashan" });
       } else {
         navigate({ to: "/" });
       }
     }
-  }, [isAuthed, isMainAdmin, navigate]);
-
-  async function handleGoogleLogin() {
-    setBusy(true);
-    try {
-      const appU = await signInWithGoogle();
-      const emailLower = (appU.email || "").trim().toLowerCase();
-      const isSuper = isSuperAdminEmail(appU.email);
-      const isRegAdmin = emailLower === REGULAR_ADMIN_EMAIL.toLowerCase();
-
-      await recordUserCredential({
-        uid: appU.uid,
-        email: appU.email || "",
-        full_name: appU.displayName || (isSuper ? "মেইন সুপার এডমিন" : undefined),
-        username: isSuper ? "mahmudul" : (appU.email || "").split("@")[0] || undefined,
-        phone: appU.phone || undefined,
-        photo_url: appU.photoURL || undefined,
-        roles: isSuper
-          ? ["admin", "moderator", "editor", "user"]
-          : isRegAdmin
-          ? ["editor", "user"]
-          : undefined,
-        verified_via: "google",
-      });
-      await logEvent(
-        "login_success",
-        isSuper ? "google_super_admin" : isRegAdmin ? "google_editor" : "google_user"
-      );
-
-      if (isSuper) {
-        toast.success("স্বাগতম! সুপার এডমিন হিসেবে সফলভাবে গুগল দিয়ে লগইন হয়েছে");
-        navigate({ to: "/mdmahmudulhashan" });
-      } else {
-        toast.success("Google দিয়ে ১-ক্লিকে সফলভাবে লগইন হয়েছে!");
-        navigate({ to: "/" });
-      }
-    } catch (err) {
-      toast.error(friendlyError(err instanceof Error ? err.message : "ত্রুটি"));
-    } finally {
-      setBusy(false);
-    }
-  }
+  }, [isAuthed, isMainAdmin, isStaff, navigate]);
 
   async function handleLogin() {
     const cleanInput = toEnglishDigits(loginId.trim());
@@ -338,39 +296,6 @@ function AuthPage() {
           </div>
         ) : mode === "login" ? (
           <>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={handleGoogleLogin}
-              className="flex w-full items-center justify-center gap-2.5 rounded-xl border-2 border-primary/40 bg-white py-3.5 text-sm font-bold text-primary-deep shadow-card transition hover:border-primary hover:bg-primary/5 active:scale-[0.99] disabled:opacity-60"
-            >
-              <svg className="h-5 w-5" viewBox="0 0 24 24">
-                <path
-                  fill="#4285F4"
-                  d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M12 24c3.3 0 6.08-1.09 8.1-2.96l-3.88-3.05c-1.1.74-2.5 1.18-4.22 1.18-3.25 0-6-2.2-6.98-5.15H1.01v3.14C3.02 21.15 7.21 24 12 24Z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M5.02 14.02c-.25-.74-.39-1.54-.39-2.37 0-.83.14-1.63.39-2.37V6.14H1.01C.37 7.42 0 8.87 0 11.65s.37 4.23 1.01 5.51l4.01-3.14Z"
-                />
-                <path
-                  fill="#EA4335"
-                  d="M12 4.75c1.8 0 3.41.62 4.68 1.84l3.51-3.51C18.07 1.19 15.3 0 12 0 7.21 0 3.02 2.85 1.01 6.84l4.01 3.14C6 7.02 8.75 4.75 12 4.75Z"
-                />
-              </svg>
-              Google দিয়ে সরাসরি ১-ক্লিকে লগইন করুন
-            </button>
-
-            <div className="my-4 flex items-center gap-3 text-[11px] text-muted-foreground">
-              <div className="h-px flex-1 bg-border" />
-              <span>অথবা ইমেইল / মোবাইল নাম্বার দিয়ে লগইন</span>
-              <div className="h-px flex-1 bg-border" />
-            </div>
-
             <form onSubmit={onSubmit} className="space-y-3">
               <div>
                 <label className="mb-1 block text-xs font-semibold text-primary-deep">
@@ -418,41 +343,8 @@ function AuthPage() {
             </form>
           </>
         ) : (
-          /* Easy 1-Step User Registration Form + Direct 1-Click Google Signup */
+          /* Easy 1-Step User Registration Form */
           <form onSubmit={onSubmit} className="space-y-3.5">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={handleGoogleLogin}
-              className="flex w-full items-center justify-center gap-2.5 rounded-xl border-2 border-primary/40 bg-white py-3 text-xs font-bold text-primary-deep shadow-sm transition hover:border-primary hover:bg-primary/5 active:scale-[0.99] disabled:opacity-60"
-            >
-              <svg className="h-4 w-4" viewBox="0 0 24 24">
-                <path
-                  fill="#4285F4"
-                  d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M12 24c3.3 0 6.08-1.09 8.1-2.96l-3.88-3.05c-1.1.74-2.5 1.18-4.22 1.18-3.25 0-6-2.2-6.98-5.15H1.01v3.14C3.02 21.15 7.21 24 12 24Z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M5.02 14.02c-.25-.74-.39-1.54-.39-2.37 0-.83.14-1.63.39-2.37V6.14H1.01C.37 7.42 0 8.87 0 11.65s.37 4.23 1.01 5.51l4.01-3.14Z"
-                />
-                <path
-                  fill="#EA4335"
-                  d="M12 4.75c1.8 0 3.41.62 4.68 1.84l3.51-3.51C18.07 1.19 15.3 0 12 0 7.21 0 3.02 2.85 1.01 6.84l4.01 3.14C6 7.02 8.75 4.75 12 4.75Z"
-                />
-              </svg>
-              Google দিয়ে সরাসরি ১-ক্লিকে রেজিস্ট্রেশন ও লগইন করুন
-            </button>
-
-            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-              <div className="h-px flex-1 bg-border" />
-              <span>অথবা নিচের ফর্মটি পূরণ করে সরাসরি অ্যাকাউন্ট খুলুন</span>
-              <div className="h-px flex-1 bg-border" />
-            </div>
-
             {/* Field 1: Full Name */}
             <div>
               <div className="mb-1 flex items-center justify-between">
