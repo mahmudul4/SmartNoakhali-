@@ -111,6 +111,7 @@ import { AttachmentView, VoiceRecorderButton } from "@/routes/chat";
 import { SecurityPanel } from "@/components/security/SecurityPanel";
 import { RolePermissionsManager } from "@/components/RolePermissionsManager";
 import { WebsiteBrandingManager } from "@/components/WebsiteBrandingManager";
+import { TaskManager } from "@/components/TaskManager";
 import { useRolePermissions } from "@/lib/permissions";
 import {
   getLoginLockoutRemainingSeconds,
@@ -493,6 +494,7 @@ function AdminLoginForm() {
 
 type Tab =
   | "overview"
+  | "tasks"
   | "roles"
   | "branding"
   | "activity"
@@ -777,6 +779,9 @@ function Dashboard({
         <TabBtn active={tab === "overview"} onClick={() => setTab("overview")}>
           ড্যাশবোর্ড
         </TabBtn>
+        <TabBtn active={tab === "tasks"} onClick={() => setTab("tasks")}>
+          📋 টাস্ক ও করণীয়
+        </TabBtn>
         {isMainAdmin && (
           <TabBtn active={tab === "roles"} onClick={() => setTab("roles")}>
             🛡️ রোল ও পারমিশন
@@ -911,6 +916,8 @@ function Dashboard({
             auditLogs={auditHook.logs}
           />
         )}
+
+        {tab === "tasks" && <TaskManager />}
 
         {tab === "roles" && isMainAdmin && <RolePermissionsManager />}
 
@@ -6221,6 +6228,11 @@ function OverviewPanel({
             onClick={() => onJump("profile")}
             icon={<UserCircle2 className="h-4 w-4" />}
             label="আমার প্রোফাইল ও ফটো"
+          />
+          <QuickAction
+            onClick={() => onJump("tasks")}
+            icon={<CheckCircle2 className="h-4 w-4 text-emerald-600" />}
+            label="টাস্ক ও কর্মসূচি (অফলাইন)"
           />
           {isMainAdmin && (
             <QuickAction

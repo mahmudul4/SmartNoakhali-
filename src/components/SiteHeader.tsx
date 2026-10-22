@@ -1,11 +1,12 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Menu, Search, LogIn, LogOut, ShieldCheck, User as UserIcon } from "lucide-react";
+import { Menu, Search, LogIn, LogOut, ShieldCheck, User as UserIcon, WifiOff } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useLogo, useCategories } from "@/lib/store";
 import { useAuth } from "@/lib/auth";
 import { NotificationBell } from "@/lib/notifications";
+import { useNetworkStatus } from "@/lib/tasks";
 
 export function SiteHeader() {
   const [open, setOpen] = useState(false);
@@ -13,6 +14,7 @@ export function SiteHeader() {
   const { logo } = useLogo();
   const { categories } = useCategories();
   const { isAuthed, isStaff, isAdmin, isMainAdmin, user, signOut } = useAuth();
+  const { isOnline } = useNetworkStatus();
 
   const handleHeaderLogout = async () => {
     setOpen(false);
@@ -121,6 +123,15 @@ export function SiteHeader() {
         </Link>
 
         <div className="flex shrink-0 items-center gap-1.5">
+          {!isOnline && (
+            <span
+              className="flex items-center gap-1 rounded-full border border-amber-300/40 bg-amber-500/25 px-2 py-1 text-[10px] font-bold text-amber-200 animate-pulse"
+              title="অফলাইন মোড সক্রিয় — তথ্য ডিভাইসে সেভ হচ্ছে এবং ইন্টারনেট পেলে অটো-সিঙ্ক হবে"
+            >
+              <WifiOff className="h-3 w-3 shrink-0" />
+              <span className="hidden sm:inline">অফলাইন</span>
+            </span>
+          )}
           <NotificationBell />
           {isAuthed && isMainAdmin && (
             <Link
