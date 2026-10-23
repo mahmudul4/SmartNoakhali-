@@ -11,8 +11,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "deploy": "wrangler pages deploy dist --project-name=smart-noakhali",
-    "deploy:pages": "wrangler pages deploy dist --project-name=smart-noakhali"
+    "deploy": "wrangler pages deploy dist --project-name=smartnoakhali",
+    "deploy:pages": "wrangler pages deploy dist --project-name=smartnoakhali"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
