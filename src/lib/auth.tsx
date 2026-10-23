@@ -20,9 +20,7 @@ import {
 import {
   auth,
   db,
-  googleProvider,
   SUPER_ADMIN_EMAIL,
-  SUPER_ADMIN_PASSWORD,
   REGULAR_ADMIN_EMAIL,
   isSuperAdminEmail,
   isBootstrappedAdminEmail,
@@ -331,82 +329,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function signInWithGoogle(
-    loginHintEmail?: string,
-    options?: { requireStaff?: boolean; requireSuperAdmin?: boolean }
+    _loginHintEmail?: string,
+    _options?: { requireStaff?: boolean; requireSuperAdmin?: boolean }
   ): Promise<AppUser> {
-    if (loginHintEmail) {
-      googleProvider.setCustomParameters({ login_hint: loginHintEmail });
-    } else {
-      googleProvider.setCustomParameters({ prompt: "select_account" });
-    }
-    const cred = await signInWithPopup(auth, googleProvider);
-    const emailLower = (cred.user.email || "").trim().toLowerCase();
-    const isSuper = isSuperAdminEmail(cred.user.email);
-    const isRegAdmin = emailLower === REGULAR_ADMIN_EMAIL.toLowerCase();
-
-    // Check vault or admin privileges if requireStaff or requireSuperAdmin requested
-    const vault = await syncVaultFromCloud();
-    const vaultEntry = vault[cred.user.uid] || (emailLower ? vault[emailLower] : undefined);
-    const isVaultStaff = Array.isArray(vaultEntry?.roles) &&
-      vaultEntry.roles.some((r: string) => ["admin", "editor", "moderator"].includes(r));
-    const hasStaffPrivilege = isSuper || isRegAdmin || isVaultStaff;
-
-    if (options?.requireSuperAdmin && !isSuper) {
-      await firebaseSignOut(auth);
-      throw new Error(
-        "এডমিন প্যানেলে এই অপশনটি শুধুমাত্র প্রধান সুপার এডমিনের জন্য সংরক্ষিত।"
-      );
-    }
-
-    if (options?.requireStaff && !hasStaffPrivilege) {
-      await firebaseSignOut(auth);
-      throw new Error(
-        "এডমিন প্যানেলে প্রবেশের জন্য আপনার অ্যাকাউন্টে এডমিন বা স্টাফ অনুমতি প্রয়োজন।"
-      );
-    }
-
-    if (isSuper) {
-      try {
-        sessionStorage.setItem(SUPER_ADMIN_SESSION_KEY, "true");
-      } catch {
-        // ignore
-      }
-      setLocalSuperAdmin(true);
-    } else {
-      try {
-        sessionStorage.removeItem(SUPER_ADMIN_SESSION_KEY);
-      } catch {
-        // ignore
-      }
-      setLocalSuperAdmin(false);
-    }
-
-    try {
-      await ensureCurrentUserProfileDoc(cred.user);
-    } catch {
-      // ignore
-    }
-
-    const appU = toAppUser(cred.user);
-
-    await recordUserCredential({
-      uid: appU.uid,
-      email: cred.user.email || "",
-      full_name: appU.displayName || (isSuper ? "মেইন সুপার এডমিন" : undefined),
-      username: isSuper ? "mahmudul" : (appU.email || "").split("@")[0] || undefined,
-      phone: appU.phone || undefined,
-      photo_url: appU.photoURL || undefined,
-      roles: isSuper
-        ? ["admin", "moderator", "editor", "user"]
-        : isRegAdmin
-        ? ["admin", "user"]
-        : isVaultStaff
-        ? (vaultEntry?.roles as Role[])
-        : ["user"],
-      verified_via: "google",
-    }).catch(() => {});
-
-    return appU;
+    throw new Error(
+      "Google সাইন-ইন সম্পূর্ণরূপে নিষ্ক্রিয় করা হয়েছে। অনুগ্রহ করে আপনার নিবন্ধিত ইমেইল ও পাসওয়ার্ড দিয়ে লগইন করুন।"
+    );
   }
 
   async function signInSuperAdmin(emailOrUsername: string, password: string): Promise<boolean> {
@@ -418,75 +346,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       cleanInput === "mdmahmudulhashan0";
 
     if (!isSuperIdentity) {
-      return false;
+      throw new Error(
+        "এই লগইন রুটটি শুধুমাত্র মেইন এডমিনের জন্য সংরক্ষিত। সঠিক মেইন এডমিন ইমেইল ব্যবহার করুন।"
+      );
     }
 
-    let isPasswordValid = password === SUPER_ADMIN_PASSWORD;
-    if (!isPasswordValid) {
+    if (!password || password.trim().length === 0) {
+      throw new Error("অনুগ্রহ করে আপনার মেইন এডমিন পাসওয়ার্ড লিখুন।");
+    }
+
+    try {
+      const cred = await signInWithEmailAndPassword(auth, SUPER_ADMIN_EMAIL, password);
+      if (!isSuperAdminEmail(cred.user.email)) {
+        await firebaseSignOut(auth);
+        throw new Error("অননুমোদিত অ্যাকাউন্ট। শুধুমাত্র প্রধান সুপার এডমিনের প্রবেশাধিকার রয়েছে।");
+      }
+
+      writeVerifiedSession(null);
+      setVerifiedSession(null);
+
       try {
-        const resp = await fetch("/api/auth/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ identifier: SUPER_ADMIN_EMAIL, password }),
-        });
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data?.ok) isPasswordValid = true;
-        }
+        sessionStorage.setItem(SUPER_ADMIN_SESSION_KEY, "true");
       } catch {
         // ignore
       }
-    }
+      setLocalSuperAdmin(true);
 
-    if (!isPasswordValid) {
-      return false;
-    }
+      try {
+        await ensureCurrentUserProfileDoc(cred.user, {
+          full_name: "মেইন সুপার এডমিন",
+          username: "mahmudul",
+        });
+      } catch {
+        // ignore
+      }
 
-    writeVerifiedSession(null);
-    setVerifiedSession(null);
-
-    try {
-      sessionStorage.setItem(SUPER_ADMIN_SESSION_KEY, "true");
-    } catch {
-      // ignore
-    }
-    setLocalSuperAdmin(true);
-
-    try {
-      await signInWithEmailAndPassword(auth, SUPER_ADMIN_EMAIL, password);
+      await logEvent("admin_login_success", SUPER_ADMIN_EMAIL).catch(() => {});
+      return true;
     } catch (err: any) {
-      let signedInFb = false;
-      for (const fallbackPwd of [SUPER_ADMIN_PASSWORD, "MahMuduL0@#", "MahMuduL0"]) {
-        if (fallbackPwd === password) continue;
-        try {
-          await signInWithEmailAndPassword(auth, SUPER_ADMIN_EMAIL, fallbackPwd);
-          signedInFb = true;
-          break;
-        } catch {
-          // continue
-        }
-      }
-      const code = String(err?.code || err?.message || "");
+      const code = String(err?.code || "");
       if (
-        !signedInFb &&
-        (code.includes("auth/user-not-found") || code.includes("auth/invalid-credential"))
+        code === "auth/user-not-found" ||
+        code === "auth/invalid-credential" ||
+        code === "auth/wrong-password"
       ) {
-        try {
-          const cred = await createUserWithEmailAndPassword(
-            auth,
-            SUPER_ADMIN_EMAIL,
-            SUPER_ADMIN_PASSWORD
-          );
-          if (!cred.user.emailVerified) {
-            await sendEmailVerification(cred.user).catch(() => {});
-          }
-        } catch {
-          // localSuperAdmin remains active
-        }
+        throw new Error(
+          "ভুল ইমেইল বা পাসওয়ার্ড। Firebase Authentication এ মেইন এডমিন পাসওয়ার্ড সঠিক কিনা নিশ্চিত করুন।"
+        );
       }
+      if (code === "auth/user-disabled") {
+        throw new Error("মেইন এডমিন অ্যাকাউন্টটি Firebase এ নিষ্ক্রিয় (Disabled) করা হয়েছে।");
+      }
+      if (code === "auth/too-many-requests") {
+        throw new Error("অনেকবার ভুল চেষ্টা করা হয়েছে। কিছুক্ষণ পর পুনরায় চেষ্টা করুন।");
+      }
+      throw new Error(err?.message || "মেইন এডমিন লগইন ব্যর্থ হয়েছে।");
     }
-
-    return true;
   }
 
   async function signInUserOrStaff(
@@ -1004,26 +919,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     photoURL: string | null;
     email: string | null;
   }> {
-    const current = auth.currentUser;
-    const existingGoogle = current?.providerData?.find(
-      (p) => p.providerId === "google.com"
-    );
-
-    if (existingGoogle && (existingGoogle.displayName || existingGoogle.photoURL)) {
-      return {
-        displayName: existingGoogle.displayName || null,
-        photoURL: existingGoogle.photoURL || null,
-        email: existingGoogle.email || null,
-      };
-    }
-
-    googleProvider.setCustomParameters({ prompt: "select_account" });
-    const cred = await signInWithPopup(auth, googleProvider);
-    return {
-      displayName: cred.user.displayName || null,
-      photoURL: cred.user.photoURL || null,
-      email: cred.user.email || null,
-    };
+    throw new Error("Google সিঙ্ক ফিচারটি নিষ্ক্রিয় করা হয়েছে।");
   }
 
   // Strictly enforce that ONLY mdmahmudulhashan0@gmail.com can ever be isMainAdmin (Super Admin)

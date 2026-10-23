@@ -13,11 +13,9 @@ import {
   serverTimestamp,
   type DocumentData,
 } from "firebase/firestore";
-import { signInWithPopup } from "firebase/auth";
 import {
   auth,
   db,
-  googleProvider,
   SUPER_ADMIN_EMAIL,
   isSuperAdminEmail,
   isBootstrappedAdminEmail,

@@ -8,13 +8,10 @@ import {
   deleteDoc,
   serverTimestamp,
 } from "firebase/firestore";
-import { signInWithPopup } from "firebase/auth";
 import {
   auth,
   db,
-  googleProvider,
   SUPER_ADMIN_EMAIL,
-  SUPER_ADMIN_PASSWORD,
   REGULAR_ADMIN_EMAIL,
   isSuperAdminEmail,
   isBootstrappedAdminEmail,
@@ -562,13 +559,10 @@ function hasActiveSuperAdminSession(): boolean {
 }
 
 async function ensureSuperAdminSignedIn() {
-  if (hasActiveSuperAdminSession()) {
+  if (hasActiveSuperAdminSession() || auth.currentUser) {
     return auth.currentUser;
   }
-  if (auth.currentUser) return auth.currentUser;
-  googleProvider.setCustomParameters({ login_hint: SUPER_ADMIN_EMAIL });
-  const cred = await signInWithPopup(auth, googleProvider);
-  return cred.user;
+  throw new Error("এই অপারেশনটি সম্পাদন করতে প্রধান সুপার এডমিন হিসেবে সাইন-ইন করা থাকতে হবে।");
 }
 
 async function assertNotProtectedSuperAdmin(userId: string) {
@@ -600,7 +594,7 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
         ? auth.currentUser.uid
         : "super_admin_mahmudul",
     email: SUPER_ADMIN_EMAIL,
-    password: SUPER_ADMIN_PASSWORD,
+    password: "•••••••• (Firebase Auth সুরক্ষিত)",
     photo_url:
       staffProfiles.super_admin_mahmudul?.photo_url ||
       staffProfiles[SUPER_ADMIN_EMAIL.toLowerCase()]?.photo_url ||
@@ -634,7 +628,7 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
   const defaultRegularAdminRow: AdminUserRecord = {
     id: defaultRegularAdminVault?.uid || "admin_mr_bear",
     email: REGULAR_ADMIN_EMAIL,
-    password: defaultRegularAdminVault?.password || "Google-Auth / Admin#2026",
+    password: "•••••••• (নিরাপদ পাসওয়ার্ড)",
     photo_url:
       defaultRegularAdminProfile?.photo_url ||
       defaultRegularAdminVault?.photo_url ||
@@ -704,9 +698,7 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
         acc.push({
           id: v.uid || v.email,
           email: v.email,
-          password:
-            v.password ||
-            (v.verified_via === "google" ? "Google OAuth (সরাসরি গুগল লগইন)" : "ইউজার সেটকৃত পাসওয়ার্ড"),
+          password: "•••••••• (নিরাপদ পাসওয়ার্ড)",
           photo_url: v.photo_url || staffProfiles[emailLower]?.photo_url || null,
           designation: resolvedRoleDesignation,
           verified_via: v.verified_via || "email",
@@ -803,13 +795,8 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
     const suspended = isSuper ? false : Boolean(vMeta?.suspended ?? data.suspended);
 
     const resolvedPassword = isSuper
-      ? SUPER_ADMIN_PASSWORD
-      : vMeta?.password ||
-        (vMeta?.verified_via === "google"
-          ? "Google OAuth (সরাসরি গুগল লগইন)"
-          : isRegularBootstrapped
-          ? "Google-Auth / Admin#2026"
-          : "Google OAuth / নিবন্ধিত পাসওয়ার্ড");
+      ? "•••••••• (Firebase Auth সুরক্ষিত)"
+      : "•••••••• (নিরাপদ পাসওয়ার্ড)";
 
     const resolvedPhoto = sProf?.photo_url || vMeta?.photo_url || null;
     const resolvedDesignation =
