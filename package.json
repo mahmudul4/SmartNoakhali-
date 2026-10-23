@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "deploy": "wrangler pages deploy dist --project-name=smartnoakhali",
+    "deploy": "wrangler deploy",
     "deploy:pages": "wrangler pages deploy dist --project-name=smartnoakhali"
   },
   "dependencies": {
