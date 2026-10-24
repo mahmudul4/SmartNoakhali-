@@ -41,6 +41,7 @@ import {
   useSiteMetaConfig,
 } from "@/lib/store";
 import { useAuth } from "@/lib/auth";
+import { auth, ensureFirebaseAuthUser } from "@/lib/firebase";
 import { toast } from "sonner";
 import type { AiChatMessage } from "@/components/FloatingLiveChat";
 import { FormattedChatMessage } from "@/lib/chat-formatter";
@@ -145,11 +146,41 @@ function ChatPage() {
   const aiEndRef = useRef<HTMLDivElement>(null);
 
   // Active Thread ID Calculation
+  const [activeUid, setActiveUid] = useState<string>(() => {
+    return auth.currentUser?.uid || user?.id || localStorage.getItem("sn_guest_chat_id_v1") || "";
+  });
+
+  useEffect(() => {
+    void ensureFirebaseAuthUser().then((fbUser) => {
+      const resolved = user?.id || fbUser?.uid;
+      if (resolved) {
+        setActiveUid(resolved);
+        try {
+          localStorage.setItem("sn_guest_chat_id_v1", resolved);
+        } catch {}
+      }
+    });
+  }, [user]);
+
   const effectiveThreadId = isStaff && staffSelectedThread
     ? staffSelectedThread
     : user
     ? user.id
-    : getOrCreateGuestId();
+    : activeUid || getOrCreateGuestId();
+
+  function resetAiChat() {
+    setAiMessages([
+      {
+        id: "welcome_ai_page",
+        role: "assistant",
+        text:
+          meta.aiWelcomeMessage ||
+          "আসসালামু আলাইকুম! আমি স্মার্ট নোয়াখালী এআই সহকারী। ডাক্তার, হাসপাতাল, জরুরি সেবা, সাধারণ জ্ঞান, কোডিং বা গণিতসহ যেকোনো বিষয়ে আমাকে প্রশ্ন করতে পারেন!",
+        created_at: new Date().toISOString(),
+      },
+    ]);
+    toast.success("নতুন এআই চ্যাট শুরু হয়েছে!");
+  }
 
   useEffect(() => {
     setThreadId(effectiveThreadId);
@@ -212,6 +243,7 @@ function ChatPage() {
       });
       const data = await resp.json().catch(() => ({}));
       const replyText =
+        data.text ||
         data.reply ||
         `স্মার্ট নোয়াখালী এআই সহকারী: আপনার অনুসন্ধানের জন্য নিচের জরুরি যোগাযোগ:\n• জাতীয় জরুরি সেবা: 📞 [999](tel:999)\n• নোয়াখালী জেনারেল হাসপাতাল: 📞 [01730-324794](tel:01730324794)\n• নোয়াখালী ফায়ার সার্ভিস: 📞 [01730-002444](tel:01730002444)\n• সুধারাম মডেল থানা: 📞 [01320-116035](tel:01320116035)\n\nসরাসরি এডমিনের সাথে কথা বলতে উপরের 'লাইভ প্রতিনিধি' ট্যাবে মেসেজ দিন।`;
 
@@ -466,7 +498,20 @@ function ChatPage() {
 
       {mode === "ai" ? (
         <>
-          {/* Quick Prompts */}
+          {/* Quick Prompts with Reset Button */}
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <span className="text-[11px] font-bold text-muted-foreground flex items-center gap-1">
+              <Sparkles className="h-3 w-3 text-gold" /> দ্রুত সেবা প্রশ্ন
+            </span>
+            <button
+              type="button"
+              onClick={resetAiChat}
+              className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-muted hover:text-primary transition"
+              title="নতুন এআই চ্যাট শুরু করুন"
+            >
+              <RotateCcw className="h-3 w-3" /> নতুন চ্যাট
+            </button>
+          </div>
           <div className="mb-2 flex flex-wrap gap-1.5 overflow-x-auto pb-1">
             {QUICK_PROMPTS.map((qp) => (
               <button
@@ -727,12 +772,27 @@ function ChatPage() {
                     </div>
                     {m.body && <p className="whitespace-pre-wrap break-words leading-relaxed">{m.body}</p>}
                     {m.attachment_url && <AttachmentView url={m.attachment_url} />}
-                    <p className={`mt-0.5 text-[9px] ${mine ? "opacity-75" : "text-muted-foreground"}`}>
-                      {new Date(m.created_at).toLocaleTimeString("bn-BD", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </p>
+                    <div className="mt-0.5 flex items-center justify-between gap-2 text-[9px]">
+                      <span className={mine ? "opacity-75" : "text-muted-foreground"}>
+                        {new Date(m.created_at).toLocaleTimeString("bn-BD", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                      {mine && (
+                        <span className="flex items-center gap-0.5 text-[9px]">
+                          {m.status === "sending" && (
+                            <span className="opacity-75 animate-pulse">পাঠানো হচ্ছে...</span>
+                          )}
+                          {m.status === "failed" && (
+                            <span className="text-red-300 font-bold">ব্যর্থ</span>
+                          )}
+                          {(!m.status || m.status === "sent") && (
+                            <span className="text-gold font-bold">✓</span>
+                          )}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               );

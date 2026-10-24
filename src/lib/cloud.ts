@@ -23,6 +23,7 @@ import {
   handleFirestoreError,
   sanitizeString,
   ensureCurrentUserProfileDoc,
+  ensureFirebaseAuthUser,
 } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth";
 import { recordStaffActivity } from "@/lib/staff-audit";
@@ -154,6 +155,7 @@ export interface PrivateMessageRow {
   body: string | null;
   attachment_url: string | null;
   created_at: string;
+  status?: "sending" | "sent" | "failed";
 }
 
 function tsToIso(val: unknown): string {
@@ -2574,18 +2576,54 @@ export async function purgeDeletedFirestoreThread(threadId: string) {
 
 // ---------- Private chat: threads ----------
 export function useChatThreads() {
-  const { items: fsItems, loading: fsLoading } = useFirestoreRealtime<ChatThreadRow>(
-    "chat_threads",
-    "user_owned",
-    {
-      col: "last_message_at",
-      asc: false,
-    }
-  );
   const { user, isStaff } = useAuth();
+  const [fsItems, setFsItems] = useState<ChatThreadRow[]>([]);
+  const [fsLoading, setFsLoading] = useState(true);
   const [serverItems, setServerItems] = useState<ChatThreadRow[]>([]);
   const [delState, setDelState] = useState<ChatDeletionState>(() => readLocalChatDeletions());
   const [serverLoading, setServerLoading] = useState(true);
+
+  // Authoritative real-time Firestore listener for live chat threads
+  useEffect(() => {
+    let active = true;
+    void ensureFirebaseAuthUser().then((fbUser) => {
+      if (!active) return;
+      const threadsCol = collection(db, "chat_threads");
+      const currentUid = fbUser?.uid || user?.id;
+      const q = isStaff
+        ? query(threadsCol)
+        : currentUid
+        ? query(threadsCol, where("user_id", "==", currentUid))
+        : null;
+
+      if (!q) {
+        setFsItems([]);
+        setFsLoading(false);
+        return;
+      }
+
+      const unsub = onSnapshot(
+        q,
+        (snap) => {
+          if (!active) return;
+          const list = snap.docs.map((d) => normalizeDoc<ChatThreadRow>(d.id, d.data()));
+          list.sort((a, b) => (b.last_message_at || "").localeCompare(a.last_message_at || ""));
+          setFsItems(list);
+          setFsLoading(false);
+        },
+        (err) => {
+          console.warn("[Chat] Firestore chat_threads subscription notice:", err);
+          if (active) setFsLoading(false);
+        }
+      );
+
+      return () => unsub();
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [isStaff, user?.id]);
 
   useEffect(() => {
     let active = true;
@@ -2775,9 +2813,7 @@ export async function ensureMyThread(userId: string): Promise<ChatThreadRow | nu
     created_at: nowIso,
   };
 
-  if (!auth.currentUser && !sessionStorage.getItem("sn_verified_user_session_v1")) {
-    return fallbackThread;
-  }
+  void ensureFirebaseAuthUser();
 
   const threadRef = doc(db, "chat_threads", userId);
   try {
@@ -2801,11 +2837,9 @@ export function useThreadMessages(threadId: string | null) {
   const [serverItems, setServerItems] = useState<PrivateMessageRow[]>([]);
   const [delState, setDelState] = useState<ChatDeletionState>(() => readLocalChatDeletions());
   const [loading, setLoading] = useState(true);
-  const { user, firebaseUser, isFirebaseVerifiedAdmin } = useAuth();
+  const { user } = useAuth();
 
-  const isBootstrappedAdmin = isFirebaseVerifiedAdmin;
-
-  // Poll server messages for universal reliability (all staff & phone/email verified users)
+  // Poll server messages for auxiliary compatibility in dev/express
   useEffect(() => {
     if (!threadId) {
       setServerItems([]);
@@ -2836,51 +2870,51 @@ export function useThreadMessages(threadId: string | null) {
         }
       } catch {
         // ignore
-      } finally {
-        if (active) setLoading(false);
       }
     }
 
     void loadServerMsgs();
-    const timer = setInterval(loadServerMsgs, 2200);
+    const timer = setInterval(loadServerMsgs, 4000);
     return () => {
       active = false;
       clearInterval(timer);
     };
   }, [threadId]);
 
-  // Also subscribe to Firestore messages
+  // Authoritative real-time Firestore messages subscription
   useEffect(() => {
-    if (!threadId || (!firebaseUser && !auth.currentUser)) {
+    if (!threadId) {
       setFsItems([]);
+      setLoading(false);
       return;
     }
 
-    const currentUid = firebaseUser?.uid || auth.currentUser?.uid || user?.id;
-    const msgsRef = collection(db, "chat_threads", threadId, "messages");
-    const q = isBootstrappedAdmin
-      ? query(msgsRef)
-      : currentUid
-      ? query(msgsRef, where("thread_id", "==", currentUid))
-      : null;
+    let active = true;
+    void ensureFirebaseAuthUser().then(() => {
+      if (!active) return;
+      const msgsRef = collection(db, "chat_threads", threadId, "messages");
+      const unsub = onSnapshot(
+        msgsRef,
+        (snap) => {
+          if (!active) return;
+          const list = snap.docs.map((d) => normalizeDoc<PrivateMessageRow>(d.id, d.data()));
+          list.sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
+          setFsItems(list);
+          setLoading(false);
+        },
+        (err) => {
+          console.warn("[Chat] Firestore messages snapshot notice:", err);
+          if (active) setLoading(false);
+        }
+      );
 
-    if (!q) return;
+      return () => unsub();
+    });
 
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const list = snap.docs.map((d) => normalizeDoc<PrivateMessageRow>(d.id, d.data()));
-        list.sort((a, b) => a.created_at.localeCompare(b.created_at));
-        setFsItems(list);
-        setLoading(false);
-      },
-      () => {
-        // fallback to serverItems
-      }
-    );
-
-    return () => unsub();
-  }, [threadId, firebaseUser?.uid, isBootstrappedAdmin, user?.id]);
+    return () => {
+      active = false;
+    };
+  }, [threadId]);
 
   const items = (() => {
     const merged: PrivateMessageRow[] = [
@@ -2907,7 +2941,7 @@ export function useThreadMessages(threadId: string | null) {
         merged.push(fm);
       }
     }
-    merged.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    merged.sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
     return merged;
   })();
 
@@ -2927,93 +2961,130 @@ export function useThreadMessages(threadId: string | null) {
   ) => {
     if (!threadId) return { error: { message: "No thread selected" } };
 
-    // 1. Send to Unified Server Chat Hub (always works for all staff & verified users)
+    const fbUser = await ensureFirebaseAuthUser();
+    const activeUid = fbUser?.uid || auth.currentUser?.uid || sender_id;
+    const msgId = genId();
+    const nowIso = new Date().toISOString();
+    const preview = sanitizeString(body || (attachment_url ? "📎 সংযুক্তি" : ""), 300, "");
+
+    // 1. Instant optimistic message in local state
+    const optimisticMsg: PrivateMessageRow = {
+      id: msgId,
+      thread_id: threadId,
+      sender_id: activeUid,
+      sender_role,
+      sender_name:
+        meta?.sender_name ||
+        user?.displayName ||
+        (sender_role === "staff" ? "সাপোর্ট টিম" : "গ্রাহক"),
+      sender_photo: meta?.sender_photo || user?.photoURL || "",
+      sender_role_label:
+        meta?.sender_role_label || (sender_role === "staff" ? "এডমিন" : "গ্রাহক"),
+      body: body || "",
+      attachment_url: attachment_url || null,
+      created_at: nowIso,
+      status: "sending",
+    };
+    setFsItems((prev) => [...prev, optimisticMsg]);
+
+    // 2. Direct authoritative Firestore write
     try {
-      const resp = await fetch("/api/chat/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          thread_id: threadId,
-          user_id: sender_role === "user" ? sender_id : threadId,
+      const threadRef = doc(db, "chat_threads", threadId);
+      const threadSnap = await getDoc(threadRef).catch(() => null);
+      if (!threadSnap || !threadSnap.exists()) {
+        await setDoc(threadRef, {
+          user_id: threadId,
           user_name:
             meta?.user_name ||
-            (sender_role === "user" ? user?.displayName || "গ্রাহক" : undefined),
+            (sender_role === "user" ? user?.displayName || "গ্রাহক" : "গ্রাহক"),
           user_email:
-            meta?.user_email || (sender_role === "user" ? user?.email || "" : undefined),
-          user_phone:
-            meta?.user_phone || (sender_role === "user" ? user?.phone || "" : undefined),
-          sender_id,
-          sender_role,
-          sender_name:
-            meta?.sender_name ||
-            user?.displayName ||
-            (sender_role === "staff" ? "সাপোর্ট টিম" : "গ্রাহক"),
-          sender_photo: meta?.sender_photo || user?.photoURL || "",
-          sender_role_label:
-            meta?.sender_role_label || (sender_role === "staff" ? "এডমিন" : "গ্রাহক"),
-          body: body || "",
-          attachment_url: attachment_url || "",
-        }),
-      });
-      if (resp.ok && (resp.headers.get("content-type") || "").includes("application/json")) {
-        const data = await resp.json();
-        if (data.message) {
-          setServerItems((prev) => [...prev, data.message]);
-        }
-      }
-    } catch {
-      // ignore
-    }
-
-    // 2. Also persist to Firestore if signed in with verified Firebase account
-    if (auth.currentUser?.emailVerified) {
-      const msgId = genId();
-      try {
-        const nowIso = new Date().toISOString();
-        const preview = sanitizeString(body || (attachment_url ? "📎 সংযুক্তি" : ""), 300, "");
-        const threadRef = doc(db, "chat_threads", threadId);
-        const threadSnap = await getDoc(threadRef);
-        if (!threadSnap.exists()) {
-          if (sender_role === "user" && auth.currentUser.uid === threadId) {
-            await setDoc(threadRef, {
-              user_id: threadId,
-              last_message_at: nowIso,
-              last_message_preview: preview,
-              user_unread: 0,
-              staff_unread: 1,
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-            });
-          }
-        } else {
-          const tData = threadSnap.data();
-          await updateDoc(threadRef, {
-            last_message_at: nowIso,
-            last_message_preview: preview,
-            user_unread:
-              sender_role === "staff"
-                ? Math.min((Number(tData.user_unread) || 0) + 1, 10000)
-                : Number(tData.user_unread) || 0,
-            staff_unread:
-              sender_role === "user"
-                ? Math.min((Number(tData.staff_unread) || 0) + 1, 10000)
-                : 0,
-            updatedAt: serverTimestamp(),
-          });
-        }
-
-        await setDoc(doc(db, "chat_threads", threadId, "messages", msgId), {
-          thread_id: threadId,
-          sender_id: sanitizeString(auth.currentUser.uid, 128, ""),
-          sender_role: sender_role === "staff" ? "staff" : "user",
-          body: sanitizeString(body || "", 2000, ""),
-          attachment_url: sanitizeString(attachment_url ?? "", 300000, ""),
+            meta?.user_email || (sender_role === "user" ? user?.email || "" : ""),
+          last_message_at: nowIso,
+          last_message_preview: preview,
+          user_unread: sender_role === "staff" ? 1 : 0,
+          staff_unread: sender_role === "user" ? 1 : 0,
           createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
         });
-      } catch {
-        // Server chat hub already persisted the message
+      } else {
+        const tData = threadSnap.data();
+        await updateDoc(threadRef, {
+          last_message_at: nowIso,
+          last_message_preview: preview,
+          user_name:
+            meta?.user_name ||
+            tData.user_name ||
+            (sender_role === "user" ? user?.displayName || "গ্রাহক" : "গ্রাহক"),
+          user_email:
+            meta?.user_email ||
+            tData.user_email ||
+            (sender_role === "user" ? user?.email || "" : ""),
+          user_unread:
+            sender_role === "staff"
+              ? Math.min((Number(tData.user_unread) || 0) + 1, 10000)
+              : Number(tData.user_unread) || 0,
+          staff_unread:
+            sender_role === "user"
+              ? Math.min((Number(tData.staff_unread) || 0) + 1, 10000)
+              : 0,
+          updatedAt: serverTimestamp(),
+        });
       }
+
+      await setDoc(doc(db, "chat_threads", threadId, "messages", msgId), {
+        thread_id: threadId,
+        sender_id: activeUid,
+        sender_role: sender_role === "staff" ? "staff" : "user",
+        sender_name:
+          meta?.sender_name ||
+          user?.displayName ||
+          (sender_role === "staff" ? "সাপোর্ট টিম" : "গ্রাহক"),
+        sender_photo: meta?.sender_photo || user?.photoURL || "",
+        sender_role_label:
+          meta?.sender_role_label || (sender_role === "staff" ? "এডমিন" : "গ্রাহক"),
+        body: sanitizeString(body || "", 2000, ""),
+        attachment_url: sanitizeString(attachment_url ?? "", 300000, ""),
+        createdAt: serverTimestamp(),
+      });
+
+      // Update optimistic message status to sent
+      setFsItems((prev) =>
+        prev.map((m) => (m.id === msgId ? { ...m, status: "sent" } : m))
+      );
+    } catch (fsErr) {
+      console.warn("[Chat] Direct Firestore send notice:", fsErr);
+      setFsItems((prev) =>
+        prev.map((m) => (m.id === msgId ? { ...m, status: "failed" } : m))
+      );
     }
+
+    // 3. Optional background server notification (non-blocking)
+    fetch("/api/chat/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        thread_id: threadId,
+        user_id: sender_role === "user" ? sender_id : threadId,
+        user_name:
+          meta?.user_name ||
+          (sender_role === "user" ? user?.displayName || "গ্রাহক" : undefined),
+        user_email:
+          meta?.user_email || (sender_role === "user" ? user?.email || "" : undefined),
+        user_phone:
+          meta?.user_phone || (sender_role === "user" ? user?.phone || "" : undefined),
+        sender_id: activeUid,
+        sender_role,
+        sender_name:
+          meta?.sender_name ||
+          user?.displayName ||
+          (sender_role === "staff" ? "সাপোর্ট টিম" : "গ্রাহক"),
+        sender_photo: meta?.sender_photo || user?.photoURL || "",
+        sender_role_label:
+          meta?.sender_role_label || (sender_role === "staff" ? "এডমিন" : "গ্রাহক"),
+        body: body || "",
+        attachment_url: attachment_url || "",
+      }),
+    }).catch(() => {});
 
     if (sender_role === "staff") {
       void recordStaffActivity({

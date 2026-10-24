@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, type User } from "firebase/auth";
+import { getAuth, signInAnonymously, type User } from "firebase/auth";
 import {
   initializeFirestore,
   persistentLocalCache,
@@ -57,6 +57,30 @@ export const db = initFirestoreInstance();
 export { enableNetwork, disableNetwork };
 export const auth = getAuth(app);
 export const storage = getStorage(app);
+
+let anonAuthPromise: Promise<User | null> | null = null;
+/**
+ * Ensures an authenticated Firebase Auth session exists.
+ * If user is not yet signed in, seamlessly signs in anonymously so that
+ * Firestore security rules have an authenticated UID for live chat.
+ */
+export async function ensureFirebaseAuthUser(): Promise<User | null> {
+  if (auth.currentUser) return auth.currentUser;
+  if (anonAuthPromise) return anonAuthPromise;
+
+  anonAuthPromise = (async () => {
+    try {
+      const cred = await signInAnonymously(auth);
+      return cred.user;
+    } catch (err) {
+      console.warn("Firebase anonymous authentication notice:", err);
+      return auth.currentUser || null;
+    } finally {
+      anonAuthPromise = null;
+    }
+  })();
+  return anonAuthPromise;
+}
 
 export const SUPER_ADMIN_EMAIL = "mdmahmudulhashan0@gmail.com";
 export const REGULAR_ADMIN_EMAIL = "mr.bear444plus@gmail.com";

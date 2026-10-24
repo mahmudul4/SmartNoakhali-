@@ -14,8 +14,11 @@ import {
   Droplet,
   User as UserIcon,
   ChevronRight,
+  RotateCcw,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
+import { auth, ensureFirebaseAuthUser } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth";
 import {
   useCategories,
@@ -115,9 +118,37 @@ export function FloatingLiveChat() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Determine active thread
-  const effectiveThreadId = user
-    ? user.id
-    : getOrCreateGuestId();
+  const [activeUid, setActiveUid] = useState<string>(() => {
+    return auth.currentUser?.uid || user?.id || localStorage.getItem("sn_guest_chat_id_v1") || "";
+  });
+
+  useEffect(() => {
+    void ensureFirebaseAuthUser().then((fbUser) => {
+      const resolved = user?.id || fbUser?.uid;
+      if (resolved) {
+        setActiveUid(resolved);
+        try {
+          localStorage.setItem("sn_guest_chat_id_v1", resolved);
+        } catch {}
+      }
+    });
+  }, [user]);
+
+  const effectiveThreadId = user?.id || activeUid || getOrCreateGuestId();
+
+  function resetAiChat() {
+    setAiMessages([
+      {
+        id: "welcome_ai",
+        role: "assistant",
+        text:
+          meta.aiWelcomeMessage ||
+          "আসসালামু আলাইকুম! আমি স্মার্ট নোয়াখালী এআই সহকারী। ডাক্তার, হাসপাতাল, অ্যাম্বুলেন্স, রক্তদাতা বা যেকোনো প্রশ্ন, অনুবাদ ও কোডিং সহায়তায় আমাকে লিখুন!",
+        created_at: new Date().toISOString(),
+      },
+    ]);
+    toast.success("নতুন এআই চ্যাট শুরু হয়েছে!");
+  }
 
   useEffect(() => {
     setThreadId(effectiveThreadId);
@@ -238,6 +269,7 @@ export function FloatingLiveChat() {
 
       const data = await resp.json().catch(() => ({}));
       const replyText =
+        data.text ||
         data.reply ||
         `স্মার্ট নোয়াখালী এআই সহকারী: আপনার অনুসন্ধানের জন্য সরাসরি যোগাযোগ:\n• জাতীয় জরুরি সেবা: 📞 [999](tel:999)\n• নোয়াখালী জেনারেল হাসপাতাল: 📞 [01730-324794](tel:01730324794)\n• নোয়াখালী ফায়ার সার্ভিস: 📞 [01730-002444](tel:01730002444)\n• সুধারাম মডেল থানা: 📞 [01320-116035](tel:01320116035)\n\nঅথবা উপরের 'লাইভ চ্যাট' ট্যাবে মেসেজ দিয়ে সরাসরি এডমিনদের সাথে কথা বলুন।`;
 
@@ -403,7 +435,20 @@ export function FloatingLiveChat() {
           {chatMode === "ai" ? (
             <>
               <div className="flex-1 space-y-2.5 overflow-y-auto bg-background/60 p-3">
-                {/* Quick AI Search Prompts */}
+                {/* Quick AI Search Prompts with Reset Button */}
+                <div className="flex items-center justify-between gap-1 pb-1">
+                  <span className="text-[10px] font-bold text-muted-foreground flex items-center gap-1">
+                    <Sparkles className="h-3 w-3 text-gold" /> দ্রুত সেবা প্রশ্ন
+                  </span>
+                  <button
+                    type="button"
+                    onClick={resetAiChat}
+                    className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-semibold text-muted-foreground hover:bg-muted hover:text-primary transition"
+                    title="নতুন এআই চ্যাট শুরু করুন"
+                  >
+                    <RotateCcw className="h-3 w-3" /> নতুন চ্যাট
+                  </button>
+                </div>
                 <div className="flex flex-wrap gap-1.5">
                   {QUICK_AI_PROMPTS.map((qp) => (
                     <button
@@ -683,16 +728,27 @@ export function FloatingLiveChat() {
                         {m.attachment_url && (
                           <AttachmentView url={m.attachment_url} />
                         )}
-                        <p
-                          className={`mt-0.5 text-[9px] ${
-                            mine ? "opacity-75" : "text-muted-foreground"
-                          }`}
-                        >
-                          {new Date(m.created_at).toLocaleTimeString("bn-BD", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </p>
+                        <div className="mt-0.5 flex items-center justify-between gap-2 text-[9px]">
+                          <span className={mine ? "opacity-75" : "text-muted-foreground"}>
+                            {new Date(m.created_at).toLocaleTimeString("bn-BD", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </span>
+                          {mine && (
+                            <span className="flex items-center gap-0.5 text-[9px]">
+                              {m.status === "sending" && (
+                                <span className="opacity-75 animate-pulse">পাঠানো হচ্ছে...</span>
+                              )}
+                              {m.status === "failed" && (
+                                <span className="text-red-300 font-bold">ব্যর্থ</span>
+                              )}
+                              {(!m.status || m.status === "sent") && (
+                                <span className="text-gold font-bold">✓</span>
+                              )}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       {mine && (
                         <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">

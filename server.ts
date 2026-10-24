@@ -2110,37 +2110,41 @@ async function startServer() {
             ],
           });
 
-          const recentHistory = (history || [])
-            .slice(-6)
-            .map((h) => `${h.role === "user" ? "গ্রাহক" : "এআই"}: ${h.text}`)
-            .join("\n");
+          const systemInstruction = `You are the official Smart AI Assistant of "Smart Noakhali (স্মার্ট নোয়াখালী)" — an intelligent, versatile, multi-purpose assistant for both local Noakhali civic assistance and general-purpose problem solving.
 
-          const systemInstruction = `তুমি "স্মার্ট নোয়াখালী (Smart Noakhali)" অ্যাপের অফিসিয়াল স্মার্ট এআই সহকারী।
-তোমার কাজ হলো নোয়াখালী জেলার নাগরিকদের যেকোনো প্রশ্ন বা প্রয়োজনীয় তথ্য (যেমন: ডাক্তার, হাসপাতাল, অ্যাম্বুলেন্স, ফায়ার সার্ভিস, থানা পুলিশ, রক্তদাতা, জরুরী রক্তদান, জনপ্রতিনিধি, সাংবাদিক, আইনজীবী, অনুদান নাম্বার ইত্যাদি) খুব সহজে, আন্তরিকভাবে এবং শুদ্ধ বাংলায় খুঁজে দেওয়া।
+PRIMARY CAPABILITIES:
+1. General-Purpose Problem Solver: You are an expert at programming, software development (provide clean, production-grade code with markdown code blocks like \`\`\`javascript, \`\`\`python, \`\`\`html and clear explanations), mathematics, science, logical reasoning, document translation (Bengali <-> English), and creative drafting.
+2. Smart Noakhali & Civic Assistance: When users ask about Noakhali district, local civic directory, hospitals, doctors, ambulances, fire stations, police stations, lawyers, blood donors, or emergency hotlines (999, 333), you ground your response accurately using the provided directory and emergency contacts.
+3. Multilingual Excellence: Answer fluently in the language the user asked in (Bengali বাংলা or English). Use warm, polite, and respectful tone ("আপনি / আপনার").
+4. Markdown Formatting: Use bold for key numbers or names, bullet points for lists, and code blocks for programming solutions. Always provide clear phone numbers with 📞 emoji for local contacts.
 
-নিচে আমাদের নোয়াখালী ডিরেক্টরি ও ডাটাবেইজের তথ্য দেওয়া হলো:
-${contextSummary}
+Local Smart Noakhali Directory Data:
+${contextSummary}`;
 
-নির্দেশনা:
-১. প্রাসঙ্গিক নাম, ফোন নাম্বার, ঠিকানা বা রক্তদাতা থাকলে সেগুলো স্পষ্টভাবে পয়েন্ট আকারে নাম ও 📞 ফোন নাম্বারসহ সুন্দর করে উল্লেখ করো।
-২. উত্তর সবসময় পরিষ্কার, সংক্ষিপ্ত, স্পষ্ট ও বিনম্র বাংলায় দাও।
-৩. জরুরি পরিস্থিতিতে সরাসরি ৯৯৯ অথবা নোয়াখালী ফায়ার সার্ভিস (01730-002444) / নোয়াখালী জেনারেল হাসপাতাল (01730-324794) এ যোগাযোগের পরামর্শ দাও।
-৪. ব্যবহারকারীকে সরাসরি লাইভ চ্যাটে এডমিনদের সাথে কথা বলার সুবিধাও স্মরণ করিয়ে দিতে পারো।`;
+          const contents: any[] = [];
+          for (const h of (history || []).slice(-6)) {
+            if (h.text && h.text.trim()) {
+              contents.push({
+                role: h.role === "assistant" || h.role === "model" ? "model" : "user",
+                parts: [{ text: String(h.text).trim() }],
+              });
+            }
+          }
+          contents.push({
+            role: "user",
+            parts: [{ text: userQuery }],
+          });
 
-          const promptText = recentHistory
-            ? `পূর্ববর্তী বার্তাগুলো:\n${recentHistory}\n\nগ্রাহকের বর্তমান প্রশ্ন: ${userQuery}`
-            : `গ্রাহকের প্রশ্ন: ${userQuery}`;
-
-          // Cascade models with retry
-          const candidateModels = ["gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-flash-latest"];
+          // Cascade models with retry: gemini-3.8-flash primary, then fallback
+          const candidateModels = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-2.5-flash"];
           for (const modelName of candidateModels) {
             try {
               const response = await ai.models.generateContent({
                 model: modelName,
-                contents: promptText,
+                contents,
                 config: {
                   systemInstruction,
-                  temperature: 0.35,
+                  temperature: 0.4,
                 },
               });
               const candText = response.text || "";

@@ -197,14 +197,17 @@ service cloud.firestore {
     // 15. /chat_threads/{threadId} & Subcollection /messages
     // =========================================================
     match /chat_threads/{threadId} {
-      allow get, list: if isSignedIn();
-      allow create, update: if isSignedIn();
-      allow delete: if isMainAdmin();
+      allow get: if isEditor() || (isSignedIn() && (request.auth.uid == threadId || (resource != null && resource.data.user_id == request.auth.uid)));
+      allow list: if isEditor() || (isSignedIn() && (resource == null || resource.data.user_id == request.auth.uid));
+      allow create: if isSignedIn() && (isEditor() || request.auth.uid == threadId);
+      allow update: if isEditor() || (isSignedIn() && request.auth.uid == threadId);
+      allow delete: if isEditor() || isMainAdmin();
 
       match /messages/{messageId} {
-        allow get, list: if isSignedIn();
-        allow create, update: if isSignedIn();
-        allow delete: if isMainAdmin();
+        allow get, list: if isEditor() || (isSignedIn() && request.auth.uid == threadId);
+        allow create: if isSignedIn() && (isEditor() || request.auth.uid == threadId);
+        allow update: if isEditor();
+        allow delete: if isEditor() || isMainAdmin();
       }
     }
   }

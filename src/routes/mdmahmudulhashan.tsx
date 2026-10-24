@@ -5697,14 +5697,22 @@ function SettingsAdminPanel() {
         </div>
 
         {/* Feature Toggles */}
-        <div className="grid grid-cols-1 gap-2 rounded-2xl bg-muted/40 p-3.5 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-2.5 rounded-2xl bg-muted/40 p-3.5 sm:grid-cols-2">
           <label className="flex cursor-pointer items-center gap-2.5 text-xs font-semibold">
             <input
               type="checkbox"
               checked={draft.aiChatEnabled}
               onChange={(e) => setDraft({ ...draft, aiChatEnabled: e.target.checked })}
             />
-            লাইভ চ্যাটে সরাসরি এআই (AI) সার্চ অ্যাসিস্ট্যান্ট সক্রিয়
+            এআই (AI) সহকারী সক্রিয় (General & Noakhali Assistant)
+          </label>
+          <label className="flex cursor-pointer items-center gap-2.5 text-xs font-semibold">
+            <input
+              type="checkbox"
+              checked={draft.liveChatEnabled ?? true}
+              onChange={(e) => setDraft({ ...draft, liveChatEnabled: e.target.checked })}
+            />
+            লাইভ চ্যাট গ্রাহক সাপোর্ট সক্রিয়
           </label>
           <label className="flex cursor-pointer items-center gap-2.5 text-xs font-semibold">
             <input
@@ -5714,6 +5722,15 @@ function SettingsAdminPanel() {
             />
             কঠোর এডমিন প্যানেল সিকিউরিটি শিল্ড (Strict Security Mode)
           </label>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-semibold text-muted-foreground whitespace-nowrap">সাপোর্ট স্ট্যাটাস:</span>
+            <input
+              value={draft.liveChatSupportStatus || "অনলাইন (সক্রিয় সাপোর্ট)"}
+              onChange={(e) => setDraft({ ...draft, liveChatSupportStatus: e.target.value })}
+              className="w-full rounded-lg border border-border bg-background px-2.5 py-1 text-xs"
+              placeholder="অনলাইন (সকাল ৯টা - রাত ১০টা)"
+            />
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2">

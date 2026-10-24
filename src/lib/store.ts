@@ -1323,6 +1323,8 @@ export interface SiteMetaConfig {
   emergencyNotice: string;
   aiChatEnabled: boolean;
   aiWelcomeMessage: string;
+  liveChatEnabled: boolean;
+  liveChatSupportStatus: string;
   adminPinCode: string;
   sessionTimeoutMinutes: number;
   strictSecurityMode: boolean;
@@ -1336,6 +1338,8 @@ export const DEFAULT_SITE_META: SiteMetaConfig = {
   aiChatEnabled: true,
   aiWelcomeMessage:
     "আসসালামু আলাইকুম! আমি স্মার্ট নোয়াখালী এআই সহকারী। ডাক্তার, হাসপাতাল, অ্যাম্বুলেন্স, ফায়ার সার্ভিস, রক্তদাতা বা যেকোনো নাম্বার খুঁজতে আমাকে প্রশ্ন করুন!",
+  liveChatEnabled: true,
+  liveChatSupportStatus: "অনলাইন (সক্রিয় সাপোর্ট)",
   adminPinCode: "",
   sessionTimeoutMinutes: 30,
   strictSecurityMode: true,
