@@ -29,6 +29,7 @@ import { useAuth } from "@/lib/auth";
 import { listMySecurityEvents } from "@/lib/security";
 import { useCloudSubmissions } from "@/lib/cloud";
 import { isSuperAdminEmail, REGULAR_ADMIN_EMAIL } from "@/lib/firebase";
+import { UniversalImageUploader } from "@/components/UniversalImageUploader";
 
 export const Route = createFileRoute("/profile")({
   head: () => ({
@@ -378,16 +379,18 @@ function ProfilePage() {
                 />
               </div>
 
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-primary-deep">
-                  প্রোফাইল ছবির URL (বা Google সিঙ্ক করুন)
+              <div className="sm:col-span-2">
+                <label className="mb-1.5 block text-xs font-semibold text-primary-deep">
+                  প্রোফাইল ছবি (ক্যামেরা বা গ্যালারি থেকে নির্বাচন করুন)
                 </label>
-                <input
-                  type="url"
+                <UniversalImageUploader
+                  variant="inline"
+                  category="profile"
+                  entityId={user.uid}
                   value={photoURL}
-                  onChange={(e) => setPhotoURL(e.target.value)}
-                  placeholder="https://example.com/avatar.jpg"
-                  className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-xs outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                  onChange={(url) => setPhotoURL(url || "")}
+                  label="প্রোফাইল ছবি আপলোড করুন"
+                  hint="মোবাইল বা পিসি থেকে ছবি নির্বাচন করুন — স্বয়ংক্রিয়ভাবে অপ্টিমাইজ ও Firebase Storage-এ সংরক্ষিত হবে"
                 />
               </div>
             </div>

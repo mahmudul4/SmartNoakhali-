@@ -27,6 +27,7 @@ import {
 } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth";
 import { recordStaffActivity } from "@/lib/staff-audit";
+import { uploadImageToFirebaseStorage, type ImageUploadCategory } from "@/lib/imageUpload";
 
 export type BloodGroupType = "A+" | "A-" | "B+" | "B-" | "AB+" | "AB-" | "O+" | "O-";
 export type ModerationStatus = "pending" | "approved" | "rejected";
@@ -3178,53 +3179,57 @@ export async function markThreadRead(threadId: string, side: "user" | "staff") {
   }
 }
 
-// ---------- Compact Client Image / Audio Serializer ----------
-export async function uploadPublicImage(file: File, _folder = "uploads"): Promise<string | null> {
+// ---------- Universal Client Image & Media Upload Service ----------
+export async function uploadPublicImage(file: File, folder = "uploads"): Promise<string | null> {
+  // If image, route through universal image compression & Firebase Storage
   if (file.type.startsWith("image/")) {
-    return new Promise((resolve) => {
-      const objUrl = URL.createObjectURL(file);
-      const img = new Image();
-      img.onload = () => {
-        URL.revokeObjectURL(objUrl);
-        const maxDim = 360;
-        let { width, height } = img;
-        if (width > maxDim || height > maxDim) {
-          if (width > height) {
-            height = Math.round((height * maxDim) / width);
-            width = maxDim;
-          } else {
-            width = Math.round((width * maxDim) / height);
-            height = maxDim;
-          }
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(width, 1);
-        canvas.height = Math.max(height, 1);
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return resolve(null);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        let dataUrl = canvas.toDataURL("image/jpeg", 0.70);
-        if (dataUrl.length > 70000) {
-          dataUrl = canvas.toDataURL("image/jpeg", 0.50);
-        }
-        if (dataUrl.length > 100000) {
-          const smallCanvas = document.createElement("canvas");
-          smallCanvas.width = Math.max(Math.round(canvas.width * 0.75), 1);
-          smallCanvas.height = Math.max(Math.round(canvas.height * 0.75), 1);
-          const sCtx = smallCanvas.getContext("2d");
-          if (sCtx) {
-            sCtx.drawImage(canvas, 0, 0, smallCanvas.width, smallCanvas.height);
-            dataUrl = smallCanvas.toDataURL("image/jpeg", 0.50);
-          }
-        }
-        resolve(dataUrl);
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(objUrl);
-        resolve(null);
-      };
-      img.src = objUrl;
-    });
+    try {
+      let category: ImageUploadCategory = "general";
+      let entityId: string | undefined;
+
+      const cleanFolder = (folder || "uploads").replace(/^\/+|\/+$/g, "");
+      const parts = cleanFolder.split("/");
+
+      if (parts[0] === "staff_avatars") {
+        category = "staff_avatar";
+        entityId = parts[1];
+      } else if (parts[0] === "users") {
+        category = "profile";
+        entityId = parts[1];
+      } else if (parts[0] === "submissions") {
+        category = "submission";
+        entityId = parts[1];
+      } else if (parts[0] === "donors") {
+        category = "donor";
+        entityId = parts[1];
+      } else if (parts[0] === "donor-events") {
+        category = "donor_event";
+        entityId = parts[1];
+      } else if (parts[0] === "settings") {
+        category = "logo";
+        entityId = parts[1];
+      } else if (parts[0] === "banners") {
+        category = "banner";
+        entityId = parts[1];
+      } else if (parts[0] === "chat") {
+        category = "chat";
+        entityId = parts[1];
+      } else if (parts[0] === "categories") {
+        category = "category";
+        entityId = parts[1];
+      }
+
+      const res = await uploadImageToFirebaseStorage(file, {
+        category,
+        entityId,
+      });
+
+      if (res && res.downloadUrl) {
+        return res.downloadUrl;
+      }
+    } catch (uploadErr) {
+      console.warn("[uploadPublicImage] Direct Firebase Storage error, fallback to client reader:", uploadErr);
+    }
   }
 
   // Audio or small file fallback
@@ -3232,7 +3237,7 @@ export async function uploadPublicImage(file: File, _folder = "uploads"): Promis
     const reader = new FileReader();
     reader.onload = () => {
       const res = String(reader.result || "");
-      resolve(res.length <= 295000 ? res : null);
+      resolve(res.length <= 350000 ? res : null);
     };
     reader.onerror = () => resolve(null);
     reader.readAsDataURL(file);

@@ -108,6 +108,7 @@ import {
   type StaffActivityLogEntry,
 } from "@/lib/staff-audit";
 import { AttachmentView, VoiceRecorderButton } from "@/routes/chat";
+import { UniversalImageUploader } from "@/components/UniversalImageUploader";
 import { SecurityPanel } from "@/components/security/SecurityPanel";
 import { RolePermissionsManager } from "@/components/RolePermissionsManager";
 import { WebsiteBrandingManager } from "@/components/WebsiteBrandingManager";
@@ -3759,13 +3760,13 @@ function UsersEditor() {
         const withoutTarget = prev.filter(
           (u) =>
             u.id !== res.id &&
-            u.email.toLowerCase() !== targetEmail.toLowerCase()
+            (u.email || "").toLowerCase() !== targetEmail.toLowerCase()
         );
         const superAdmin = withoutTarget.find(
-          (u) => u.email.toLowerCase() === "mdmahmudulhashan0@gmail.com"
+          (u) => (u.email || "").toLowerCase() === "mdmahmudulhashan0@gmail.com"
         );
         const others = withoutTarget.filter(
-          (u) => u.email.toLowerCase() !== "mdmahmudulhashan0@gmail.com"
+          (u) => (u.email || "").toLowerCase() !== "mdmahmudulhashan0@gmail.com"
         );
         return superAdmin
           ? [superAdmin, optimisticUser, ...others]
@@ -3815,7 +3816,7 @@ function UsersEditor() {
         prev.filter(
           (item) =>
             item.id !== u.id &&
-            (!u.email || item.email.toLowerCase() !== u.email.toLowerCase())
+            (!u.email || (item.email || "").toLowerCase() !== u.email.toLowerCase())
         )
       );
       await deleteUser({ data: { user_id: u.id, email: u.email } });
@@ -4106,7 +4107,7 @@ function UsersEditor() {
             const userCatAccess = allAccessItems.filter(
               (a) =>
                 a.user_id === u.id ||
-                (u.email && a.user_id.toLowerCase() === u.email.toLowerCase())
+                (u.email && (a.user_id || "").toLowerCase() === u.email.toLowerCase())
             );
 
             return (
@@ -4456,7 +4457,7 @@ function UserDetailsModal({
   const userAccessRows = allAccessItems.filter(
     (a) =>
       a.user_id === user.id ||
-      (user.email && a.user_id.toLowerCase() === user.email.toLowerCase())
+      (user.email && (a.user_id || "").toLowerCase() === user.email.toLowerCase())
   );
 
   const mergedAccessSlugs = Array.from(
@@ -5021,7 +5022,7 @@ function AccessEditor() {
   const selectableUsers = users.filter((u) => {
     if (!userSearch.trim()) return true;
     const q = userSearch.trim().toLowerCase();
-    return `${u.profile?.full_name || ""} ${u.email} ${u.profile?.phone || ""} ${u.id}`
+    return `${u.profile?.full_name || ""} ${u.email || ""} ${u.profile?.phone || ""} ${u.id || ""}`
       .toLowerCase()
       .includes(q);
   });
@@ -5296,7 +5297,7 @@ function AccessEditor() {
             const u = users.find(
               (x) =>
                 x.id === targetUid ||
-                (x.email && x.email.toLowerCase() === targetUid.toLowerCase())
+                (x.email && targetUid && x.email.toLowerCase() === targetUid.toLowerCase())
             );
             return (
               <div
@@ -5567,52 +5568,30 @@ function SettingsAdminPanel() {
             </div>
           </div>
 
-          {/* Upload & URL Control Card */}
+          {/* Universal Image Upload Control Card */}
           <div className="space-y-3 rounded-2xl border border-border/80 bg-background/60 p-4">
             <div>
-              <p className="text-xs font-bold text-foreground">পদ্ধতি ১: আসল ইমেজ ফাইল আপলোড</p>
-              <p className="text-[11px] text-muted-foreground">
-                আপনার গ্যালারি বা পিসি থেকে আসল PNG বা JPG ফাইলটি সিলেক্ট করুন — এটি কোনো বিকৃতি ছাড়া সংরক্ষিত হবে।
+              <p className="text-xs font-bold text-foreground">অফিশিয়াল লোগো আপলোড</p>
+              <p className="text-[11px] text-muted-foreground mb-3">
+                মোবাইল গ্যালারি বা ফাইল থেকে আসল PNG/WebP লোগো সিলেক্ট করুন — স্বয়ংক্রিয়ভাবে অপ্টিমাইজ ও Firebase Storage-এ সংরক্ষিত হবে।
               </p>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                onChange={onLogoFile}
-                className="hidden"
+              <UniversalImageUploader
+                variant="card"
+                category="logo"
+                entityId="site_logo"
+                value={customLogo || ""}
+                onChange={(url) => {
+                  if (url) {
+                    void setLogo(url);
+                    toast.success("নতুন লোগো সফলভাবে আপলোড ও আপডেট হয়েছে!");
+                  } else {
+                    void setLogo(null);
+                    toast.success("ডিফল্ট অফিশিয়াল লোগোতে ফিরিয়ে আনা হয়েছে!");
+                  }
+                }}
+                label="লোগো আপলোড বা পরিবর্তন করুন"
+                hint="স্বচ্ছতা (transparency) বজায় রাখা হবে ও ক্লাউডে সিঙ্ক থাকবে"
               />
-              <button
-                type="button"
-                disabled={updatingLogo}
-                onClick={() => fileRef.current?.click()}
-                className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-hero py-2.5 text-xs font-bold text-white shadow transition hover:opacity-95 disabled:opacity-70"
-              >
-                <Upload className="h-4 w-4" />
-                {updatingLogo ? "লোগো প্রসেস হচ্ছে..." : "ফাইল থেকে আসল লোগো আপলোড করুন"}
-              </button>
-            </div>
-
-            <div className="border-t border-border/60 pt-3">
-              <p className="text-xs font-bold text-foreground">পদ্ধতি ২: সরাসরি ইমেজ লিংক (Direct URL)</p>
-              <p className="text-[11px] text-muted-foreground">
-                হোস্টিং বা ড্রাইভের ডিরেক্ট ইমেজ URL পেস্ট করে ১-ক্লিকে সেট করতে পারেন:
-              </p>
-              <form onSubmit={handleApplyLogoUrl} className="mt-2 flex gap-1.5">
-                <input
-                  type="url"
-                  value={logoUrlInput}
-                  onChange={(e) => setLogoUrlInput(e.target.value)}
-                  placeholder="https://example.com/logo.png"
-                  className="flex-1 rounded-xl border border-border bg-card px-3 py-1.5 text-xs outline-none focus:border-primary"
-                />
-                <button
-                  type="submit"
-                  disabled={updatingLogo || !logoUrlInput.trim()}
-                  className="rounded-xl bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground shadow hover:opacity-90 disabled:opacity-50"
-                >
-                  সেট করুন
-                </button>
-              </form>
             </div>
           </div>
         </div>

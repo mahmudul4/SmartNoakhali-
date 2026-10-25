@@ -1,21 +1,34 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Send, CheckCircle2, Upload } from "lucide-react";
+import { ArrowLeft, Send, CheckCircle2 } from "lucide-react";
 import { useCategories } from "@/lib/store";
 import { toast } from "sonner";
-import { useCloudSubmissions, uploadPublicImage } from "@/lib/cloud";
+import { useCloudSubmissions } from "@/lib/cloud";
+import { UniversalImageUploader } from "@/components/UniversalImageUploader";
 
 export const Route = createFileRoute("/submit-info")({
-  head: () => ({ meta: [{ title: "তথ্য দিন — স্মার্ট নোয়াখালী" }, { name: "description", content: "নতুন তথ্য জমা দিন। এডমিন অনুমোদনের পর প্রকাশিত হবে।" }] }),
+  head: () => ({
+    meta: [
+      { title: "তথ্য দিন — স্মার্ট নোয়াখালী" },
+      { name: "description", content: "নতুন তথ্য জমা দিন। এডমিন অনুমোদনের পর প্রকাশিত হবে।" },
+    ],
+  }),
   component: SubmitInfo,
 });
 
 function SubmitInfo() {
   const { categories } = useCategories();
   const [submitted, setSubmitted] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({ category_slug: "", title: "", contact: "", address: "", designation: "", body: "", image_url: "" });
+  const [form, setForm] = useState({
+    category_slug: "",
+    title: "",
+    contact: "",
+    address: "",
+    designation: "",
+    body: "",
+    image_url: "",
+  });
   const { add } = useCloudSubmissions();
 
   useEffect(() => {
@@ -25,23 +38,16 @@ function SubmitInfo() {
         setForm((p) => ({ ...p, category_slug: pre }));
         sessionStorage.removeItem("submit-info:category");
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, []);
-
-  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setUploading(true);
-    const url = await uploadPublicImage(f, "submissions");
-    setUploading(false);
-    if (!url) return toast.error("আপলোড ব্যর্থ");
-    setForm((p) => ({ ...p, image_url: url }));
-    toast.success("ছবি আপলোড হয়েছে");
-  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.category_slug || !form.title || !form.contact || !form.address) return toast.error("ক্যাটাগরি, নাম, ফোন ও ঠিকানা আবশ্যক");
+    if (!form.category_slug || !form.title || !form.contact || !form.address) {
+      return toast.error("ক্যাটাগরি, নাম, ফোন ও ঠিকানা আবশ্যক");
+    }
     setSubmitting(true);
     const res = await add({
       category_slug: form.category_slug,
@@ -66,62 +72,125 @@ function SubmitInfo() {
         </div>
         <h1 className="font-display text-xl font-bold text-primary-deep">ধন্যবাদ!</h1>
         <p className="mt-2 text-sm text-muted-foreground">আপনার তথ্য সফলভাবে জমা হয়েছে।</p>
-        <Link to="/" className="mt-6 inline-block rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground">হোমে ফিরুন</Link>
+        <Link
+          to="/"
+          className="mt-6 inline-block rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm hover:brightness-105"
+        >
+          হোমে ফিরুন
+        </Link>
       </div>
     );
   }
 
   return (
     <div className="mx-auto max-w-3xl px-4 pb-24 pt-4">
-      <Link to="/" className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground"><ArrowLeft className="h-4 w-4" /> হোম</Link>
+      <Link
+        to="/"
+        className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="h-4 w-4" /> হোম
+      </Link>
       <div className="mb-4 rounded-2xl bg-gradient-card p-4 shadow-card">
         <h1 className="font-display text-lg font-bold text-primary-deep">তথ্য দিন</h1>
         <p className="text-xs text-muted-foreground">এডমিন অনুমোদনের পর প্রকাশিত হবে।</p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-3 rounded-2xl bg-card p-4 shadow-card">
+      <form onSubmit={handleSubmit} className="space-y-4 rounded-2xl bg-card p-4 shadow-card">
         <Field label="ক্যাটাগরি *">
-          <select required value={form.category_slug} onChange={(e) => setForm({ ...form, category_slug: e.target.value })} className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm">
+          <select
+            required
+            value={form.category_slug}
+            onChange={(e) => setForm({ ...form, category_slug: e.target.value })}
+            className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
+          >
             <option value="">নির্বাচন করুন</option>
-            {categories.filter((c) => !["submit-info", "admin", "about", "donation", "blood-donor", "chat", "app-download", "board-result"].includes(c.slug)).map((c) => (
-              <option key={c.slug} value={c.slug}>{c.bn}</option>
-            ))}
+            {categories
+              .filter(
+                (c) =>
+                  ![
+                    "submit-info",
+                    "admin",
+                    "about",
+                    "donation",
+                    "blood-donor",
+                    "chat",
+                    "app-download",
+                    "board-result",
+                  ].includes(c.slug)
+              )
+              .map((c) => (
+                <option key={c.slug} value={c.slug}>
+                  {c.bn}
+                </option>
+              ))}
           </select>
         </Field>
-        <Field label="নাম / শিরোনাম *"><input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm" /></Field>
-        <Field label="ফোন নম্বর *"><input required value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} type="tel" className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm" /></Field>
-        <Field label="ঠিকানা *"><input required value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm" /></Field>
-        <Field label="পদবি (ঐচ্ছিক)"><input value={form.designation} onChange={(e) => setForm({ ...form, designation: e.target.value })} className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm" /></Field>
+
+        <Field label="নাম / শিরোনাম *">
+          <input
+            required
+            value={form.title}
+            onChange={(e) => setForm({ ...form, title: e.target.value })}
+            className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
+          />
+        </Field>
+
+        <Field label="ফোন নম্বর *">
+          <input
+            required
+            value={form.contact}
+            onChange={(e) => setForm({ ...form, contact: e.target.value })}
+            type="tel"
+            className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
+          />
+        </Field>
+
+        <Field label="ঠিকানা *">
+          <input
+            required
+            value={form.address}
+            onChange={(e) => setForm({ ...form, address: e.target.value })}
+            className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
+          />
+        </Field>
+
+        <Field label="পদবি (ঐচ্ছিক)">
+          <input
+            value={form.designation}
+            onChange={(e) => setForm({ ...form, designation: e.target.value })}
+            className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
+          />
+        </Field>
+
         <Field label="বিস্তারিত">
-          <textarea value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} rows={4} className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2.5 text-sm" />
+          <textarea
+            value={form.body}
+            onChange={(e) => setForm({ ...form, body: e.target.value })}
+            rows={4}
+            className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
+          />
         </Field>
-        <Field label="ছবি (ঐচ্ছিক)">
-          <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border bg-background px-3 py-3 text-sm">
-            <Upload className="h-4 w-4 text-primary" />
-            <span className="flex-1 text-muted-foreground">{uploading ? "আপলোড হচ্ছে..." : form.image_url ? "ছবি যোগ হয়েছে" : "ছবি বাছাই করুন"}</span>
-            <input type="file" accept="image/*" className="hidden" onChange={onFile} />
+
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold text-primary-deep">
+            ছবি (ঐচ্ছিক — গ্যালারি বা ক্যামেরা থেকে)
           </label>
-          {form.image_url && (
-            <div className="mt-2 flex items-center gap-3">
-              <img
-                src={form.image_url}
-                alt=""
-                className="h-20 w-20 rounded-lg border object-cover"
-                onError={(e) => {
-                  (e.currentTarget as HTMLElement).style.display = "none";
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => setForm({ ...form, image_url: "" })}
-                className="text-xs font-semibold text-destructive hover:underline"
-              >
-                ছবি মুছে ফেলুন
-              </button>
-            </div>
-          )}
-        </Field>
-        <button type="submit" disabled={submitting} className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-hero py-3 font-semibold text-primary-foreground shadow-elevated disabled:opacity-60">
+          <UniversalImageUploader
+            variant="inline"
+            category="submission"
+            entityId={form.category_slug || "general"}
+            value={form.image_url}
+            onChange={(url) => setForm((p) => ({ ...p, image_url: url || "" }))}
+            label="তথ্য সম্পর্কিত ছবি আপলোড করুন"
+            hint="ক্যামেরা বা ফাইল থেকে ছবি নির্বাচন করুন — স্বয়ংক্রিয়ভাবে কম্প্রেস ও Firebase Storage-এ সংরক্ষিত হবে"
+          />
+        </div>
+
+        <button
+          type="submit"
+          disabled={submitting}
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-hero py-3 font-semibold text-primary-foreground shadow-elevated disabled:opacity-60 transition active:scale-[0.99]"
+        >
           <Send className="h-4 w-4" /> {submitting ? "জমা হচ্ছে..." : "জমা দিন"}
         </button>
       </form>
@@ -130,5 +199,10 @@ function SubmitInfo() {
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="block"><span className="mb-1 block text-xs font-medium text-muted-foreground">{label}</span>{children}</label>;
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium text-muted-foreground">{label}</span>
+      {children}
+    </label>
+  );
 }

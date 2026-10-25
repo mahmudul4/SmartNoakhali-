@@ -1,0 +1,101 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == "mdmahmudulhashan0@gmail.com"
+      );
+    }
+    
+    function isStaff() {
+      return isSuperAdmin() || (
+        isSignedIn() && (
+          request.auth.token.email == "mr.bear444plus@gmail.com" ||
+          firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.roles.hasAny(['admin', 'editor', 'moderator'])
+        )
+      );
+    }
+
+    function isImage() {
+      return request.resource.contentType.matches('image/.*')
+        && request.resource.size < 20 * 1024 * 1024;
+    }
+
+    function isMedia() {
+      return (
+        request.resource.contentType.matches('image/.*') ||
+        request.resource.contentType.matches('audio/.*') ||
+        request.resource.contentType.matches('application/pdf')
+      ) && request.resource.size < 20 * 1024 * 1024;
+    }
+
+    // Public readable assets across the portal
+    match /{allImages=**} {
+      allow read: if true;
+    }
+
+    // User profile avatars
+    match /users/{userId}/avatar/{fileName} {
+      allow write: if (isOwner(userId) || isStaff()) && isImage();
+    }
+
+    // Staff avatars
+    match /staff_avatars/{userId}/{fileName} {
+      allow write: if (isOwner(userId) || isStaff()) && isImage();
+    }
+
+    // Citizen submissions / directory listings
+    match /submissions/{subId}/{fileName} {
+      allow write: if isSignedIn() && isImage();
+    }
+
+    // Blood donor profile images
+    match /donors/{donorId}/{fileName} {
+      allow write: if isSignedIn() && isImage();
+    }
+
+    // Blood donation event certificates / photos
+    match /donor-events/{donorId}/{fileName} {
+      allow write: if isSignedIn() && isImage();
+    }
+
+    // Site settings & logo
+    match /settings/{settingKey}/{fileName} {
+      allow write: if isStaff() && isImage();
+    }
+
+    // Branding assets (logos, favicons, PWA icons)
+    match /branding/{fileName} {
+      allow write: if isStaff() && isImage();
+    }
+
+    // Category images
+    match /categories/{categorySlug}/{fileName} {
+      allow write: if isStaff() && isImage();
+    }
+
+    // Emergency banners
+    match /banners/{bannerId}/{fileName} {
+      allow write: if isStaff() && isImage();
+    }
+
+    // Chat attachments (images, voice recordings, PDFs)
+    match /chat/{threadId}/{fileName} {
+      allow write: if isSignedIn() && isMedia();
+    }
+
+    // General fallback uploads
+    match /uploads/{entityId}/{fileName} {
+      allow write: if isSignedIn() && isMedia();
+    }
+  }
+}

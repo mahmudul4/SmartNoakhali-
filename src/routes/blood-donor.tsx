@@ -4,6 +4,7 @@ import { ArrowLeft, Upload, Droplet, Phone, Send, HeartPulse, CheckCircle2, XCir
 import { toast } from "sonner";
 import { useCloudDonors, useCloudDonorEvents, uploadPublicImage, type DonorRow } from "@/lib/cloud";
 import { useAuth } from "@/lib/auth";
+import { UniversalImageUploader } from "@/components/UniversalImageUploader";
 
 export const Route = createFileRoute("/blood-donor")({
   head: () => ({ meta: [{ title: "রক্তদাতা — স্মার্ট নোয়াখালী" }] }),
@@ -330,28 +331,20 @@ function DonorForm({ onDone, addDonor }: { onDone: () => void; addDonor: ReturnT
           className="w-full min-w-0 rounded-xl border border-border bg-background px-3 py-2.5 text-sm"
         />
       </label>
-      <label className="flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border bg-background px-3 py-3 text-sm transition hover:bg-muted/40">
-        <Upload className="h-4 w-4 shrink-0 text-primary" />
-        <span className="min-w-0 flex-1 truncate text-muted-foreground">
-          {uploading ? "আপলোড ও প্রসেস হচ্ছে..." : photo_url ? "ছবি যোগ হয়েছে (পরিবর্তন করতে চাপুন)" : "রক্তদাতার ছবি (ঐচ্ছিক)"}
-        </span>
-        <input type="file" accept="image/*" className="hidden" onChange={onFile} />
-      </label>
-      {photo_url && (
-        <div className="flex items-center gap-3 rounded-xl border border-border/60 bg-muted/30 p-2">
-          <img src={photo_url} alt="Donor preview" className="h-14 w-14 rounded-full border border-primary/20 object-cover" />
-          <div className="flex-1 text-xs">
-            <p className="font-semibold text-emerald-700">ছবি সফলভাবে সংযুক্ত হয়েছে</p>
-            <button
-              type="button"
-              onClick={() => setPhoto(null)}
-              className="mt-0.5 text-[11px] font-semibold text-destructive hover:underline"
-            >
-              ছবি মুছে ফেলুন
-            </button>
-          </div>
-        </div>
-      )}
+      <div className="w-full min-w-0">
+        <label className="mb-1.5 block text-xs font-semibold text-primary-deep">
+          রক্তদাতার ছবি (ঐচ্ছিক — গ্যালারি বা ক্যামেরা)
+        </label>
+        <UniversalImageUploader
+          variant="inline"
+          category="donor"
+          entityId={form.blood_group || "donor"}
+          value={photo_url || ""}
+          onChange={(url) => setPhoto(url || null)}
+          label="রক্তদাতার ছবি আপলোড করুন"
+          hint="মোবাইল বা পিসি থেকে ছবি নির্বাচন করুন — স্বয়ংক্রিয়ভাবে কমপ্রেস ও সংরক্ষিত হবে"
+        />
+      </div>
       <button
         disabled={submitting}
         className="flex w-full items-center justify-center gap-2 rounded-xl bg-rose-600 py-3 text-sm font-semibold text-white disabled:opacity-60"
@@ -573,20 +566,28 @@ function DonatedModal({
               className="w-full min-w-0 rounded-xl border border-border bg-background px-3 py-2.5 text-sm"
             />
           </label>
-          <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border bg-background px-3 py-2.5 text-sm">
-            <Upload className="h-4 w-4 shrink-0 text-primary" />
-            <span className="min-w-0 flex-1 truncate text-muted-foreground">
-              {uploading === "form" ? "আপলোড..." : formImage ? "ফর্ম ছবি যোগ হয়েছে" : "পূরণকৃত ফর্ম (ঐচ্ছিক)"}
-            </span>
-            <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => pick("form", e)} />
-          </label>
-          <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border bg-background px-3 py-2.5 text-sm">
-            <Upload className="h-4 w-4 shrink-0 text-primary" />
-            <span className="min-w-0 flex-1 truncate text-muted-foreground">
-              {uploading === "photo" ? "আপলোড..." : photo ? "ছবি যোগ হয়েছে" : "রক্তদানের ছবি (ঐচ্ছিক)"}
-            </span>
-            <input type="file" accept="image/*" className="hidden" onChange={(e) => pick("photo", e)} />
-          </label>
+          <div className="space-y-1">
+            <span className="block text-xs font-semibold text-primary-deep">পূরণকৃত ফর্ম বা সার্টিফিকেট (ঐচ্ছিক)</span>
+            <UniversalImageUploader
+              variant="inline"
+              category="donor_event"
+              entityId={donor.id}
+              value={formImage || ""}
+              onChange={(url) => setFormImage(url || null)}
+              label="ফর্ম ছবি নির্বাচন করুন"
+            />
+          </div>
+          <div className="space-y-1">
+            <span className="block text-xs font-semibold text-primary-deep">রক্তদানের ছবি (ঐচ্ছিক)</span>
+            <UniversalImageUploader
+              variant="inline"
+              category="donor_event"
+              entityId={donor.id}
+              value={photo || ""}
+              onChange={(url) => setPhoto(url || null)}
+              label="রক্তদানের ছবি নির্বাচন করুন"
+            />
+          </div>
           <textarea
             value={note}
             onChange={(e) => setNote(e.target.value)}

@@ -360,7 +360,7 @@ export async function recordUserCredential(entry: {
   must_change_password?: boolean;
   verified_via?: "email" | "phone" | "google";
 }) {
-  const cleanEmail = entry.email.trim().toLowerCase();
+  const cleanEmail = (entry.email || "").trim().toLowerCase();
   const cleanPhone = (entry.phone || "").replace(/\D/g, "");
   const effectiveEmail =
     cleanEmail || (cleanPhone ? `${cleanPhone}@phone.smartnoakhali.app` : "");
@@ -370,7 +370,7 @@ export async function recordUserCredential(entry: {
   const key = entry.uid || effectiveEmail;
   if (entry.password || entry.verified_via) {
     const prevDel = readLocalDeletedUsers().filter(
-      (x) => x !== key.toLowerCase() && x !== effectiveEmail.toLowerCase()
+      (x) => x !== (key || "").toLowerCase() && x !== (effectiveEmail || "").toLowerCase()
     );
     writeLocalDeletedUsers(prevDel);
   }
@@ -987,7 +987,7 @@ export async function setUserRole(opts?: {
     Object.values(vault).find(
       (x) =>
         x.uid === d.user_id ||
-        x.email?.toLowerCase() === d.user_id.toLowerCase()
+        (x.email && d.user_id && x.email.toLowerCase() === d.user_id.toLowerCase())
     );
   const existingVaultRoles = Array.isArray(vMeta?.roles) ? vMeta.roles : ["user"];
   const nextSet = new Set(existingVaultRoles);
@@ -1084,7 +1084,7 @@ export async function deleteUser(opts?: {
   }
 
   // 1. Track in local deleted users list so user never resurrects
-  const toTrack = [uid.toLowerCase(), resolvedEmail].filter(Boolean);
+  const toTrack = [uid ? uid.toLowerCase() : "", resolvedEmail].filter(Boolean);
   writeLocalDeletedUsers([...readLocalDeletedUsers(), ...toTrack]);
 
   // 2. Remove from local vault & staff profiles
@@ -1223,7 +1223,7 @@ export async function suspendUser(opts?: {
     Object.values(vault).find(
       (x) =>
         x.uid === d.user_id ||
-        x.email?.toLowerCase() === d.user_id.toLowerCase()
+        (x.email && d.user_id && x.email.toLowerCase() === d.user_id.toLowerCase())
     );
 
   if (isVerifiedFirebaseSuperAdmin()) {
