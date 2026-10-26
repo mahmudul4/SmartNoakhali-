@@ -504,7 +504,24 @@ export function useCategories() {
       })
       .catch(() => {});
 
-    // Listen to realtime Firestore updates
+    // Listen directly to the categories config document in Firestore for instant cross-session sync
+    const unsubDirect = onSnapshot(
+      doc(db, "settings", CATEGORIES_CONFIG_ID),
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const parsed = parseCategoryConfig(docSnap.data()?.logo_url);
+          if (parsed) {
+            setItems(parsed);
+            try {
+              localStorage.setItem(LOCAL_CATEGORIES_KEY, JSON.stringify(parsed));
+            } catch {}
+          }
+        }
+      },
+      () => {}
+    );
+
+    // Also listen to settings collection queries for backwards-compatibility
     const q = query(collection(db, "settings"), where("visible", "==", true));
     const unsub = onSnapshot(
       q,
@@ -526,7 +543,10 @@ export function useCategories() {
         // Keep current categories on snapshot error
       }
     );
-    return () => unsub();
+    return () => {
+      unsubDirect();
+      unsub();
+    };
   }, []);
 
   const saveCategories = useCallback(async (nextList: CategoryConfigItem[]) => {
@@ -553,12 +573,13 @@ export function useCategories() {
 
   const addCategory = useCallback(
     async (newCat: Omit<CategoryConfigItem, "sort_order">) => {
-      const cleanSlug = newCat.slug
+      const rawSlug = typeof newCat?.slug === "string" ? newCat.slug : "";
+      const cleanSlug = rawSlug
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9_-]/g, "-");
       if (!cleanSlug) throw new Error("সঠিক ক্যাটাগরি স্লাগ (ইংরেজি অক্ষর) দিন");
-      if (items.some((c) => c.slug === cleanSlug)) {
+      if (items.some((c) => (c?.slug || "").toLowerCase() === cleanSlug)) {
         throw new Error("এই স্লাগের ক্যাটাগরি ইতিমধ্যে আছে");
       }
       const next: CategoryConfigItem[] = [
@@ -718,9 +739,10 @@ export function useStaffProfiles() {
 
   const upsertStaffProfile = useCallback(
     async (entry: Partial<StaffProfileEntry> & { uid: string; email?: string }) => {
+      const entryEmail = (entry.email || "").trim().toLowerCase();
       const existing = profiles[entry.uid] ||
         Object.values(profiles).find(
-          (p) => entry.email && p.email.toLowerCase() === entry.email.toLowerCase()
+          (p) => Boolean(entryEmail && p?.email && typeof p.email === "string" && p.email.trim().toLowerCase() === entryEmail)
         ) || {
           uid: entry.uid,
           email: entry.email || "",
@@ -751,8 +773,8 @@ export function useStaffProfiles() {
         ...profiles,
         [entry.uid]: merged,
       };
-      if (merged.email) {
-        nextMap[merged.email.toLowerCase()] = merged;
+      if (merged.email && typeof merged.email === "string") {
+        nextMap[merged.email.trim().toLowerCase()] = merged;
       }
 
       const serialized = JSON.stringify(nextMap);
@@ -778,21 +800,23 @@ export function useStaffProfiles() {
 
   const getStaffProfile = useCallback(
     (uidOrEmail?: string | null): StaffProfileEntry | null => {
-      if (!uidOrEmail) return null;
+      if (!uidOrEmail || typeof uidOrEmail !== "string") return null;
       const key = uidOrEmail.trim();
+      if (!key) return null;
+      const lowerKey = key.toLowerCase();
       if (profiles[key]) return profiles[key];
-      if (profiles[key.toLowerCase()]) return profiles[key.toLowerCase()];
+      if (profiles[lowerKey]) return profiles[lowerKey];
       const byMatch = Object.values(profiles).find(
         (p) =>
           p.uid === key ||
-          (p.email && p.email.toLowerCase() === key.toLowerCase()) ||
-          (p.username && p.username.toLowerCase() === key.toLowerCase())
+          (Boolean(p?.email && typeof p.email === "string" && p.email.trim().toLowerCase() === lowerKey)) ||
+          (Boolean(p?.username && typeof p.username === "string" && p.username.trim().toLowerCase() === lowerKey))
       );
       if (byMatch) return byMatch;
       if (isSuperAdminEmail(key) || key === "super_admin_mahmudul") {
         return profiles.super_admin_mahmudul || DEFAULT_STAFF_PROFILES.super_admin_mahmudul;
       }
-      if (key.toLowerCase() === REGULAR_ADMIN_EMAIL.toLowerCase()) {
+      if (lowerKey === REGULAR_ADMIN_EMAIL.toLowerCase()) {
         return {
           uid: key,
           email: REGULAR_ADMIN_EMAIL,

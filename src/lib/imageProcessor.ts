@@ -105,7 +105,11 @@ export function validateImageFile(file: File): { ok: boolean; error?: string } {
     "image/svg+xml",
   ];
 
-  if (!file.type.startsWith("image/") && !validMimes.includes(file.type.toLowerCase())) {
+  const fileType = (file?.type || "").trim().toLowerCase();
+  const fileName = (file?.name || "").trim().toLowerCase();
+  const hasImageExt = /\.(jpe?g|png|webp|avif|gif|bmp|svg)$/i.test(fileName);
+
+  if (!fileType.startsWith("image/") && !validMimes.includes(fileType) && !hasImageExt) {
     return {
       ok: false,
       error: "নির্বাচিত ফাইলটি অনুমোদিত ছবি নয়। শুধুমাত্র JPG, PNG, WebP বা GIF ছবি নির্বাচন করুন।",

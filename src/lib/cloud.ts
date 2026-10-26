@@ -184,42 +184,64 @@ function genId(): string {
 }
 
 function getCurrentActorInfo(): { uid: string; isStaff: boolean; isSuper: boolean } {
-  if (auth.currentUser?.uid) {
-    const email = auth.currentUser.email || "";
-    const isSuper = isSuperAdminEmail(email);
-    const isBoot = isBootstrappedAdminEmail(email);
-    return {
-      uid: auth.currentUser.uid,
-      isStaff: isSuper || isBoot,
-      isSuper,
-    };
+  let isSuper = false;
+  let isStaff = false;
+  let resolvedUid = auth.currentUser?.uid || "";
+
+  // 1. Check direct Firebase Auth email
+  if (auth.currentUser?.email) {
+    if (isSuperAdminEmail(auth.currentUser.email)) {
+      isSuper = true;
+      isStaff = true;
+    } else if (isBootstrappedAdminEmail(auth.currentUser.email)) {
+      isStaff = true;
+    }
   }
+
+  // 2. Check Super Admin session flag
   try {
     if (sessionStorage.getItem("sn_super_admin_session_v1") === "true") {
-      return { uid: "super_admin_mahmudul", isStaff: true, isSuper: true };
+      isSuper = true;
+      isStaff = true;
+      if (!resolvedUid) resolvedUid = "super_admin_mahmudul";
     }
+  } catch {}
+
+  // 3. Check Verified User / Staff session flag
+  try {
     const raw = sessionStorage.getItem("sn_verified_user_session_v1");
     if (raw) {
       const parsed = JSON.parse(raw);
       const u = parsed?.user;
       const roles: string[] = Array.isArray(parsed?.roles) ? parsed.roles : [];
-      if (u?.uid) {
-        const isSuper = isSuperAdminEmail(u.email);
-        const isStaff =
-          isSuper ||
-          roles.includes("admin") ||
-          roles.includes("editor") ||
-          roles.includes("moderator");
-        return {
-          uid: String(u.uid).replace(/[^a-zA-Z0-9_-]/g, "_"),
-          isStaff,
-          isSuper,
-        };
+      if (u?.email && isSuperAdminEmail(u.email)) {
+        isSuper = true;
+        isStaff = true;
+      } else if (u?.email && isBootstrappedAdminEmail(u.email)) {
+        isStaff = true;
+      }
+      if (
+        isSuper ||
+        roles.includes("admin") ||
+        roles.includes("editor") ||
+        roles.includes("moderator")
+      ) {
+        isStaff = true;
+      }
+      if (!resolvedUid && u?.uid) {
+        resolvedUid = String(u.uid).replace(/[^a-zA-Z0-9_-]/g, "_");
       }
     }
-  } catch {
-    // ignore
+  } catch {}
+
+  if (resolvedUid) {
+    return {
+      uid: resolvedUid,
+      isStaff,
+      isSuper,
+    };
   }
+
   let anonId = "";
   try {
     anonId = localStorage.getItem("sn_visitor_uid_v1") || "";
@@ -533,14 +555,11 @@ async function syncSingleDocToNativeFirestore(
   id: string,
   item: Record<string, any>
 ): Promise<{ ok: boolean; error?: string }> {
+  await ensureFirebaseAuthUser().catch(() => {});
   const u = auth.currentUser;
-  const isSuperSession =
-    sessionStorage.getItem("sn_super_admin_session_v1") === "true" ||
-    isSuperAdminEmail(u?.email);
-  const isStaffSession =
-    isSuperSession ||
-    sessionStorage.getItem("sn_verified_user_session_v1") !== null ||
-    isBootstrappedAdminEmail(u?.email);
+  const actor = getCurrentActorInfo();
+  const isSuperSession = actor.isSuper;
+  const isStaffSession = actor.isStaff;
 
   try {
     if (u) {

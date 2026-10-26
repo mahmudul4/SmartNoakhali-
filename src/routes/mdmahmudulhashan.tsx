@@ -330,9 +330,9 @@ function AdminLoginForm() {
       );
     }
 
-    const cleanInput = username.trim().toLowerCase();
+    const cleanInput = (username || "").trim().toLowerCase();
     const isSuperInput =
-      cleanInput === SUPER_ADMIN_EMAIL.toLowerCase() ||
+      cleanInput === (SUPER_ADMIN_EMAIL || "").toLowerCase() ||
       cleanInput === "mahmudul" ||
       cleanInput === "mahmud" ||
       cleanInput === "mdmahmudulhashan0";
@@ -1075,7 +1075,7 @@ function MyStaffProfilePanel({ isMainAdmin }: { isMainAdmin: boolean }) {
     (item, idx, arr) =>
       arr.findIndex(
         (x) =>
-          (x.email && item.email && x.email.toLowerCase() === item.email.toLowerCase()) ||
+          (Boolean(x?.email && item?.email && typeof x.email === "string" && typeof item.email === "string" && x.email.trim().toLowerCase() === item.email.trim().toLowerCase())) ||
           x.uid === item.uid
       ) === idx
   );
@@ -1700,9 +1700,13 @@ function CategoriesEditor() {
     visible: true,
   });
 
-  const filtered = rawItems.filter((c) =>
-    `${c.bn} ${c.en} ${c.slug} ${c.description}`.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = rawItems.filter((c) => {
+    const q = (search || "").trim().toLowerCase();
+    if (!q) return true;
+    return `${c?.bn || ""} ${c?.en || ""} ${c?.slug || ""} ${c?.description || ""}`
+      .toLowerCase()
+      .includes(q);
+  });
 
   function startEdit(c: CategoryConfigItem) {
     setEditingSlug(c.slug);
@@ -2126,9 +2130,10 @@ function SubmissionsAdminPanel({ subs }: { subs: ReturnType<typeof useCloudSubmi
   const filtered = subs.items.filter((s) => {
     if (catFilter !== "all" && s.category_slug !== catFilter) return false;
     if (statusFilter !== "all" && s.status !== statusFilter) return false;
-    if (query.trim()) {
-      const hay = `${s.title} ${s.contact ?? ""} ${s.address ?? ""} ${s.designation ?? ""} ${s.category_slug}`.toLowerCase();
-      if (!hay.includes(query.toLowerCase())) return false;
+    const q = (query || "").trim().toLowerCase();
+    if (q) {
+      const hay = `${s.title ?? ""} ${s.contact ?? ""} ${s.address ?? ""} ${s.designation ?? ""} ${s.category_slug ?? ""}`.toLowerCase();
+      if (!hay.includes(q)) return false;
     }
     return true;
   });
@@ -2671,9 +2676,9 @@ function DonationsAdminPanel({ dons }: { dons: ReturnType<typeof useCloudDonatio
 
   const filtered = dons.items.filter((d) => {
     if (statusFilter !== "all" && d.status !== statusFilter) return false;
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      const hay = `${d.sender_name} ${d.sender_phone ?? ""} ${d.trx_id} ${d.method} ${d.note ?? ""}`.toLowerCase();
+    const q = (search || "").trim().toLowerCase();
+    if (q) {
+      const hay = `${d.sender_name ?? ""} ${d.sender_phone ?? ""} ${d.trx_id ?? ""} ${d.method ?? ""} ${d.note ?? ""}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -2877,9 +2882,9 @@ function DonorsAdminPanel({ donors }: { donors: ReturnType<typeof useCloudDonors
   const filtered = donors.items.filter((d) => {
     if (statusFilter !== "all" && d.status !== statusFilter) return false;
     if (bloodFilter !== "all" && d.blood_group !== bloodFilter) return false;
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      const hay = `${d.full_name} ${d.phone} ${d.blood_group} ${d.address ?? ""}`.toLowerCase();
+    const q = (search || "").trim().toLowerCase();
+    if (q) {
+      const hay = `${d.full_name ?? ""} ${d.phone ?? ""} ${d.blood_group ?? ""} ${d.address ?? ""}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -3757,10 +3762,11 @@ function UsersEditor() {
 
       // Optimistically add to users list so it never flickers or disappears
       setUsers((prev) => {
+        const lowerTargetEmail = (targetEmail || "").trim().toLowerCase();
         const withoutTarget = prev.filter(
           (u) =>
             u.id !== res.id &&
-            (u.email || "").toLowerCase() !== targetEmail.toLowerCase()
+            (u.email || "").toLowerCase() !== lowerTargetEmail
         );
         const superAdmin = withoutTarget.find(
           (u) => (u.email || "").toLowerCase() === "mdmahmudulhashan0@gmail.com"
@@ -3816,7 +3822,7 @@ function UsersEditor() {
         prev.filter(
           (item) =>
             item.id !== u.id &&
-            (!u.email || (item.email || "").toLowerCase() !== u.email.toLowerCase())
+            (!u?.email || (item?.email || "").toLowerCase() !== (u?.email || "").toLowerCase())
         )
       );
       await deleteUser({ data: { user_id: u.id, email: u.email } });
@@ -3918,9 +3924,9 @@ function UsersEditor() {
     )
       return false;
 
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      const hay = `${u.email} ${u.profile?.full_name ?? ""} ${u.profile?.phone ?? ""} ${u.profile?.username ?? ""} ${u.id}`.toLowerCase();
+    const q = (search || "").trim().toLowerCase();
+    if (q) {
+      const hay = `${u.email ?? ""} ${u.profile?.full_name ?? ""} ${u.profile?.phone ?? ""} ${u.profile?.username ?? ""} ${u.id ?? ""}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -4107,7 +4113,7 @@ function UsersEditor() {
             const userCatAccess = allAccessItems.filter(
               (a) =>
                 a.user_id === u.id ||
-                (u.email && (a.user_id || "").toLowerCase() === u.email.toLowerCase())
+                (Boolean(u?.email && a?.user_id && typeof u.email === "string" && typeof a.user_id === "string" && a.user_id.trim().toLowerCase() === u.email.trim().toLowerCase()))
             );
 
             return (
@@ -4457,7 +4463,7 @@ function UserDetailsModal({
   const userAccessRows = allAccessItems.filter(
     (a) =>
       a.user_id === user.id ||
-      (user.email && (a.user_id || "").toLowerCase() === user.email.toLowerCase())
+      (Boolean(user?.email && a?.user_id && typeof user.email === "string" && typeof a.user_id === "string" && a.user_id.trim().toLowerCase() === user.email.trim().toLowerCase()))
   );
 
   const mergedAccessSlugs = Array.from(
@@ -5020,9 +5026,9 @@ function AccessEditor() {
   })();
 
   const selectableUsers = users.filter((u) => {
-    if (!userSearch.trim()) return true;
-    const q = userSearch.trim().toLowerCase();
-    return `${u.profile?.full_name || ""} ${u.email || ""} ${u.profile?.phone || ""} ${u.id || ""}`
+    const q = (userSearch || "").trim().toLowerCase();
+    if (!q) return true;
+    return `${u?.profile?.full_name || ""} ${u?.email || ""} ${u?.profile?.phone || ""} ${u?.id || ""}`
       .toLowerCase()
       .includes(q);
   });
@@ -5297,7 +5303,7 @@ function AccessEditor() {
             const u = users.find(
               (x) =>
                 x.id === targetUid ||
-                (x.email && targetUid && x.email.toLowerCase() === targetUid.toLowerCase())
+                (Boolean(x?.email && targetUid && typeof x.email === "string" && typeof targetUid === "string" && x.email.trim().toLowerCase() === targetUid.trim().toLowerCase()))
             );
             return (
               <div
@@ -6952,9 +6958,9 @@ function ChatThreadsAdmin() {
     if (filterMode === "unread" && !(Number(t.staff_unread) > 0)) return false;
     if (filterMode === "replied" && Number(t.staff_unread) > 0) return false;
 
-    const q = search.trim().toLowerCase();
+    const q = (search || "").trim().toLowerCase();
     if (!q) return true;
-    return [t.email, t.profile?.full_name, t.profile?.username, t.profile?.phone, t.last_message_preview]
+    return [t?.email, t?.profile?.full_name, t?.profile?.username, t?.profile?.phone, t?.last_message_preview]
       .filter(Boolean)
       .join(" ")
       .toLowerCase()
@@ -7594,8 +7600,8 @@ function StaffActivityAuditPanel({
     if (actionFilter !== "all" && l.action_type !== actionFilter) return false;
     if (moduleFilter !== "all" && l.module !== moduleFilter) return false;
 
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
+    const q = (search || "").trim().toLowerCase();
+    if (q) {
       const hay = [
         l.actor_name,
         l.actor_email,

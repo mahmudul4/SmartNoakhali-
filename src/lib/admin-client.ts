@@ -987,7 +987,7 @@ export async function setUserRole(opts?: {
     Object.values(vault).find(
       (x) =>
         x.uid === d.user_id ||
-        (x.email && d.user_id && x.email.toLowerCase() === d.user_id.toLowerCase())
+        (Boolean(x?.email && d?.user_id && typeof x.email === "string" && typeof d.user_id === "string" && x.email.toLowerCase() === d.user_id.toLowerCase()))
     );
   const existingVaultRoles = Array.isArray(vMeta?.roles) ? vMeta.roles : ["user"];
   const nextSet = new Set(existingVaultRoles);
@@ -1063,13 +1063,8 @@ export async function deleteUser(opts?: {
   if (!uid && !rawEmail) throw new Error("Missing user_id");
 
   const vault = readLocalVault();
-  const resolvedEmail = (
-    rawEmail ||
-    vault[uid]?.email ||
-    (uid === "admin_mr_bear" ? REGULAR_ADMIN_EMAIL : "")
-  )
-    .trim()
-    .toLowerCase();
+  const rawEmailStr = (rawEmail || (uid && vault[uid]?.email) || (uid === "admin_mr_bear" ? REGULAR_ADMIN_EMAIL : "") || "");
+  const resolvedEmail = String(rawEmailStr).trim().toLowerCase();
 
   if (
     isProtectedMainSuperAdmin({
@@ -1223,7 +1218,7 @@ export async function suspendUser(opts?: {
     Object.values(vault).find(
       (x) =>
         x.uid === d.user_id ||
-        (x.email && d.user_id && x.email.toLowerCase() === d.user_id.toLowerCase())
+        (Boolean(x?.email && d?.user_id && typeof x.email === "string" && typeof d.user_id === "string" && x.email.toLowerCase() === d.user_id.toLowerCase()))
     );
 
   if (isVerifiedFirebaseSuperAdmin()) {
