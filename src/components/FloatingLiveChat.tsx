@@ -696,6 +696,9 @@ export function FloatingLiveChat() {
                         <img
                           src={staffPhoto}
                           alt={staffName}
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = logo;
+                          }}
                           className="h-7 w-7 shrink-0 rounded-full border border-primary/30 bg-white object-cover shadow-sm"
                         />
                       )}

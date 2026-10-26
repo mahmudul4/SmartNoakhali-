@@ -89,6 +89,7 @@ export function UniversalImageUploader({
   const isMountedRef = useRef<boolean>(true);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  const [instantPreview, setInstantPreview] = useState<string | null>(null);
   const [lifecycle, setLifecycle] = useState<UploadLifecycle>("idle");
   const [progress, setProgress] = useState<number>(0);
   const [stats, setStats] = useState<ProcessedImageResult | null>(null);
@@ -101,12 +102,24 @@ export function UniversalImageUploader({
     lifecycle === "uploading" ||
     lifecycle === "saving";
 
+  const instantPreviewRef = useRef<string | null>(null);
+
+  // Effective displayed image: instant local blob preview while processing, or saved remote value
+  const displayImage = instantPreview || value;
+
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
       if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
+        try {
+          abortControllerRef.current.abort();
+        } catch (_) {}
+        abortControllerRef.current = null;
+      }
+      if (instantPreviewRef.current) {
+        URL.revokeObjectURL(instantPreviewRef.current);
+        instantPreviewRef.current = null;
       }
     };
   }, []);
@@ -114,9 +127,16 @@ export function UniversalImageUploader({
   const handleCancel = (e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
+      try {
+        abortControllerRef.current.abort();
+      } catch (_) {}
       abortControllerRef.current = null;
     }
+    if (instantPreviewRef.current) {
+      URL.revokeObjectURL(instantPreviewRef.current);
+      instantPreviewRef.current = null;
+    }
+    setInstantPreview(null);
     if (isMountedRef.current) {
       setLifecycle("idle");
       setProgress(0);
@@ -129,13 +149,24 @@ export function UniversalImageUploader({
     e.target.value = ""; // reset input so same file can be re-selected
     if (!file) return;
 
+    // Fast Instant Preview
+    if (instantPreviewRef.current) {
+      URL.revokeObjectURL(instantPreviewRef.current);
+      instantPreviewRef.current = null;
+    }
+    const localUrl = URL.createObjectURL(file);
+    instantPreviewRef.current = localUrl;
+    setInstantPreview(localUrl);
+
     setLastSelectedFile(file);
     await startUploadProcess(file);
   };
 
   const startUploadProcess = async (file: File) => {
     if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
+      try {
+        abortControllerRef.current.abort();
+      } catch (_) {}
     }
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -171,6 +202,12 @@ export function UniversalImageUploader({
       onChange(result.downloadUrl);
       toast.success("ছবি সফলভাবে আপলোড ও অপ্টিমাইজ হয়েছে!");
 
+      if (instantPreviewRef.current) {
+        URL.revokeObjectURL(instantPreviewRef.current);
+        instantPreviewRef.current = null;
+      }
+      setInstantPreview(null);
+
       // If requested, clean up old storage image in background safely
       if (autoDeleteOld && oldUrl && oldUrl !== result.downloadUrl) {
         void deleteStorageImageByUrl(oldUrl);
@@ -202,6 +239,11 @@ export function UniversalImageUploader({
     if (disabled || isProcessing) return;
 
     const oldUrl = value;
+    if (instantPreviewRef.current) {
+      URL.revokeObjectURL(instantPreviewRef.current);
+      instantPreviewRef.current = null;
+    }
+    setInstantPreview(null);
     onChange(null);
     setStats(null);
     setErrorMsg(null);
@@ -251,9 +293,9 @@ export function UniversalImageUploader({
             onClick={() => !disabled && !isProcessing && fileInputRef.current?.click()}
             title="গ্যালারি বা ক্যামেরা থেকে ছবি পরিবর্তন করুন"
           >
-            {value ? (
+            {displayImage ? (
               <img
-                src={value}
+                src={displayImage}
                 alt={label || "Avatar"}
                 className="h-full w-full object-cover bg-white"
                 onError={(e) => {
@@ -289,7 +331,7 @@ export function UniversalImageUploader({
           </div>
 
           {/* Remove Button Badge */}
-          {value && !disabled && !isProcessing && (
+          {displayImage && !disabled && !isProcessing && (
             <button
               type="button"
               onClick={handleRemove}
@@ -310,7 +352,7 @@ export function UniversalImageUploader({
             onClick={() => fileInputRef.current?.click()}
             className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline disabled:opacity-50"
           >
-            <Camera className="h-3 w-3" /> {value ? "ছবি পরিবর্তন করুন" : "ছবি যুক্ত করুন"}
+            <Camera className="h-3 w-3" /> {displayImage ? "ছবি পরিবর্তন করুন" : "ছবি যুক্ত করুন"}
           </button>
           {isProcessing && (
             <p className="mt-1 text-[10px] text-primary font-medium animate-pulse">
@@ -350,8 +392,8 @@ export function UniversalImageUploader({
           }`}
           title="ছবি নির্বাচন করুন"
         >
-          {value ? (
-            <img src={value} alt="Preview" className="h-full w-full object-cover" />
+          {displayImage ? (
+            <img src={displayImage} alt="Preview" className="h-full w-full object-cover" />
           ) : (
             <FileImage className="h-5 w-5 text-muted-foreground" />
           )}
@@ -372,7 +414,7 @@ export function UniversalImageUploader({
               className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-muted disabled:opacity-50"
             >
               <Upload className="h-3 w-3 text-primary" />
-              {value ? "পরিবর্তন" : "ছবি আপলোড"}
+              {displayImage ? "পরিবর্তন" : "ছবি আপলোড"}
             </button>
             {isProcessing && (
               <button
@@ -383,7 +425,7 @@ export function UniversalImageUploader({
                 <X className="h-3 w-3" /> বাতিল
               </button>
             )}
-            {value && !disabled && !isProcessing && (
+            {displayImage && !disabled && !isProcessing && (
               <button
                 type="button"
                 onClick={handleRemove}
@@ -443,15 +485,15 @@ export function UniversalImageUploader({
         className={`group relative flex flex-col items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed transition-all ${
           aspectRatioClass || "min-h-[140px] w-full"
         } ${
-          value
+          displayImage
             ? "border-primary/40 bg-card"
             : "border-border bg-muted/20 hover:border-primary/60 hover:bg-muted/40"
         } ${disabled ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
       >
-        {value ? (
+        {displayImage ? (
           <>
             <img
-              src={value}
+              src={displayImage}
               alt={label || "Uploaded Image"}
               className="h-full w-full object-contain p-2"
               onError={(e) => {

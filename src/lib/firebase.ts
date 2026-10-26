@@ -57,6 +57,8 @@ export const db = initFirestoreInstance();
 export { enableNetwork, disableNetwork };
 export const auth = getAuth(app);
 export const storage = getStorage(app);
+storage.maxUploadRetryTime = 10000;
+storage.maxOperationRetryTime = 10000;
 
 let anonAuthPromise: Promise<User | null> | null = null;
 /**

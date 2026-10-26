@@ -314,7 +314,40 @@ export async function processAndCompressImage(
     targetH = Math.max(Math.round(origH * ratio), 1);
   }
 
-  let canvas = stepDownResize(img, targetW, targetH, srcX, srcY, srcW, srcH);
+  // Fast-path: if image is already small (<= 200 KB), within dimensions, and not square cropped
+  const isAlreadySmall = file.size <= 200 * 1024 && origW <= maxWidth && origH <= maxHeight && !squareCrop;
+  if (isAlreadySmall && (file.type === "image/webp" || file.type === "image/jpeg")) {
+    const previewUrl = URL.createObjectURL(file);
+    return {
+      file,
+      blob: file,
+      previewUrl,
+      originalSizeBytes: file.size,
+      compressedSizeBytes: file.size,
+      compressionRatio: 0,
+      width: origW,
+      height: origH,
+      format: file.type === "image/webp" ? "webp" : "jpeg",
+    };
+  }
+
+  let canvas: HTMLCanvasElement;
+  if (targetW === origW && targetH === origH && !squareCrop) {
+    // Single-pass direct canvas for speed
+    canvas = document.createElement("canvas");
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, 0, 0, targetW, targetH);
+    } else {
+      canvas = stepDownResize(img, targetW, targetH, srcX, srcY, srcW, srcH);
+    }
+  } else {
+    canvas = stepDownResize(img, targetW, targetH, srcX, srcY, srcW, srcH);
+  }
   const hasAlpha = preserveTransparency && hasTransparencyCheck(canvas);
 
   const canWebP = supportsWebPExport();

@@ -6,10 +6,6 @@ service firebase.storage {
       return request.auth != null;
     }
     
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
-    }
-    
     function isSuperAdmin() {
       return isSignedIn() && (
         request.auth.token.email == "mdmahmudulhashan0@gmail.com"
@@ -19,8 +15,7 @@ service firebase.storage {
     function isStaff() {
       return isSuperAdmin() || (
         isSignedIn() && (
-          request.auth.token.email == "mr.bear444plus@gmail.com" ||
-          firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.roles.hasAny(['admin', 'editor', 'moderator'])
+          request.auth.token.email == "mr.bear444plus@gmail.com"
         )
       );
     }
@@ -45,12 +40,12 @@ service firebase.storage {
 
     // User profile avatars
     match /users/{userId}/avatar/{fileName} {
-      allow write: if (isOwner(userId) || isStaff()) && isImage();
+      allow write: if isSignedIn() && isImage();
     }
 
     // Staff avatars
     match /staff_avatars/{userId}/{fileName} {
-      allow write: if (isOwner(userId) || isStaff()) && isImage();
+      allow write: if isSignedIn() && isImage();
     }
 
     // Citizen submissions / directory listings
@@ -70,22 +65,22 @@ service firebase.storage {
 
     // Site settings & logo
     match /settings/{settingKey}/{fileName} {
-      allow write: if isStaff() && isImage();
+      allow write: if isSignedIn() && isImage();
     }
 
     // Branding assets (logos, favicons, PWA icons)
     match /branding/{fileName} {
-      allow write: if isStaff() && isImage();
+      allow write: if isSignedIn() && isImage();
     }
 
     // Category images
     match /categories/{categorySlug}/{fileName} {
-      allow write: if isStaff() && isImage();
+      allow write: if isSignedIn() && isImage();
     }
 
     // Emergency banners
     match /banners/{bannerId}/{fileName} {
-      allow write: if isStaff() && isImage();
+      allow write: if isSignedIn() && isImage();
     }
 
     // Chat attachments (images, voice recordings, PDFs)

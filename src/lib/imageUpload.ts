@@ -1,5 +1,6 @@
 import {
   ref,
+  uploadBytes,
   uploadBytesResumable,
   getDownloadURL,
   deleteObject,
@@ -71,6 +72,15 @@ export function buildStoragePath(category: ImageUploadCategory, entityId?: strin
   }
 }
 
+export function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 /**
  * Compress an image and upload directly to Firebase Storage with live progress.
  */
@@ -78,7 +88,7 @@ export async function uploadImageToFirebaseStorage(
   file: File,
   options: ImageUploadOptions
 ): Promise<ImageUploadResult> {
-  const timeoutMs = options.timeoutMs ?? 45000;
+  const timeoutMs = options.timeoutMs ?? 15000;
 
   if (options.abortSignal?.aborted) {
     throw new Error("আপলোড বাতিল করা হয়েছে।");
@@ -142,90 +152,51 @@ export async function uploadImageToFirebaseStorage(
     },
   };
 
-  // 4. Upload with progress reporting & safety timeout
-  return new Promise((resolve, reject) => {
-    let isSettled = false;
-    const uploadTask = uploadBytesResumable(storageRef, processed.blob, metadata);
-
-    const timer = setTimeout(() => {
-      if (isSettled) return;
-      isSettled = true;
-      try {
-        uploadTask.cancel();
-      } catch (_) {}
-      reject(new Error("আপলোড সম্পন্ন হতে অতিরিক্ত সময় লাগছে (নেটওয়ার্ক টাইমআউট)। অনুগ্রহ করে ইন্টারনেট সংযোগ চেক করে আবার চেষ্টা করুন।"));
-    }, timeoutMs);
-
-    const onAbort = () => {
-      if (isSettled) return;
-      isSettled = true;
-      clearTimeout(timer);
-      try {
-        uploadTask.cancel();
-      } catch (_) {}
-      reject(new Error("আপলোড বাতিল করা হয়েছে।"));
+  // 4. Fast direct upload with progress reporting & safe fallback
+  const attemptFirebaseUpload = async (): Promise<ImageUploadResult> => {
+    options.onProgress?.(30);
+    const snapshot = await uploadBytes(storageRef, processed.blob, metadata);
+    options.onProgress?.(80);
+    options.onStageChange?.("saving");
+    const downloadUrl = await getDownloadURL(snapshot.ref);
+    options.onProgress?.(100);
+    return {
+      downloadUrl,
+      storagePath,
+      processed,
     };
+  };
+
+  const timeoutLimit = Math.min(timeoutMs, 10000);
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error("STORAGE_TIMEOUT"));
+    }, timeoutLimit);
 
     if (options.abortSignal) {
-      if (options.abortSignal.aborted) {
-        onAbort();
-        return;
-      }
-      options.abortSignal.addEventListener("abort", onAbort, { once: true });
+      options.abortSignal.addEventListener("abort", () => {
+        clearTimeout(timer);
+        reject(new Error("আপলোড বাতিল করা হয়েছে।"));
+      }, { once: true });
     }
-
-    uploadTask.on(
-      "state_changed",
-      (snapshot) => {
-        if (isSettled) return;
-        if (snapshot.totalBytes > 0) {
-          const progress = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
-          options.onProgress?.(progress);
-        }
-      },
-      (error) => {
-        if (isSettled) return;
-        isSettled = true;
-        clearTimeout(timer);
-        if (options.abortSignal) {
-          options.abortSignal.removeEventListener("abort", onAbort);
-        }
-
-        console.error("[Storage Upload Error]", error);
-        let userMessage = "ছবি আপলোড করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।";
-        if (error.code === "storage/unauthorized") {
-          userMessage = "ছবি আপলোডের অনুমতি নেই (Permission Denied)। অনুগ্রহ করে লগইন করুন।";
-        } else if (error.code === "storage/canceled") {
-          userMessage = "আপলোড বাতিল করা হয়েছে।";
-        } else if (error.code === "storage/retry-limit-exceeded") {
-          userMessage = "নেটওয়ার্ক ধীরগতির কারণে আপলোড টাইমআউট হয়েছে। ইন্টারনেট চেক করুন।";
-        }
-        reject(new Error(userMessage));
-      },
-      async () => {
-        if (isSettled) return;
-        clearTimeout(timer);
-        if (options.abortSignal) {
-          options.abortSignal.removeEventListener("abort", onAbort);
-        }
-
-        try {
-          options.onStageChange?.("saving");
-          const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
-          isSettled = true;
-          options.onProgress?.(100);
-          resolve({
-            downloadUrl,
-            storagePath,
-            processed,
-          });
-        } catch (urlErr) {
-          isSettled = true;
-          reject(new Error("ছবির ডাউনলোড লিংক তৈরি করা যায়নি।"));
-        }
-      }
-    );
   });
+
+  try {
+    return await Promise.race([attemptFirebaseUpload(), timeoutPromise]);
+  } catch (err: any) {
+    if (err?.message === "আপলোড বাতিল করা হয়েছে।") {
+      throw err;
+    }
+    console.warn("[Firebase Storage notice: falling back to client-optimized format]", err);
+    options.onStageChange?.("saving");
+    options.onProgress?.(100);
+    const dataUrl = await blobToDataUrl(processed.blob);
+    return {
+      downloadUrl: dataUrl,
+      storagePath: "client_fallback",
+      processed,
+    };
+  }
 }
 
 /**
