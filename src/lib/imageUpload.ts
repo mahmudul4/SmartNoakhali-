@@ -25,6 +25,9 @@ export interface ImageUploadOptions {
   entityId?: string; // e.g. uid, categorySlug, submissionId, donorId, threadId
   compression?: CompressionOptions;
   onProgress?: (progressPercent: number) => void;
+  onStageChange?: (stage: "validating" | "compressing" | "uploading" | "saving") => void;
+  timeoutMs?: number;
+  abortSignal?: AbortSignal;
   customPath?: string;
 }
 
@@ -75,10 +78,24 @@ export async function uploadImageToFirebaseStorage(
   file: File,
   options: ImageUploadOptions
 ): Promise<ImageUploadResult> {
+  const timeoutMs = options.timeoutMs ?? 45000;
+
+  if (options.abortSignal?.aborted) {
+    throw new Error("আপলোড বাতিল করা হয়েছে।");
+  }
+
+  // 1. Validating
+  options.onStageChange?.("validating");
+
   // 1. Ensure authentication session exists (signs in anonymously if visitor)
   const fbUser = await ensureFirebaseAuthUser();
 
+  if (options.abortSignal?.aborted) {
+    throw new Error("আপলোড বাতিল করা হয়েছে।");
+  }
+
   // 2. Compress & optimize the image
+  options.onStageChange?.("compressing");
   const compressionPreset =
     options.compression?.preset ||
     (options.category === "profile" || options.category === "staff_avatar"
@@ -96,7 +113,12 @@ export async function uploadImageToFirebaseStorage(
     ...options.compression,
   });
 
+  if (options.abortSignal?.aborted) {
+    throw new Error("আপলোড বাতিল করা হয়েছে।");
+  }
+
   // 3. Build target Firebase Storage reference
+  options.onStageChange?.("uploading");
   const resolvedEntityId =
     options.entityId ||
     (options.category === "profile" || options.category === "staff_avatar"
@@ -120,19 +142,55 @@ export async function uploadImageToFirebaseStorage(
     },
   };
 
-  // 4. Upload with progress reporting
+  // 4. Upload with progress reporting & safety timeout
   return new Promise((resolve, reject) => {
+    let isSettled = false;
     const uploadTask = uploadBytesResumable(storageRef, processed.blob, metadata);
+
+    const timer = setTimeout(() => {
+      if (isSettled) return;
+      isSettled = true;
+      try {
+        uploadTask.cancel();
+      } catch (_) {}
+      reject(new Error("আপলোড সম্পন্ন হতে অতিরিক্ত সময় লাগছে (নেটওয়ার্ক টাইমআউট)। অনুগ্রহ করে ইন্টারনেট সংযোগ চেক করে আবার চেষ্টা করুন।"));
+    }, timeoutMs);
+
+    const onAbort = () => {
+      if (isSettled) return;
+      isSettled = true;
+      clearTimeout(timer);
+      try {
+        uploadTask.cancel();
+      } catch (_) {}
+      reject(new Error("আপলোড বাতিল করা হয়েছে।"));
+    };
+
+    if (options.abortSignal) {
+      if (options.abortSignal.aborted) {
+        onAbort();
+        return;
+      }
+      options.abortSignal.addEventListener("abort", onAbort, { once: true });
+    }
 
     uploadTask.on(
       "state_changed",
       (snapshot) => {
+        if (isSettled) return;
         if (snapshot.totalBytes > 0) {
           const progress = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
           options.onProgress?.(progress);
         }
       },
       (error) => {
+        if (isSettled) return;
+        isSettled = true;
+        clearTimeout(timer);
+        if (options.abortSignal) {
+          options.abortSignal.removeEventListener("abort", onAbort);
+        }
+
         console.error("[Storage Upload Error]", error);
         let userMessage = "ছবি আপলোড করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।";
         if (error.code === "storage/unauthorized") {
@@ -145,8 +203,16 @@ export async function uploadImageToFirebaseStorage(
         reject(new Error(userMessage));
       },
       async () => {
+        if (isSettled) return;
+        clearTimeout(timer);
+        if (options.abortSignal) {
+          options.abortSignal.removeEventListener("abort", onAbort);
+        }
+
         try {
+          options.onStageChange?.("saving");
           const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
+          isSettled = true;
           options.onProgress?.(100);
           resolve({
             downloadUrl,
@@ -154,6 +220,7 @@ export async function uploadImageToFirebaseStorage(
             processed,
           });
         } catch (urlErr) {
+          isSettled = true;
           reject(new Error("ছবির ডাউনলোড লিংক তৈরি করা যায়নি।"));
         }
       }

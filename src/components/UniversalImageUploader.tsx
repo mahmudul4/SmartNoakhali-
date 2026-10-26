@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import {
   Upload,
   Camera,
@@ -9,6 +9,7 @@ import {
   AlertCircle,
   FileImage,
   Sparkles,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -23,6 +24,15 @@ import {
 } from "@/lib/imageProcessor";
 
 export type UploaderVariant = "avatar" | "card" | "inline" | "dropzone";
+
+export type UploadLifecycle =
+  | "idle"
+  | "validating"
+  | "compressing"
+  | "uploading"
+  | "saving"
+  | "success"
+  | "error";
 
 export interface UniversalImageUploaderProps {
   value?: string | null;
@@ -39,6 +49,23 @@ export interface UniversalImageUploaderProps {
   placeholderIcon?: React.ReactNode;
   autoDeleteOld?: boolean;
   className?: string;
+}
+
+function getStageBengaliText(stage: UploadLifecycle, progress: number): string {
+  switch (stage) {
+    case "validating":
+      return "ছবি যাচাই করা হচ্ছে...";
+    case "compressing":
+      return "সাইজ ও রেজোলিউশন অপ্টিমাইজ হচ্ছে...";
+    case "uploading":
+      return `ক্লাউড স্টোরেজে আপলোড হচ্ছে (${progress}%)...`;
+    case "saving":
+      return "ডাউনলোড লিংক প্রস্তুত করা হচ্ছে...";
+    case "success":
+      return "সফলভাবে আপলোড সম্পন্ন হয়েছে!";
+    default:
+      return "প্রসেসিং হচ্ছে...";
+  }
 }
 
 export function UniversalImageUploader({
@@ -59,15 +86,47 @@ export function UniversalImageUploader({
 }: UniversalImageUploaderProps) {
   const displayHint = description || hint;
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const isMountedRef = useRef<boolean>(true);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const [lifecycle, setLifecycle] = useState<UploadLifecycle>("idle");
   const [progress, setProgress] = useState<number>(0);
   const [stats, setStats] = useState<ProcessedImageResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [lastSelectedFile, setLastSelectedFile] = useState<File | null>(null);
 
+  const isProcessing =
+    lifecycle === "validating" ||
+    lifecycle === "compressing" ||
+    lifecycle === "uploading" ||
+    lifecycle === "saving";
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
+  const handleCancel = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    if (isMountedRef.current) {
+      setLifecycle("idle");
+      setProgress(0);
+      toast.info("ছবি আপলোড বাতিল করা হয়েছে।");
+    }
+  };
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    e.target.value = ""; // reset input so same file can be re-selected if desired
+    e.target.value = ""; // reset input so same file can be re-selected
     if (!file) return;
 
     setLastSelectedFile(file);
@@ -75,8 +134,14 @@ export function UniversalImageUploader({
   };
 
   const startUploadProcess = async (file: File) => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setErrorMsg(null);
-    setIsProcessing(true);
+    setLifecycle("validating");
     setProgress(5);
 
     try {
@@ -85,12 +150,24 @@ export function UniversalImageUploader({
         category,
         entityId,
         compression,
+        abortSignal: controller.signal,
+        timeoutMs: 45000,
+        onStageChange: (stage) => {
+          if (isMountedRef.current) {
+            setLifecycle(stage);
+          }
+        },
         onProgress: (pct) => {
-          setProgress(Math.max(10, pct));
+          if (isMountedRef.current) {
+            setProgress(Math.max(10, pct));
+          }
         },
       });
 
+      if (!isMountedRef.current) return;
+
       setStats(result.processed);
+      setLifecycle("success");
       onChange(result.downloadUrl);
       toast.success("ছবি সফলভাবে আপলোড ও অপ্টিমাইজ হয়েছে!");
 
@@ -99,13 +176,24 @@ export function UniversalImageUploader({
         void deleteStorageImageByUrl(oldUrl);
       }
     } catch (err: any) {
+      if (!isMountedRef.current) return;
       console.error("[UniversalImageUploader Error]", err);
       const msg = err?.message || "ছবি আপলোড ব্যর্থ হয়েছে। পুনরায় চেষ্টা করুন।";
+      setLifecycle("error");
       setErrorMsg(msg);
       toast.error(msg);
     } finally {
-      setIsProcessing(false);
-      setProgress(0);
+      if (isMountedRef.current) {
+        abortControllerRef.current = null;
+        if (lifecycle !== "error") {
+          setTimeout(() => {
+            if (isMountedRef.current) {
+              setLifecycle("idle");
+              setProgress(0);
+            }
+          }, 600);
+        }
+      }
     }
   };
 
@@ -118,6 +206,7 @@ export function UniversalImageUploader({
     setStats(null);
     setErrorMsg(null);
     setLastSelectedFile(null);
+    setLifecycle("idle");
 
     if (autoDeleteOld && oldUrl) {
       void deleteStorageImageByUrl(oldUrl);
@@ -125,7 +214,8 @@ export function UniversalImageUploader({
     toast.info("ছবি মুছে ফেলা হয়েছে।");
   };
 
-  const handleRetry = () => {
+  const handleRetry = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     if (lastSelectedFile) {
       void startUploadProcess(lastSelectedFile);
     } else {
@@ -176,9 +266,17 @@ export function UniversalImageUploader({
 
             {/* Loading Overlay */}
             {isProcessing && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 text-white backdrop-blur-xs">
-                <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                <span className="mt-1 text-[10px] font-bold font-mono">{progress}%</span>
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/75 text-white backdrop-blur-xs p-1 text-center">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                <span className="mt-1 text-[9px] font-bold font-mono">{progress}%</span>
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  className="mt-1 flex items-center gap-0.5 rounded-full bg-red-600/80 px-1.5 py-0.5 text-[8px] font-bold text-white hover:bg-red-700"
+                  title="আপলোড বাতিল করুন"
+                >
+                  <X className="h-2.5 w-2.5" /> বাতিল
+                </button>
               </div>
             )}
 
@@ -214,16 +312,21 @@ export function UniversalImageUploader({
           >
             <Camera className="h-3 w-3" /> {value ? "ছবি পরিবর্তন করুন" : "ছবি যুক্ত করুন"}
           </button>
+          {isProcessing && (
+            <p className="mt-1 text-[10px] text-primary font-medium animate-pulse">
+              {getStageBengaliText(lifecycle, progress)}
+            </p>
+          )}
           {errorMsg && (
             <div className="mt-1 flex items-center justify-center gap-1 text-[10px] text-destructive font-medium">
-              <AlertCircle className="h-3 w-3" />
+              <AlertCircle className="h-3 w-3 shrink-0" />
               <span>{errorMsg}</span>
               <button onClick={handleRetry} className="underline font-bold ml-1">
                 আবার চেষ্টা
               </button>
             </div>
           )}
-          {stats && (
+          {stats && !isProcessing && (
             <p className="mt-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center justify-center gap-1">
               <CheckCircle2 className="h-3 w-3" /> অপ্টিমাইজড ({formatFileSizeBn(stats.compressedSizeBytes)})
             </p>
@@ -253,14 +356,15 @@ export function UniversalImageUploader({
             <FileImage className="h-5 w-5 text-muted-foreground" />
           )}
           {isProcessing && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-              <Loader2 className="h-4 w-4 animate-spin text-white" />
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 text-white">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              <span className="text-[8px] font-mono font-bold mt-0.5">{progress}%</span>
             </div>
           )}
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <button
               type="button"
               disabled={disabled || isProcessing}
@@ -270,7 +374,16 @@ export function UniversalImageUploader({
               <Upload className="h-3 w-3 text-primary" />
               {value ? "পরিবর্তন" : "ছবি আপলোড"}
             </button>
-            {value && !disabled && (
+            {isProcessing && (
+              <button
+                type="button"
+                onClick={handleCancel}
+                className="inline-flex items-center gap-0.5 rounded-lg border border-red-300 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-2 py-1 text-[11px] font-semibold text-red-600 hover:bg-red-100"
+              >
+                <X className="h-3 w-3" /> বাতিল
+              </button>
+            )}
+            {value && !disabled && !isProcessing && (
               <button
                 type="button"
                 onClick={handleRemove}
@@ -281,8 +394,17 @@ export function UniversalImageUploader({
               </button>
             )}
           </div>
-          {errorMsg ? (
-            <p className="mt-0.5 text-[10px] text-destructive truncate">{errorMsg}</p>
+          {isProcessing ? (
+            <p className="mt-0.5 text-[10px] text-primary truncate animate-pulse font-medium">
+              {getStageBengaliText(lifecycle, progress)}
+            </p>
+          ) : errorMsg ? (
+            <div className="mt-0.5 flex items-center gap-1 text-[10px] text-destructive truncate">
+              <span className="truncate">{errorMsg}</span>
+              <button onClick={handleRetry} className="underline font-bold shrink-0">
+                পুনরায় চেষ্টা
+              </button>
+            </div>
           ) : stats ? (
             <p className="mt-0.5 text-[10px] text-emerald-600 truncate">
               ✓ সাইজ: {formatFileSizeBn(stats.compressedSizeBytes)}
@@ -375,16 +497,25 @@ export function UniversalImageUploader({
 
         {/* Processing & Upload Progress Bar */}
         {isProcessing && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 p-4 text-white backdrop-blur-xs">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/75 p-4 text-white backdrop-blur-xs">
             <Loader2 className="h-7 w-7 animate-spin text-primary" />
-            <p className="mt-2 text-xs font-bold">ছবি প্রসেস ও অপ্টিমাইজ হচ্ছে...</p>
+            <p className="mt-2 text-xs font-bold">{getStageBengaliText(lifecycle, progress)}</p>
             <div className="mt-2 w-48 overflow-hidden rounded-full bg-white/20 h-2">
               <div
                 className="h-full bg-gradient-to-r from-emerald-400 to-primary transition-all duration-300"
                 style={{ width: `${progress}%` }}
               />
             </div>
-            <span className="mt-1 text-[10px] font-mono font-semibold">{progress}%</span>
+            <div className="mt-2 flex items-center gap-3">
+              <span className="text-[11px] font-mono font-semibold">{progress}%</span>
+              <button
+                type="button"
+                onClick={handleCancel}
+                className="inline-flex items-center gap-1 rounded-full bg-white/20 px-2.5 py-0.5 text-[11px] font-semibold text-white hover:bg-red-600 transition"
+              >
+                <X className="h-3 w-3" /> বাতিল
+              </button>
+            </div>
           </div>
         )}
       </div>

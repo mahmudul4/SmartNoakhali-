@@ -66,20 +66,25 @@ function isValidEmailAddress(raw: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw.trim());
 }
 
-function generateAutoUsername(fullName: string, email: string, phone: string): string {
-  const baseFromEmail = email.trim().split("@")[0]?.replace(/[^a-zA-Z0-9_]/g, "").toLowerCase();
+function generateAutoUsername(fullName?: string | null, email?: string | null, phone?: string | null): string {
+  const safeEmail = (email || "").trim();
+  const safeName = (fullName || "").trim();
+  const safePhone = (phone || "").trim();
+
+  const baseFromEmail = safeEmail.includes("@")
+    ? safeEmail.split("@")[0]?.replace(/[^a-zA-Z0-9_]/g, "").toLowerCase()
+    : "";
   if (baseFromEmail && baseFromEmail.length >= 3) {
     return baseFromEmail;
   }
-  const baseFromName = fullName
-    .trim()
+  const baseFromName = safeName
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
-  const phoneSuffix = normalizeBdPhone(phone).slice(-4) || Math.floor(100 + Math.random() * 900);
+  const phoneSuffix = normalizeBdPhone(safePhone).slice(-4) || Math.floor(100 + Math.random() * 900);
   if (baseFromName.length >= 3) {
     return `${baseFromName.slice(0, 12)}${phoneSuffix}`;
   }
-  const cleanPhone = normalizeBdPhone(phone);
+  const cleanPhone = normalizeBdPhone(safePhone);
   if (cleanPhone.length >= 6) {
     return `user_${cleanPhone.slice(-6)}`;
   }

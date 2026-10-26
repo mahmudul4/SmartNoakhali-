@@ -677,8 +677,8 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
         if (
           acc.some(
             (x) =>
-              (emailLower && x.email.toLowerCase() === emailLower) ||
-              (uidLower && x.id.toLowerCase() === uidLower)
+              (emailLower && (x.email || "").toLowerCase() === emailLower) ||
+              (uidLower && (x.id || "").toLowerCase() === uidLower)
           )
         ) {
           return acc;
@@ -849,7 +849,7 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
 
   if (
     !isUserDeleted(defaultRegularAdminRow.id, defaultRegularAdminRow.email) &&
-    !rows.some((r) => r.email.toLowerCase() === REGULAR_ADMIN_EMAIL.toLowerCase())
+    !rows.some((r) => (r.email ? r.email.toLowerCase() === REGULAR_ADMIN_EMAIL.toLowerCase() : false))
   ) {
     rows.splice(1, 0, defaultRegularAdminRow);
   }
