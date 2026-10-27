@@ -22,7 +22,7 @@ export default defineConfig(() => {
         manifest: {
           id: '/',
           name: 'Smart Noakhali — স্মার্ট নোয়াখালী',
-          short_name: 'নোয়াখালী',
+          short_name: 'স্মার্ট নোয়াখালী',
           description:
             'নোয়াখালীর সকল জরুরী সেবা, জনপ্রতিনিধি, ডাক্তার, রক্তদাতা ও তথ্য এক জায়গায়।',
           theme_color: '#0f5132',

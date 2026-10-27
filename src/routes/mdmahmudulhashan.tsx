@@ -313,7 +313,7 @@ function AdminPinLockScreen({
 }
 
 function AdminLoginForm() {
-  const { signInSuperAdmin } = useAuth();
+  const { signInSuperAdmin, signInUserOrStaff } = useAuth();
   const { logo } = useLogo();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -337,22 +337,30 @@ function AdminLoginForm() {
       cleanInput === "mahmud" ||
       cleanInput === "mdmahmudulhashan0";
 
-    if (!isSuperInput) {
-      toast.error("এই লগইন রুটটি শুধুমাত্র মেইন এডমিনের জন্য। জেনারেল এডমিন, এডিটর ও মডারেটরদের সাধারণ লগইন পেজ (/auth) ব্যবহার করতে হবে।");
-      return;
-    }
-
     setBusy(true);
     try {
-      const ok = await signInSuperAdmin(username, password);
-      if (ok) {
-        clearFailedAdminLogins();
-        toast.success("স্বাগতম, মেইন এডমিন!");
-        return;
+      if (isSuperInput) {
+        const ok = await signInSuperAdmin(username, password);
+        if (ok) {
+          clearFailedAdminLogins();
+          toast.success("স্বাগতম, মেইন এডমিন!");
+          return;
+        }
+        recordFailedAdminLogin();
+        await logEvent("login_failed", username);
+        toast.error("ভুল মেইন এডমিন পাসওয়ার্ড!");
+      } else {
+        const res = await signInUserOrStaff(username, password);
+        if (res && res.isStaff) {
+          clearFailedAdminLogins();
+          toast.success("স্বাগতম, স্টাফ কন্ট্রোল প্যানেল!");
+          return;
+        } else {
+          recordFailedAdminLogin();
+          await logEvent("login_failed", username);
+          toast.error("এই অ্যাকাউন্টে এডমিন বা স্টাফ অনুমতি নেই।");
+        }
       }
-      recordFailedAdminLogin();
-      await logEvent("login_failed", username);
-      toast.error("ভুল মেইন এডমিন পাসওয়ার্ড!");
     } catch (err: any) {
       recordFailedAdminLogin();
       await logEvent("login_failed", username);
@@ -374,10 +382,10 @@ function AdminLoginForm() {
         </div>
 
         <h1 className="mb-1 text-center font-display text-lg font-bold text-primary-deep">
-          মেইন এডমিন কন্ট্রোল প্যানেল
+          এডমিন ও স্টাফ কন্ট্রোল প্যানেল
         </h1>
         <p className="mb-5 text-center text-xs text-muted-foreground">
-          শুধুমাত্র অনুমোদিত মেইন এডমিনের জন্য সংরক্ষিত
+          অনুমোদিত এডমিন ও স্টাফ সদস্যদের জন্য সংরক্ষিত
         </p>
 
         <form onSubmit={onSubmit} className="space-y-3.5">
@@ -421,7 +429,7 @@ function AdminLoginForm() {
             className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-hero py-3 text-sm font-semibold text-primary-foreground shadow-elevated disabled:opacity-60"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-            মেইন এডমিন হিসেবে প্রবেশ করুন
+            লগইন করে প্রবেশ করুন
           </button>
         </form>
 

@@ -158,7 +158,10 @@ const FALLBACK_SUPER_ADMIN_USER: AppUser = {
 
 function readVerifiedSession(): VerifiedSessionData | null {
   try {
-    const raw = sessionStorage.getItem(VERIFIED_USER_SESSION_KEY);
+    let raw = sessionStorage.getItem(VERIFIED_USER_SESSION_KEY);
+    if (!raw) {
+      raw = localStorage.getItem(VERIFIED_USER_SESSION_KEY);
+    }
     if (raw) {
       const parsed = JSON.parse(raw) as VerifiedSessionData;
       if (parsed && parsed.user && parsed.user.uid) return parsed;
@@ -173,8 +176,11 @@ function writeVerifiedSession(data: VerifiedSessionData | null) {
   try {
     if (!data) {
       sessionStorage.removeItem(VERIFIED_USER_SESSION_KEY);
+      localStorage.removeItem(VERIFIED_USER_SESSION_KEY);
     } else {
-      sessionStorage.setItem(VERIFIED_USER_SESSION_KEY, JSON.stringify(data));
+      const str = JSON.stringify(data);
+      sessionStorage.setItem(VERIFIED_USER_SESSION_KEY, str);
+      localStorage.setItem(VERIFIED_USER_SESSION_KEY, str);
     }
   } catch {
     // ignore
@@ -208,6 +214,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (!fbUser) {
+        // If Firebase Auth is restoring or session was stored, keep verified session active
+        const currentVerified = readVerifiedSession();
+        if (currentVerified && currentVerified.user) {
+          setUser(currentVerified.user);
+          setRoles(currentVerified.roles || []);
+          setUsername(currentVerified.username || null);
+          setLoading(false);
+          return;
+        }
+
         setFirebaseUser(null);
         setUser(null);
         setRoles([]);
@@ -219,6 +235,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!isSuperAdminEmail(fbUser.email)) {
         try {
           sessionStorage.removeItem(SUPER_ADMIN_SESSION_KEY);
+          localStorage.removeItem(SUPER_ADMIN_SESSION_KEY);
         } catch {
           // ignore
         }
@@ -229,7 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const isRegularBootstrappedAdmin =
         fbUser.email?.trim().toLowerCase() === REGULAR_ADMIN_EMAIL.toLowerCase();
 
-      // Check if this user has roles assigned by Super Admin in the Vault
+      // Check if this user has roles assigned by Super Admin in the Vault or cached verified session
       const vault = await syncVaultFromCloud();
       const emailLower = (fbUser.email || "").trim().toLowerCase();
       const vaultEntry = vault[fbUser.uid] || (emailLower ? vault[emailLower] : undefined);
@@ -237,26 +254,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ? (vaultEntry.roles as Role[])
         : [];
 
+      const currentVerified = readVerifiedSession();
+      const sessionRoles: Role[] = Array.isArray(currentVerified?.roles)
+        ? (currentVerified.roles as Role[])
+        : [];
+
       const appU = toAppUser(fbUser);
       setFirebaseUser(fbUser);
       setUser(appU);
 
-      // Only query/write Firestore /users/{uid} when Firebase token has email_verified == true
-      if (!fbUser.emailVerified) {
-        setRoles(
-          isSuper
-            ? ["admin", "moderator", "editor", "user"]
-            : isRegularBootstrappedAdmin
-            ? ["editor", "user"]
-            : vaultRoles.length > 0
-            ? (Array.from(new Set([...vaultRoles, "user"])) as Role[])
-            : ["user"]
-        );
-        setUsername(isSuper ? "mahmudul" : vaultEntry?.username ?? fbUser.displayName ?? null);
-        setLoading(false);
-        return;
-      }
-
+      // Listen to /users/{uid} document in Firestore for live roles & profile data
       const userPath = `users/${fbUser.uid}`;
       const userRef = doc(db, "users", fbUser.uid);
 
@@ -281,21 +288,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const effectiveRoles: Role[] = isSuper
               ? (Array.from(new Set([...docRoles, "admin", "moderator", "editor", "user"])) as Role[])
               : isRegularBootstrappedAdmin
-              ? (Array.from(new Set([...docRoles, ...vaultRoles, "editor"])) as Role[])
-              : (Array.from(new Set([...docRoles, ...vaultRoles])) as Role[]);
+              ? (Array.from(new Set([...docRoles, ...vaultRoles, ...sessionRoles, "editor"])) as Role[])
+              : (Array.from(new Set([...docRoles, ...vaultRoles, ...sessionRoles])) as Role[]);
             setRoles(effectiveRoles);
-            setUsername(typeof data.username === "string" ? data.username : vaultEntry?.username || null);
+            const resolvedUsername =
+              typeof data.username === "string"
+                ? data.username
+                : vaultEntry?.username || currentVerified?.username || null;
+            setUsername(resolvedUsername);
+
+            writeVerifiedSession({
+              user: appU,
+              roles: effectiveRoles,
+              username: resolvedUsername,
+            });
           } else {
-            setRoles(
+            const effectiveRoles: Role[] = isSuper
+              ? ["admin", "moderator", "editor", "user"]
+              : isRegularBootstrappedAdmin
+              ? (Array.from(new Set([...vaultRoles, ...sessionRoles, "editor", "user"])) as Role[])
+              : vaultRoles.length > 0 || sessionRoles.length > 0
+              ? (Array.from(new Set([...vaultRoles, ...sessionRoles, "user"])) as Role[])
+              : ["user"];
+            setRoles(effectiveRoles);
+            const resolvedUsername =
               isSuper
-                ? ["admin", "moderator", "editor", "user"]
-                : isRegularBootstrappedAdmin
-                ? ["editor", "user"]
-                : vaultRoles.length > 0
-                ? (Array.from(new Set([...vaultRoles, "user"])) as Role[])
-                : ["user"]
-            );
-            setUsername(isSuper ? "mahmudul" : vaultEntry?.username ?? fbUser.displayName ?? null);
+                ? "mahmudul"
+                : vaultEntry?.username ?? currentVerified?.username ?? fbUser.displayName ?? null;
+            setUsername(resolvedUsername);
+
+            writeVerifiedSession({
+              user: appU,
+              roles: effectiveRoles,
+              username: resolvedUsername,
+            });
           }
           setLoading(false);
         },
@@ -309,15 +335,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } else {
             console.warn("[Auth] Firestore quota exceeded while listening to user profile; using cached roles.");
           }
-          setRoles(
-            isSuper
-              ? ["admin", "moderator", "editor", "user"]
-              : isRegularBootstrappedAdmin
-              ? ["editor", "user"]
-              : vaultRoles.length > 0
-              ? (Array.from(new Set([...vaultRoles, "user"])) as Role[])
-              : ["user"]
-          );
+          const effectiveRoles: Role[] = isSuper
+            ? ["admin", "moderator", "editor", "user"]
+            : isRegularBootstrappedAdmin
+            ? (Array.from(new Set([...vaultRoles, ...sessionRoles, "editor", "user"])) as Role[])
+            : vaultRoles.length > 0 || sessionRoles.length > 0
+            ? (Array.from(new Set([...vaultRoles, ...sessionRoles, "user"])) as Role[])
+            : ["user"];
+          setRoles(effectiveRoles);
           setLoading(false);
         }
       );
@@ -1062,11 +1087,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     ? (Array.from(new Set([...baseRoles, "admin", "moderator", "editor", "user"])) as Role[])
     : baseRoles;
 
-  const isAdmin = isBootstrappedMain;
-  const isEditor = isBootstrappedMain || effectiveRoles.includes("editor") || effectiveRoles.includes("admin");
-  const isModerator = isBootstrappedMain || effectiveRoles.includes("moderator");
-  const isStaff = isBootstrappedMain || isEditor || isModerator;
   const isMainAdmin = isBootstrappedMain;
+  const isAdmin = isBootstrappedMain || effectiveRoles.includes("admin");
+  const isEditor =
+    isBootstrappedMain ||
+    effectiveRoles.includes("editor") ||
+    effectiveRoles.includes("admin");
+  const isModerator = isBootstrappedMain || effectiveRoles.includes("moderator");
+  const isStaff = isBootstrappedMain || isAdmin || isEditor || isModerator;
 
   const value: AuthCtx = {
     user: effectiveUser,
@@ -1089,6 +1117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signOut: async () => {
       try {
         sessionStorage.removeItem(SUPER_ADMIN_SESSION_KEY);
+        localStorage.removeItem(SUPER_ADMIN_SESSION_KEY);
       } catch {
         // ignore
       }
