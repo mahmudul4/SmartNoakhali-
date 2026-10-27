@@ -121,6 +121,64 @@ async function handleStaticApiFallback(
     });
   }
 
+  // 2b. Password Reset via OTP
+  if (method === "POST" && apiPath === "/api/auth/reset-password-otp") {
+    const mode = body.channel === "phone" ? "phone" : "email";
+    const cleanEmail = String(body.email || "").trim().toLowerCase();
+    const cleanPhone = normalizePhone(String(body.phone || ""));
+    const cleanCode = toEnglishDigits(String(body.code || "")).replace(/\D/g, "");
+    const targetKey = mode === "email" ? `email:${cleanEmail}` : `phone:${cleanPhone}`;
+    const sessions = readLs<Record<string, any>>(LS_OTP, {});
+    const sess = sessions[targetKey];
+
+    let valid = Boolean(sess && sess.code === cleanCode && Date.now() <= sess.expiresAt);
+    if (!valid && body.otpToken) {
+      const [expStr, b64] = String(body.otpToken).split(".");
+      if (Number(expStr) > Date.now() && b64 === btoa(`${targetKey}:${cleanCode}`)) {
+        valid = true;
+      }
+    }
+    if (!valid) {
+      return jsonResp(400, { error: "ভুল অথবা মেয়াদোত্তীর্ণ ভেরিফিকেশন কোড।" });
+    }
+
+    if (body.newPassword) {
+      const store = readLs<Record<string, any>>(LS_USERS, {});
+      const matched = Object.values(store).find(
+        (u: any) =>
+          (cleanEmail && String(u.email || "").toLowerCase() === cleanEmail) ||
+          (cleanPhone && normalizePhone(u.phone) === cleanPhone)
+      );
+      if (matched && matched.uid) {
+        store[matched.uid] = { ...matched, password: body.newPassword, updated_at: new Date().toISOString() };
+        writeLs(LS_USERS, store);
+      }
+    }
+
+    delete sessions[targetKey];
+    writeLs(LS_OTP, sessions);
+    return jsonResp(200, { ok: true, message: "পাসওয়ার্ড সফলভাবে পরিবর্তন হয়েছে" });
+  }
+
+  // 2c. Direct Password Reset
+  if (method === "POST" && apiPath === "/api/auth/reset-password-direct") {
+    const rawId = String(body.identifier || "").trim().toLowerCase();
+    const cleanPhone = normalizePhone(rawId);
+    if (body.newPassword && (rawId || cleanPhone)) {
+      const store = readLs<Record<string, any>>(LS_USERS, {});
+      const matched = Object.values(store).find(
+        (u: any) =>
+          (rawId && String(u.email || "").toLowerCase() === rawId) ||
+          (cleanPhone && normalizePhone(u.phone) === cleanPhone)
+      );
+      if (matched && matched.uid) {
+        store[matched.uid] = { ...matched, password: body.newPassword, updated_at: new Date().toISOString() };
+        writeLs(LS_USERS, store);
+      }
+    }
+    return jsonResp(200, { ok: true });
+  }
+
   // 3. User Sync & Lookup
   if (method === "POST" && apiPath === "/api/auth/sync-user") {
     const cleanEmail = String(body.email || "").trim().toLowerCase();

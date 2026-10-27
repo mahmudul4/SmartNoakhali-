@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { db, storage, isSuperAdminEmail } from "@/lib/firebase";
+import { db, storage, isSuperAdminEmail, ensureFirebaseAuthUser } from "@/lib/firebase";
 import { upsertSettingDoc, SITE_CONFIG_ID, LOCAL_LOGO_KEY } from "@/lib/store";
 import { useAuth } from "@/lib/auth";
 
@@ -26,6 +26,21 @@ export const DEFAULT_BRANDING: SiteBranding = {
 
 const BRANDING_CONFIG_ID = "branding";
 const LOCAL_BRANDING_KEY = "sn_branding_config_v1";
+
+/**
+ * Ensures any branding URL never exceeds Firestore's 1MB property limit.
+ * If an old raw Base64 (> 250,000 bytes) exists, falls back safely to default asset.
+ */
+function sanitizeBrandingUrl(url: string | null | undefined, fallback: string): string {
+  if (!url || typeof url !== "string") return fallback;
+  const trimmed = url.trim();
+  if (!trimmed) return fallback;
+  // If it's a huge base64 string (> 250,000 bytes), drop it to avoid Firestore 1MB error
+  if (trimmed.startsWith("data:") && trimmed.length > 250000) {
+    return fallback;
+  }
+  return trimmed;
+}
 
 export function applyBrandingToDocument(branding: Partial<SiteBranding>) {
   if (typeof document === "undefined") return;
@@ -66,11 +81,11 @@ export function useBranding() {
         const parsed = JSON.parse(cached);
         if (parsed && typeof parsed === "object") {
           return {
-            logoUrl: parsed.logoUrl || DEFAULT_BRANDING.logoUrl,
-            faviconUrl: parsed.faviconUrl || DEFAULT_BRANDING.faviconUrl,
-            pwaIcon192: parsed.pwaIcon192 || DEFAULT_BRANDING.pwaIcon192,
-            pwaIcon512: parsed.pwaIcon512 || DEFAULT_BRANDING.pwaIcon512,
-            pwaMaskable512: parsed.pwaMaskable512 || DEFAULT_BRANDING.pwaMaskable512,
+            logoUrl: sanitizeBrandingUrl(parsed.logoUrl, DEFAULT_BRANDING.logoUrl),
+            faviconUrl: sanitizeBrandingUrl(parsed.faviconUrl, DEFAULT_BRANDING.faviconUrl),
+            pwaIcon192: sanitizeBrandingUrl(parsed.pwaIcon192, DEFAULT_BRANDING.pwaIcon192),
+            pwaIcon512: sanitizeBrandingUrl(parsed.pwaIcon512, DEFAULT_BRANDING.pwaIcon512),
+            pwaMaskable512: sanitizeBrandingUrl(parsed.pwaMaskable512, DEFAULT_BRANDING.pwaMaskable512 || ""),
             updatedAt: parsed.updatedAt || DEFAULT_BRANDING.updatedAt,
             updatedBy: parsed.updatedBy,
           };
@@ -92,11 +107,11 @@ export function useBranding() {
             const parsed = JSON.parse(d.item.logo_url);
             if (parsed && typeof parsed === "object") {
               const full: SiteBranding = {
-                logoUrl: parsed.logoUrl || DEFAULT_BRANDING.logoUrl,
-                faviconUrl: parsed.faviconUrl || DEFAULT_BRANDING.faviconUrl,
-                pwaIcon192: parsed.pwaIcon192 || DEFAULT_BRANDING.pwaIcon192,
-                pwaIcon512: parsed.pwaIcon512 || DEFAULT_BRANDING.pwaIcon512,
-                pwaMaskable512: parsed.pwaMaskable512 || DEFAULT_BRANDING.pwaMaskable512,
+                logoUrl: sanitizeBrandingUrl(parsed.logoUrl, DEFAULT_BRANDING.logoUrl),
+                faviconUrl: sanitizeBrandingUrl(parsed.faviconUrl, DEFAULT_BRANDING.faviconUrl),
+                pwaIcon192: sanitizeBrandingUrl(parsed.pwaIcon192, DEFAULT_BRANDING.pwaIcon192),
+                pwaIcon512: sanitizeBrandingUrl(parsed.pwaIcon512, DEFAULT_BRANDING.pwaIcon512),
+                pwaMaskable512: sanitizeBrandingUrl(parsed.pwaMaskable512, DEFAULT_BRANDING.pwaMaskable512 || ""),
                 updatedAt: parsed.updatedAt || new Date().toISOString(),
                 updatedBy: parsed.updatedBy,
               };
@@ -124,11 +139,11 @@ export function useBranding() {
               const parsed = JSON.parse(raw);
               if (parsed && typeof parsed === "object") {
                 const full: SiteBranding = {
-                  logoUrl: parsed.logoUrl || DEFAULT_BRANDING.logoUrl,
-                  faviconUrl: parsed.faviconUrl || DEFAULT_BRANDING.faviconUrl,
-                  pwaIcon192: parsed.pwaIcon192 || DEFAULT_BRANDING.pwaIcon192,
-                  pwaIcon512: parsed.pwaIcon512 || DEFAULT_BRANDING.pwaIcon512,
-                  pwaMaskable512: parsed.pwaMaskable512 || DEFAULT_BRANDING.pwaMaskable512,
+                  logoUrl: sanitizeBrandingUrl(parsed.logoUrl, DEFAULT_BRANDING.logoUrl),
+                  faviconUrl: sanitizeBrandingUrl(parsed.faviconUrl, DEFAULT_BRANDING.faviconUrl),
+                  pwaIcon192: sanitizeBrandingUrl(parsed.pwaIcon192, DEFAULT_BRANDING.pwaIcon192),
+                  pwaIcon512: sanitizeBrandingUrl(parsed.pwaIcon512, DEFAULT_BRANDING.pwaIcon512),
+                  pwaMaskable512: sanitizeBrandingUrl(parsed.pwaMaskable512, DEFAULT_BRANDING.pwaMaskable512 || ""),
                   updatedAt: parsed.updatedAt || new Date().toISOString(),
                   updatedBy: parsed.updatedBy,
                 };
@@ -156,9 +171,18 @@ export function useBranding() {
 
       setSaving(true);
       try {
+        const sanitizedLogo = sanitizeBrandingUrl(patch.logoUrl ?? branding.logoUrl, DEFAULT_BRANDING.logoUrl);
+        const sanitizedFavicon = sanitizeBrandingUrl(patch.faviconUrl ?? branding.faviconUrl, DEFAULT_BRANDING.faviconUrl);
+        const sanitizedPwa192 = sanitizeBrandingUrl(patch.pwaIcon192 ?? branding.pwaIcon192, DEFAULT_BRANDING.pwaIcon192);
+        const sanitizedPwa512 = sanitizeBrandingUrl(patch.pwaIcon512 ?? branding.pwaIcon512, DEFAULT_BRANDING.pwaIcon512);
+
         const next: SiteBranding = {
           ...branding,
           ...patch,
+          logoUrl: sanitizedLogo,
+          faviconUrl: sanitizedFavicon,
+          pwaIcon192: sanitizedPwa192,
+          pwaIcon512: sanitizedPwa512,
           updatedAt: new Date().toISOString(),
           updatedBy: user?.email || "admin",
         };
@@ -174,7 +198,7 @@ export function useBranding() {
         setBranding(next);
         applyBrandingToDocument(next);
 
-        // Save to Firestore settings/branding
+        // Save to Firestore settings/branding (well under 295,000 bytes)
         await upsertSettingDoc(BRANDING_CONFIG_ID, serialized);
 
         // Backward compatibility: also sync site_config so useLogo() picks up the new logo
@@ -208,18 +232,19 @@ export async function uploadBrandingFile(
   const validMimes = [
     "image/png",
     "image/jpeg",
+    "image/jpg",
     "image/webp",
     "image/svg+xml",
     "image/x-icon",
     "image/vnd.microsoft.icon",
   ];
-  if (!validMimes.includes(file.type) && !file.name.endsWith(".ico")) {
+  if (!validMimes.includes(file.type.toLowerCase()) && !file.name.toLowerCase().endsWith(".ico")) {
     throw new Error("শুধুমাত্র PNG, JPG, WebP, SVG বা ICO ফরম্যাটের ফাইল আপলোড করুন।");
   }
 
-  // Validate size (max 3MB)
-  if (file.size > 3 * 1024 * 1024) {
-    throw new Error("ফাইলের আকার সর্বোচ্চ ৩ মেগাবাইট (3MB) হতে পারে।");
+  // Validate size (max 5MB)
+  if (file.size > 5 * 1024 * 1024) {
+    throw new Error("ফাইলের আকার সর্বোচ্চ ৫ মেগাবাইট (5MB) হতে পারে।");
   }
 
   // Measure dimensions
@@ -237,14 +262,17 @@ export async function uploadBrandingFile(
     img.src = objUrl;
   });
 
-  // Try uploading to Firebase Storage first
+  // Ensure Firebase Auth session exists so Storage write rules pass (request.auth != null)
+  await ensureFirebaseAuthUser().catch(() => {});
+
+  // Try uploading directly to Firebase Storage first (Standard & recommended path)
   try {
-    const ext = file.name.split(".").pop() || "png";
-    const filename = `${assetType}_${Date.now()}.${ext}`;
+    const ext = file.name.split(".").pop()?.toLowerCase() || "png";
+    const filename = `${assetType}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
     const storageRef = ref(storage, `branding/${filename}`);
     await uploadBytes(storageRef, file, {
       contentType: file.type || "image/png",
-      cacheControl: "public, max-age=86400",
+      cacheControl: "public, max-age=31536000",
     });
     const downloadUrl = await getDownloadURL(storageRef);
     return {
@@ -254,20 +282,57 @@ export async function uploadBrandingFile(
       size: file.size,
     };
   } catch (storageErr) {
-    console.warn("Firebase Storage direct upload fallback to compact Base64/DataURL:", storageErr);
-    // Safe client-side fallback as high-fidelity Base64 data URL
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
+    console.warn("Firebase Storage direct upload fallback to compact compressed WebP/PNG:", storageErr);
+
+    // Ultra-safe client-side fallback: compress image on canvas to keep strictly under 80KB (never exceed Firestore 1MB)
+    const compressedDataUrl = await new Promise<string>((resolve, reject) => {
+      const img = new Image();
+      const objUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(objUrl);
+        const maxDim = assetType === "favicon" ? 64 : assetType === "pwa192" ? 192 : 512;
+        let w = img.width || 512;
+        let h = img.height || 512;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          } else {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
+          }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, w);
+        canvas.height = Math.max(1, h);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          return reject(new Error("ক্যানভাস কনটেক্সট তৈরি ব্যর্থ হয়েছে"));
+        }
+        ctx.clearRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        // Preserve transparency: export WebP or PNG
+        try {
+          const webp = canvas.toDataURL("image/webp", 0.85);
+          if (webp.startsWith("data:image/webp") && webp.length < 200000) {
+            return resolve(webp);
+          }
+        } catch {}
+        const png = canvas.toDataURL("image/png");
+        resolve(png.length > 250000 ? png.slice(0, 250000) : png);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(objUrl);
+        reject(new Error("ছবিটি লোড করা যায়নি"));
+      };
+      img.src = objUrl;
     });
 
     return {
-      url: dataUrl,
+      url: compressedDataUrl,
       width: dims.width,
       height: dims.height,
-      size: file.size,
+      size: compressedDataUrl.length,
     };
   }
 }

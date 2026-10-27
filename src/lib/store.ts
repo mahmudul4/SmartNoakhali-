@@ -49,10 +49,8 @@ export async function upsertSettingDoc(
   payloadValue: string,
   options?: { visible?: boolean; allowStaff?: boolean }
 ) {
-  const cleanUrl =
-    settingId === SITE_CONFIG_ID
-      ? (typeof payloadValue === "string" ? payloadValue.trim() : "")
-      : sanitizeString(payloadValue, 295000, "");
+  // Never exceed 295,000 bytes to ensure Firestore 1MB document limit is never exceeded
+  const cleanUrl = sanitizeString(payloadValue, 295000, "");
   const isVisible = options?.visible !== false;
 
   // 1. Immediately cache in localStorage
@@ -122,12 +120,18 @@ export async function upsertSettingDoc(
 }
 
 // ============================================================================
-// 1. Site Logo Hook (/settings/site_config)
-// ============================================================================
+function isSafeLogoUrl(url: unknown): url is string {
+  if (typeof url !== "string" || !url.trim()) return false;
+  const trimmed = url.trim();
+  if (trimmed.startsWith("data:") && trimmed.length > 250000) return false;
+  return true;
+}
+
 export function useLogo() {
   const [customLogo, setCustomLogo] = useState<string | null>(() => {
     try {
-      return localStorage.getItem(LOCAL_LOGO_KEY) || null;
+      const cached = localStorage.getItem(LOCAL_LOGO_KEY);
+      return isSafeLogoUrl(cached) ? cached : null;
     } catch {
       return null;
     }
@@ -138,7 +142,7 @@ export function useLogo() {
     fetch(`/api/content?collection=settings&id=${SITE_CONFIG_ID}`)
       .then((r) => r.json())
       .then((d) => {
-        if (d?.item?.logo_url && typeof d.item.logo_url === "string") {
+        if (isSafeLogoUrl(d?.item?.logo_url)) {
           setCustomLogo(d.item.logo_url);
           try {
             localStorage.setItem(LOCAL_LOGO_KEY, d.item.logo_url);
@@ -155,7 +159,7 @@ export function useLogo() {
         const configDoc = snap.docs.find((d) => d.id === SITE_CONFIG_ID);
         if (configDoc) {
           const url = configDoc.data().logo_url;
-          if (typeof url === "string" && url.length > 0) {
+          if (isSafeLogoUrl(url)) {
             setCustomLogo(url);
             try {
               localStorage.setItem(LOCAL_LOGO_KEY, url);

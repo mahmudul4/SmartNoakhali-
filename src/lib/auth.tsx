@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import {
   onAuthStateChanged,
   signInWithPopup,
+  GoogleAuthProvider,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendEmailVerification,
@@ -329,12 +330,124 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function signInWithGoogle(
-    _loginHintEmail?: string,
-    _options?: { requireStaff?: boolean; requireSuperAdmin?: boolean }
+    loginHintEmail?: string,
+    options?: { requireStaff?: boolean; requireSuperAdmin?: boolean }
   ): Promise<AppUser> {
-    throw new Error(
-      "Google সাইন-ইন সম্পূর্ণরূপে নিষ্ক্রিয় করা হয়েছে। অনুগ্রহ করে আপনার নিবন্ধিত ইমেইল ও পাসওয়ার্ড দিয়ে লগইন করুন।"
-    );
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({
+      prompt: "select_account",
+      ...(loginHintEmail ? { login_hint: loginHintEmail } : {}),
+    });
+
+    try {
+      const result = await signInWithPopup(auth, provider);
+      const fbUser = result.user;
+      const email = fbUser.email || "";
+
+      if (options?.requireSuperAdmin && !isSuperAdminEmail(email)) {
+        await firebaseSignOut(auth);
+        throw new Error("অননুমোদিত অ্যাকাউন্ট। শুধুমাত্র প্রধান সুপার এডমিনের প্রবেশাধিকার রয়েছে।");
+      }
+
+      // Check if this Google user has roles pre-assigned by Super Admin in Vault
+      const vault = await syncVaultFromCloud();
+      const emailLower = email.trim().toLowerCase();
+      const vaultEntry = vault[fbUser.uid] || (emailLower ? vault[emailLower] : undefined);
+      const isSuper = isSuperAdminEmail(email);
+      const isRegAdmin = emailLower === REGULAR_ADMIN_EMAIL.toLowerCase();
+
+      // STRICT SECURITY RULE: Regular Google Sign-In defaults strictly to ["user"].
+      // Google Sign-In CANNOT grant or escalate to admin/moderator/editor unless explicitly in vault
+      const resolvedRoles: Role[] = isSuper
+        ? ["admin", "moderator", "editor", "user"]
+        : isRegAdmin
+        ? ["editor", "user"]
+        : vaultEntry?.roles?.length
+        ? (Array.from(new Set([...vaultEntry.roles, "user"])) as Role[])
+        : ["user"];
+
+      if (options?.requireStaff && !isSuper && !isRegAdmin && !resolvedRoles.includes("editor") && !resolvedRoles.includes("moderator")) {
+        await firebaseSignOut(auth);
+        throw new Error("শুধুমাত্র অনুমোদিত স্টাফ মেম্বারদের জন্য প্রবেশাধিকার রয়েছে।");
+      }
+
+      const cleanDisplayName = fbUser.displayName || email.split("@")[0] || "User";
+      const cleanUsername = sanitizeString(
+        vaultEntry?.username || email.split("@")[0] || "user",
+        60,
+        "user"
+      );
+
+      // Ensure profile doc exists in Firestore (/users/{uid})
+      try {
+        await ensureCurrentUserProfileDoc(fbUser, {
+          full_name: cleanDisplayName,
+          username: cleanUsername,
+          phone: fbUser.phoneNumber || undefined,
+        });
+      } catch (err) {
+        console.warn("Google user profile doc notice:", err);
+      }
+
+      // Record credentials in vault and session
+      await recordUserCredential({
+        uid: fbUser.uid,
+        email,
+        full_name: cleanDisplayName,
+        username: cleanUsername,
+        phone: fbUser.phoneNumber || undefined,
+        photo_url: fbUser.photoURL || undefined,
+        roles: resolvedRoles,
+        verified_via: "google",
+      }).catch(() => {});
+
+      const appU: AppUser = {
+        id: fbUser.uid,
+        uid: fbUser.uid,
+        email: fbUser.email,
+        phone: fbUser.phoneNumber || null,
+        displayName: cleanDisplayName,
+        photoURL: fbUser.photoURL || null,
+        emailVerified: true,
+        verifiedVia: "google",
+      };
+
+      const sess: VerifiedSessionData = {
+        user: appU,
+        roles: resolvedRoles,
+        username: cleanUsername,
+      };
+      writeVerifiedSession(sess);
+      setVerifiedSession(sess);
+      setFirebaseUser(fbUser);
+      setUser(appU);
+      setRoles(resolvedRoles);
+      setUsername(cleanUsername);
+
+      await logEvent("google_login_success", email).catch(() => {});
+      return appU;
+    } catch (err: any) {
+      const code = String(err?.code || "");
+      console.warn("Google sign-in notice:", err);
+
+      if (code === "auth/popup-closed-by-user") {
+        throw new Error("Google সাইন-ইন উইন্ডো বন্ধ করা হয়েছে। আবার চেষ্টা করুন।");
+      }
+      if (code === "auth/popup-blocked") {
+        throw new Error("আপনার ব্রাউজারে পপআপ ব্লক করা হয়েছে। অনুগ্রহ করে পপআপ অনুমোদন করুন।");
+      }
+      if (code === "auth/unauthorized-domain") {
+        throw new Error("Firebase কনসোলে এই ডোমেইনটি অনুমোদিত নয়। অনুগ্রহ করে Authorized Domains চেক করুন।");
+      }
+      if (code === "auth/account-exists-with-different-credential") {
+        throw new Error("এই ইমেইলটি দিয়ে পূর্বে অন্য পদ্ধতিতে অ্যাকাউন্ট খোলা হয়েছে। অনুগ্রহ করে পাসওয়ার্ড দিয়ে লগইন করুন।");
+      }
+      if (code === "auth/network-request-failed") {
+        throw new Error("নেটওয়ার্ক সমস্যার কারণে Google লগইন সম্ভব হয়নি। আপনার ইন্টারনেট সংযোগ পরীক্ষা করুন।");
+      }
+
+      throw new Error(err?.message || "Google দিয়ে লগইন ব্যর্থ হয়েছে।");
+    }
   }
 
   async function signInSuperAdmin(emailOrUsername: string, password: string): Promise<boolean> {
