@@ -46,6 +46,7 @@ import {
   Database,
   Droplet,
   MapPin,
+  Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
 import { auth, SUPER_ADMIN_EMAIL } from "@/lib/firebase";
@@ -58,10 +59,13 @@ import {
   useStaffProfiles,
   useAppPackages,
   useSiteMetaConfig,
+  useServicesConfig,
   type CategoryConfigItem,
   type DonationConfig,
   type SiteMetaConfig,
   type StaffProfileEntry,
+  type ServiceItem,
+  type ServicesConfig,
 } from "@/lib/store";
 import { downloadAppPackageBinary } from "@/lib/pwa";
 import { useAuth } from "@/lib/auth";
@@ -455,6 +459,7 @@ type Tab =
   | "activity"
   | "profile"
   | "categories"
+  | "services"
   | "info"
   | "donation"
   | "donors"
@@ -570,6 +575,7 @@ function Dashboard({
   useEffect(() => {
     const mainAdminOnlyTabs: Tab[] = [
       "roles",
+      "services",
       "donation",
       "apps",
       "users",
@@ -764,6 +770,11 @@ function Dashboard({
             ক্যাটাগরি
           </TabBtn>
         )}
+        {isMainAdmin && (
+          <TabBtn active={tab === "services"} onClick={() => setTab("services")}>
+            🛠️ আমাদের সেবা পরিচালনা
+          </TabBtn>
+        )}
         {(isMainAdmin || hasPermission("create_edit_content") || hasPermission("moderate_submissions")) && (
           <TabBtn active={tab === "info"} onClick={() => setTab("info")} badge={pendingSubs.length}>
             তথ্য
@@ -889,6 +900,8 @@ function Dashboard({
         {tab === "categories" && (isMainAdmin || hasPermission("manage_categories")) && (
           <CategoriesEditor />
         )}
+
+        {tab === "services" && isMainAdmin && <ServicesAdminPanel />}
 
         {tab === "info" && (isMainAdmin || hasPermission("create_edit_content") || hasPermission("moderate_submissions")) && (
           <SubmissionsAdminPanel subs={subs} />
@@ -2093,6 +2106,714 @@ function CategoriesEditor() {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Super Admin: “আমাদের সেবা” পরিচালনা (Manage Our Services)
+// Full CRUD, Active Toggle, Reordering, Page Header Editor
+// Restricted strictly to Main Super Admin (mdmahmudulhashan0@gmail.com)
+// ============================================================================
+function ServicesAdminPanel() {
+  const { isMainAdmin } = useAuth();
+  const {
+    config,
+    services,
+    addService,
+    updateService,
+    deleteService,
+    reorderServices,
+    updatePageHeader,
+  } = useServicesConfig();
+
+  // Header settings state
+  const [pageTitle, setPageTitle] = useState(config.pageTitle || "");
+  const [pageSubtitle, setPageSubtitle] = useState(config.pageSubtitle || "");
+  const [savingHeader, setSavingHeader] = useState(false);
+
+  // Sync draft when config loads/updates
+  useEffect(() => {
+    setPageTitle(config.pageTitle || "");
+    setPageSubtitle(config.pageSubtitle || "");
+  }, [config.pageTitle, config.pageSubtitle]);
+
+  // Add new service state
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newDescription, setNewDescription] = useState("");
+  const [newIconName, setNewIconName] = useState("PhoneCall");
+  const [newImageUrl, setNewImageUrl] = useState("");
+  const [newActive, setNewActive] = useState(true);
+
+  // Edit service state
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editIconName, setEditIconName] = useState("PhoneCall");
+  const [editImageUrl, setEditImageUrl] = useState("");
+  const [editActive, setEditActive] = useState(true);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  // Action busy states
+  const [busyServiceId, setBusyServiceId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+
+  if (!isMainAdmin) {
+    return (
+      <div className="rounded-3xl border border-destructive/20 bg-destructive/5 p-8 text-center shadow-card">
+        <ShieldAlert className="mx-auto h-12 w-12 text-destructive" />
+        <h3 className="mt-3 font-display text-base font-bold text-destructive">
+          অ্যাকসেস সংরক্ষিত (Access Denied)
+        </h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          “আমাদের সেবা” পরিচালনা শুধুমাত্র মেইন সুপার অ্যাডমিনের জন্য নির্ধারিত। অন্য কোনো স্টাফ এটি পরিবর্তন করতে পারবেন না।
+        </p>
+      </div>
+    );
+  }
+
+  // Handle saving page header
+  async function handleSaveHeader(e: React.FormEvent) {
+    e.preventDefault();
+    if (savingHeader) return;
+    if (!pageTitle.trim()) {
+      return toast.error("পেজের শিরোনাম প্রদান করুন");
+    }
+    setSavingHeader(true);
+    try {
+      await updatePageHeader(pageTitle.trim(), pageSubtitle.trim());
+      toast.success("আমাদের সেবা পেজের শিরোনাম ও বিবরণ সফলভাবে সংরক্ষিত হয়েছে!");
+    } catch (err: any) {
+      toast.error(err?.message || "শিরোনাম আপডেট ব্যর্থ হয়েছে");
+    } finally {
+      setSavingHeader(false);
+    }
+  }
+
+  // Handle adding new service
+  async function handleAddService(e: React.FormEvent) {
+    e.preventDefault();
+    if (adding) return;
+    if (!newTitle.trim()) {
+      return toast.error("সেবার নাম/শিরোনাম প্রদান করুন");
+    }
+    setAdding(true);
+    try {
+      await addService({
+        title: newTitle.trim(),
+        description: newDescription.trim(),
+        iconName: newIconName || "PhoneCall",
+        imageUrl: newImageUrl.trim() || undefined,
+        active: newActive,
+      });
+      toast.success(`“${newTitle.trim()}” সেবা সফলভাবে যোগ করা হয়েছে!`);
+      // Reset form
+      setNewTitle("");
+      setNewDescription("");
+      setNewIconName("PhoneCall");
+      setNewImageUrl("");
+      setNewActive(true);
+      setShowAddForm(false);
+    } catch (err: any) {
+      toast.error(err?.message || "সেবা যোগ করতে ব্যর্থ হয়েছে");
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  // Start editing a service
+  function startEdit(service: ServiceItem) {
+    setEditingId(service.id);
+    setEditTitle(service.title || "");
+    setEditDescription(service.description || "");
+    setEditIconName(service.iconName || "PhoneCall");
+    setEditImageUrl(service.imageUrl || "");
+    setEditActive(service.active !== false);
+  }
+
+  // Save edited service
+  async function handleSaveEdit(id: string) {
+    if (savingEdit) return;
+    if (!editTitle.trim()) {
+      return toast.error("সেবার শিরোনাম প্রদান করুন");
+    }
+    setSavingEdit(true);
+    try {
+      await updateService(id, {
+        title: editTitle.trim(),
+        description: editDescription.trim(),
+        iconName: editIconName || "PhoneCall",
+        imageUrl: editImageUrl.trim() || undefined,
+        active: editActive,
+      });
+      toast.success("সেবার তথ্য সফলভাবে আপডেট হয়েছে!");
+      setEditingId(null);
+    } catch (err: any) {
+      toast.error(err?.message || "আপডেট ব্যর্থ হয়েছে");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  // Toggle active status
+  async function handleToggleActive(service: ServiceItem) {
+    if (busyServiceId === service.id) return;
+    setBusyServiceId(service.id);
+    const nextStatus = !service.active;
+    try {
+      await updateService(service.id, { active: nextStatus });
+      toast.success(
+        nextStatus
+          ? `“${service.title}” সেবা সক্রিয় করা হয়েছে`
+          : `“${service.title}” সেবা নিষ্ক্রিয় করা হয়েছে (পাবলিক পেজে লুকানো থাকবে)`
+      );
+    } catch (err: any) {
+      toast.error(err?.message || "স্ট্যাটাস পরিবর্তন ব্যর্থ");
+    } finally {
+      setBusyServiceId(null);
+    }
+  }
+
+  // Move service up or down
+  async function handleMove(index: number, direction: "up" | "down") {
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= services.length) return;
+    const reordered = [...services];
+    const [moved] = reordered.splice(index, 1);
+    reordered.splice(targetIndex, 0, moved);
+    try {
+      await reorderServices(reordered);
+      toast.success("সেবার অবস্থান ক্রমানুসারে সাজানো হয়েছে");
+    } catch (err: any) {
+      toast.error(err?.message || "ক্রম পরিবর্তন ব্যর্থ");
+    }
+  }
+
+  // Delete service
+  async function handleDelete(service: ServiceItem) {
+    if (!window.confirm(`আপনি কি নিশ্চিত যে “${service.title}” সেবা মুছে ফেলতে চান?`)) {
+      return;
+    }
+    try {
+      await deleteService(service.id);
+      toast.success(`“${service.title}” সেবা মুছে ফেলা হয়েছে`);
+    } catch (err: any) {
+      toast.error(err?.message || "মুছে ফেলা ব্যর্থ");
+    }
+  }
+
+  const iconKeys = Object.keys(CATEGORY_ICONS);
+  const activeCount = services.filter((s) => s.active !== false).length;
+
+  const filteredServices = services.filter((s) => {
+    const q = (search || "").trim().toLowerCase();
+    if (!q) return true;
+    return (
+      (s.title || "").toLowerCase().includes(q) ||
+      (s.description || "").toLowerCase().includes(q)
+    );
+  });
+
+  return (
+    <div className="space-y-4">
+      {/* Top Banner & Stats */}
+      <div className="rounded-3xl border border-primary/25 bg-card p-4 shadow-card">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <Wrench className="h-5 w-5" />
+              </div>
+              <h2 className="font-display text-base font-bold text-primary-deep sm:text-lg">
+                আমাদের সেবা পরিচালনা (Our Services)
+              </h2>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              মেইন সুপার অ্যাডমিন হিসেবে “আমাদের সেবা” (/about) পেজের শিরোনাম, বিবরণ ও সকল সেবা রিয়েলটাইমে পরিচালনা করুন
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
+              মোট: {services.length} টি
+            </span>
+            <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-bold text-emerald-700">
+              সক্রিয়: {activeCount} টি
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowAddForm((v) => !v)}
+              className="flex items-center gap-1.5 rounded-full bg-gradient-hero px-4 py-2 text-xs font-bold text-primary-foreground shadow-card transition active:scale-95"
+            >
+              <Plus className="h-4 w-4" />
+              {showAddForm ? "ফর্ম বন্ধ করুন" : "নতুন সেবা যোগ করুন"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Page Header Settings Card */}
+      <div className="rounded-2xl border border-border bg-card p-4 shadow-card">
+        <div className="mb-3 flex items-center justify-between">
+          <p className="flex items-center gap-2 font-display text-sm font-bold text-primary-deep">
+            <Sparkles className="h-4 w-4 text-primary" /> পেজের শিরোনাম ও পরিচিতি বিবরণ
+          </p>
+          <span className="text-[11px] text-muted-foreground">
+            ওয়েবসাইটে (/about) এই তথ্য প্রদর্শিত হয়
+          </span>
+        </div>
+
+        <form onSubmit={handleSaveHeader} className="space-y-3">
+          <div>
+            <label className="text-xs font-semibold text-foreground">
+              পেজ টাইটেল / মূল শিরোনাম *
+            </label>
+            <input
+              value={pageTitle}
+              onChange={(e) => setPageTitle(e.target.value)}
+              placeholder="আমাদের সেবা — স্মার্ট নোয়াখালী"
+              required
+              className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-foreground">
+              উপ-শিরোনাম / সংক্ষিপ্ত পরিচিতি
+            </label>
+            <textarea
+              value={pageSubtitle}
+              onChange={(e) => setPageSubtitle(e.target.value)}
+              rows={2}
+              placeholder="স্মার্ট নোয়াখালী হলো নোয়াখালী জেলার একটি ডিজিটাল সেবা ডিরেক্টরি..."
+              className="mt-1 w-full rounded-xl border border-border bg-background p-3 text-xs leading-relaxed"
+            />
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={savingHeader}
+              className="flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-bold text-primary-foreground shadow-xs transition hover:bg-primary-deep disabled:opacity-60"
+            >
+              {savingHeader ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Save className="h-3.5 w-3.5" />
+              )}
+              শিরোনাম সংরক্ষণ করুন
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* Add New Service Form Modal / Accordion */}
+      {showAddForm && (
+        <div className="rounded-2xl border-2 border-primary/30 bg-primary/5 p-4 shadow-elevated">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="font-display text-sm font-bold text-primary-deep">
+              ➕ নতুন সেবা যোগ করার ফর্ম
+            </h3>
+            <button
+              type="button"
+              onClick={() => setShowAddForm(false)}
+              className="rounded-full bg-muted p-1 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <form onSubmit={handleAddService} className="space-y-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="text-xs font-semibold text-foreground">
+                  সেবার নাম / শিরোনাম *
+                </label>
+                <input
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  placeholder="যেমন: জরুরী যোগাযোগ ডিরেক্টরি"
+                  required
+                  className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-foreground">আইকন নির্বাচন করুন</label>
+                <div className="mt-1 flex items-center gap-2">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    {(() => {
+                      const IconComp = CATEGORY_ICONS[newIconName] || CATEGORY_ICONS.Info;
+                      return <IconComp className="h-5 w-5" />;
+                    })()}
+                  </div>
+                  <select
+                    value={newIconName}
+                    onChange={(e) => setNewIconName(e.target.value)}
+                    className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold"
+                  >
+                    {iconKeys.map((k) => (
+                      <option key={k} value={k}>
+                        {k}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-foreground">
+                সেবার বিস্তারিত বিবরণ
+              </label>
+              <textarea
+                value={newDescription}
+                onChange={(e) => setNewDescription(e.target.value)}
+                rows={2}
+                placeholder="সেবা সম্পর্কে সংক্ষিপ্ত বিস্তারিত লিখুন..."
+                className="mt-1 w-full rounded-xl border border-border bg-background p-3 text-xs leading-relaxed"
+              />
+            </div>
+
+            {/* Custom Image Upload (Optional) */}
+            <div>
+              <label className="text-xs font-semibold text-foreground">
+                কাস্টম ছবি (ঐচ্ছিক — আইকনের পরিবর্তে ছবি শো করতে চাইলে)
+              </label>
+              <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center">
+                <input
+                  value={newImageUrl}
+                  onChange={(e) => setNewImageUrl(e.target.value)}
+                  placeholder="https://... বা সরাসরি আপলোড করুন"
+                  className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-xs"
+                />
+                <UniversalImageUploader
+                  category="general"
+                  value={newImageUrl}
+                  onChange={(url: string | null) => {
+                    setNewImageUrl(url || "");
+                    if (url) toast.success("সেবার ছবি আপলোড হয়েছে");
+                  }}
+                  variant="inline"
+                  label="ছবি আপলোড"
+                />
+              </div>
+            </div>
+
+            {/* Active Toggle */}
+            <div className="flex items-center gap-2 pt-1">
+              <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-foreground">
+                <input
+                  type="checkbox"
+                  checked={newActive}
+                  onChange={(e) => setNewActive(e.target.checked)}
+                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                />
+                সরাসরি ওয়েবসাইটে সক্রিয় (Active) রাখুন
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowAddForm(false)}
+                className="rounded-full bg-muted px-4 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground"
+              >
+                বাতিল
+              </button>
+              <button
+                type="submit"
+                disabled={adding}
+                className="flex items-center gap-1.5 rounded-full bg-gradient-hero px-5 py-2 text-xs font-bold text-primary-foreground shadow-card disabled:opacity-60"
+              >
+                {adding ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Plus className="h-3.5 w-3.5" />
+                )}
+                সেবা যোগ করুন
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Search and List Header */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-display text-sm font-bold text-primary-deep">
+          সকল সেবা তালিকা ({services.length} টি)
+        </p>
+        <div className="relative w-full sm:w-64">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="সেবা খুঁজুন..."
+            className="w-full rounded-xl border border-border bg-background py-1.5 pl-8 pr-3 text-xs"
+          />
+        </div>
+      </div>
+
+      {/* Services List Cards */}
+      {filteredServices.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          {search ? "কোনো সেবা খুঁজে পাওয়া যায়নি" : "বর্তমানে কোনো সেবা যুক্ত করা নেই। ওপরের বাটনে ক্লিক করে যোগ করুন।"}
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {filteredServices.map((service, index) => {
+            const isEditing = editingId === service.id;
+            const IconComp = service.iconName ? CATEGORY_ICONS[service.iconName] || CATEGORY_ICONS.Info : CATEGORY_ICONS.Info;
+            const isActive = service.active !== false;
+
+            if (isEditing) {
+              return (
+                <div
+                  key={service.id}
+                  className="rounded-2xl border-2 border-primary/40 bg-card p-4 shadow-elevated"
+                >
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="font-display text-xs font-bold text-primary-deep">
+                      ✏️ সেবা সম্পাদনা: #{String(index + 1).padStart(2, "0")}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setEditingId(null)}
+                      className="rounded-full p-1 text-muted-foreground hover:bg-muted"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                      <div>
+                        <label className="text-[11px] font-semibold text-muted-foreground">
+                          সেবার শিরোনাম *
+                        </label>
+                        <input
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-1.5 text-xs font-bold"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-semibold text-muted-foreground">
+                          আইকন
+                        </label>
+                        <select
+                          value={editIconName}
+                          onChange={(e) => setEditIconName(e.target.value)}
+                          className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-1.5 text-xs font-semibold"
+                        >
+                          {iconKeys.map((k) => (
+                            <option key={k} value={k}>
+                              {k}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-semibold text-muted-foreground">
+                        বিবরণ
+                      </label>
+                      <textarea
+                        value={editDescription}
+                        onChange={(e) => setEditDescription(e.target.value)}
+                        rows={2}
+                        className="mt-0.5 w-full rounded-xl border border-border bg-background p-2.5 text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-semibold text-muted-foreground">
+                        কাস্টম ছবি URL
+                      </label>
+                      <div className="mt-0.5 flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <input
+                          value={editImageUrl}
+                          onChange={(e) => setEditImageUrl(e.target.value)}
+                          placeholder="https://..."
+                          className="flex-1 rounded-xl border border-border bg-background px-3 py-1.5 text-xs"
+                        />
+                        <UniversalImageUploader
+                          category="general"
+                          value={editImageUrl}
+                          onChange={(url: string | null) => {
+                            setEditImageUrl(url || "");
+                            if (url) toast.success("ছবি আপলোড হয়েছে");
+                          }}
+                          variant="inline"
+                          label="ছবি আপলোড"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold">
+                        <input
+                          type="checkbox"
+                          checked={editActive}
+                          onChange={(e) => setEditActive(e.target.checked)}
+                          className="h-4 w-4 rounded border-border text-primary"
+                        />
+                        সক্রিয় রাখুন
+                      </label>
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setEditingId(null)}
+                        className="rounded-full bg-muted px-3.5 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                      >
+                        বাতিল
+                      </button>
+                      <button
+                        type="button"
+                        disabled={savingEdit}
+                        onClick={() => void handleSaveEdit(service.id)}
+                        className="flex items-center gap-1 rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground shadow-xs disabled:opacity-60"
+                      >
+                        {savingEdit ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Save className="h-3.5 w-3.5" />
+                        )}
+                        আপডেট সংরক্ষণ
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <div
+                key={service.id}
+                className={`flex flex-col gap-3 rounded-2xl border bg-card p-3.5 shadow-card transition sm:flex-row sm:items-center sm:justify-between ${
+                  isActive ? "border-border" : "border-dashed border-border/80 bg-muted/20 opacity-80"
+                }`}
+              >
+                <div className="flex min-w-0 items-start gap-3">
+                  {/* Order handle */}
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted text-[11px] font-bold text-muted-foreground">
+                    #{String(index + 1).padStart(2, "0")}
+                  </span>
+
+                  {/* Thumbnail / Icon preview */}
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-primary/15 to-primary/5 text-primary shadow-xs">
+                    {service.imageUrl ? (
+                      <img
+                        src={service.imageUrl}
+                        alt={service.title}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <IconComp className="h-5 w-5" />
+                    )}
+                  </div>
+
+                  {/* Content */}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="font-display text-sm font-bold text-foreground">
+                        {service.title}
+                      </h4>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                          isActive
+                            ? "bg-emerald-500/15 text-emerald-700"
+                            : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {isActive ? "সক্রিয়" : "লুকানো"}
+                      </span>
+                    </div>
+                    {service.description && (
+                      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground leading-relaxed">
+                        {service.description}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Actions: Reorder, Active Toggle, Edit, Delete */}
+                <div className="flex flex-wrap items-center gap-1.5 self-end sm:self-center">
+                  {/* Move Up */}
+                  <button
+                    type="button"
+                    disabled={index === 0}
+                    onClick={() => void handleMove(index, "up")}
+                    title="উপরে নিন"
+                    className="rounded-full bg-muted p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                  >
+                    <ArrowUp className="h-3.5 w-3.5" />
+                  </button>
+
+                  {/* Move Down */}
+                  <button
+                    type="button"
+                    disabled={index === services.length - 1}
+                    onClick={() => void handleMove(index, "down")}
+                    title="নিচে নিন"
+                    className="rounded-full bg-muted p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                  >
+                    <ArrowDown className="h-3.5 w-3.5" />
+                  </button>
+
+                  {/* Active / Inactive Toggle */}
+                  <button
+                    type="button"
+                    disabled={busyServiceId === service.id}
+                    onClick={() => void handleToggleActive(service)}
+                    title={isActive ? "নিষ্ক্রিয় করুন" : "সক্রিয় করুন"}
+                    className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold transition ${
+                      isActive
+                        ? "bg-muted text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                        : "bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/25"
+                    }`}
+                  >
+                    {isActive ? (
+                      <>
+                        <EyeOff className="h-3 w-3" /> নিষ্ক্রিয়
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="h-3 w-3" /> সক্রিয়
+                      </>
+                    )}
+                  </button>
+
+                  {/* Edit */}
+                  <button
+                    type="button"
+                    onClick={() => startEdit(service)}
+                    title="সম্পাদনা করুন"
+                    className="flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary-deep hover:bg-primary/20"
+                  >
+                    <Edit3 className="h-3 w-3" /> এডিট
+                  </button>
+
+                  {/* Delete */}
+                  <button
+                    type="button"
+                    onClick={() => void handleDelete(service)}
+                    title="মুছে ফেলুন"
+                    className="rounded-full bg-destructive/10 p-1.5 text-destructive hover:bg-destructive hover:text-white"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -6318,6 +7039,13 @@ function OverviewPanel({
               onClick={() => onJump("categories")}
               icon={<LayoutGrid className="h-4 w-4" />}
               label="ক্যাটাগরি এডিট"
+            />
+          )}
+          {isMainAdmin && (
+            <QuickAction
+              onClick={() => onJump("services")}
+              icon={<Wrench className="h-4 w-4" />}
+              label="আমাদের সেবা পরিচালনা"
             />
           )}
           {isMainAdmin && (

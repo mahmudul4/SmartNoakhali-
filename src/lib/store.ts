@@ -36,6 +36,7 @@ const CATEGORIES_CONFIG_ID = "categories_config";
 const STAFF_PROFILES_CONFIG_ID = "staff_profiles_config";
 const APP_PACKAGES_CONFIG_ID = "app_packages_config";
 const SITE_META_CONFIG_ID = "site_meta_config";
+export const SERVICES_CONFIG_ID = "services_config";
 
 export const LOCAL_LOGO_KEY = "sn_site_logo_v3";
 const LOCAL_DONATION_KEY = "sn_donation_config_v1";
@@ -43,6 +44,7 @@ const LOCAL_CATEGORIES_KEY = "sn_categories_config_v1";
 const LOCAL_STAFF_PROFILES_KEY = "sn_staff_profiles_v1";
 const LOCAL_APP_PACKAGES_KEY = "sn_app_packages_v1";
 const LOCAL_SITE_META_KEY = "sn_site_meta_v1";
+export const LOCAL_SERVICES_KEY = "sn_services_config_v1";
 
 export async function upsertSettingDoc(
   settingId: string,
@@ -69,6 +71,8 @@ export async function upsertSettingDoc(
       localStorage.setItem(LOCAL_APP_PACKAGES_KEY, cleanUrl);
     } else if (settingId === SITE_META_CONFIG_ID) {
       localStorage.setItem(LOCAL_SITE_META_KEY, cleanUrl);
+    } else if (settingId === SERVICES_CONFIG_ID) {
+      localStorage.setItem(LOCAL_SERVICES_KEY, cleanUrl);
     }
   } catch {
     // ignore
@@ -1457,5 +1461,260 @@ export function useSiteMetaConfig() {
   return {
     meta,
     saveSiteMeta,
+  };
+}
+
+// ============================================================================
+// 7. Our Services Configuration Hook (/settings/services_config)
+// Managed by Main Super Admin for “আমাদের সেবা” (/about & Category view)
+// ============================================================================
+export interface ServiceItem {
+  id: string;
+  title: string;
+  description: string;
+  iconName?: string;
+  imageUrl?: string;
+  active: boolean;
+  sort_order: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ServicesConfig {
+  pageTitle: string;
+  pageSubtitle: string;
+  services: ServiceItem[];
+}
+
+export const DEFAULT_SERVICES_CONFIG: ServicesConfig = {
+  pageTitle: "আমাদের সেবা — স্মার্ট নোয়াখালী",
+  pageSubtitle:
+    "স্মার্ট নোয়াখালী হলো নোয়াখালী জেলার একটি ডিজিটাল সেবা ডিরেক্টরি, যেখানে এক ক্লিকেই পাবেন আইনজীবী, ডাক্তার, পুলিশ, ফায়ার সার্ভিস, রক্তদাতা সহ সকল গুরুত্বপূর্ণ যোগাযোগ।",
+  services: [
+    {
+      id: "srv_emergency_directory",
+      title: "জরুরী যোগাযোগ ডিরেক্টরি",
+      description: "এলাকার সকল জরুরী সেবার নম্বর (আইনজীবী, ডাক্তার, পুলিশ, ফায়ার সার্ভিস) এক জায়গায় রাখা ও তাৎক্ষণিক কল করার সুবিধা।",
+      iconName: "PhoneCall",
+      active: true,
+      sort_order: 1,
+    },
+    {
+      id: "srv_blood_donor_network",
+      title: "স্বেচ্ছা রক্তদাতা নেটওয়ার্ক",
+      description: "রক্তদাতাদের সাথে দ্রুত যোগাযোগের সুযোগ ও জরুরী প্রয়োজনে রক্তের আবেদন প্রকাশের সার্বক্ষণিক সুবিধা।",
+      iconName: "Droplet",
+      active: true,
+      sort_order: 2,
+    },
+    {
+      id: "srv_reliable_verified_info",
+      title: "স্বচ্ছ ও নির্ভরযোগ্য তথ্য প্রদান",
+      description: "নোয়াখালী জেলার প্রতিটি উপজেলা ও ইউনিয়নের সঠিক, আপডেটেড ও যাচাইকৃত সেবা ও যোগাযোগের তথ্য।",
+      iconName: "Shield",
+      active: true,
+      sort_order: 3,
+    },
+    {
+      id: "srv_citizen_digital_platform",
+      title: "এলাকাবাসীর সহজ ডিজিটাল প্ল্যাটফর্ম",
+      description: "স্মার্টফোন ও ওয়েবে যে কারো ব্যবহারের জন্য অত্যন্ত সহজ ডিজিটাল প্ল্যাটফর্ম এবং সার্বক্ষণিক লাইভ চ্যাট সাপোর্ট।",
+      iconName: "Smartphone",
+      active: true,
+      sort_order: 4,
+    },
+  ],
+};
+
+function parseServicesConfig(raw: string | null | undefined): ServicesConfig | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      const pageTitle =
+        typeof parsed.pageTitle === "string" && parsed.pageTitle.trim()
+          ? parsed.pageTitle.trim()
+          : DEFAULT_SERVICES_CONFIG.pageTitle;
+      const pageSubtitle =
+        typeof parsed.pageSubtitle === "string"
+          ? parsed.pageSubtitle
+          : DEFAULT_SERVICES_CONFIG.pageSubtitle;
+      const rawList = Array.isArray(parsed.services) ? parsed.services : [];
+      const services: ServiceItem[] = rawList
+        .filter((s: any) => s && typeof s === "object" && s.title)
+        .map((s: any, idx: number) => ({
+          id: String(s.id || `srv_${idx + 1}`),
+          title: String(s.title || "").trim(),
+          description: String(s.description || "").trim(),
+          iconName: typeof s.iconName === "string" && s.iconName ? s.iconName : undefined,
+          imageUrl: typeof s.imageUrl === "string" && s.imageUrl ? s.imageUrl : undefined,
+          active: s.active !== false,
+          sort_order: typeof s.sort_order === "number" ? s.sort_order : idx + 1,
+          createdAt: s.createdAt,
+          updatedAt: s.updatedAt,
+        }))
+        .sort((a: ServiceItem, b: ServiceItem) => a.sort_order - b.sort_order);
+
+      return {
+        pageTitle,
+        pageSubtitle,
+        services: services.length > 0 ? services : DEFAULT_SERVICES_CONFIG.services,
+      };
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+export function useServicesConfig() {
+  const [config, setConfig] = useState<ServicesConfig>(() => {
+    try {
+      const cached = localStorage.getItem(LOCAL_SERVICES_KEY);
+      return parseServicesConfig(cached) ?? DEFAULT_SERVICES_CONFIG;
+    } catch {
+      return DEFAULT_SERVICES_CONFIG;
+    }
+  });
+
+  useEffect(() => {
+    // 1. Initial direct document read
+    getDoc(doc(db, "settings", SERVICES_CONFIG_ID))
+      .then((snap) => {
+        if (snap.exists()) {
+          const parsed = parseServicesConfig(snap.data()?.logo_url);
+          if (parsed) {
+            setConfig(parsed);
+            try {
+              localStorage.setItem(LOCAL_SERVICES_KEY, JSON.stringify(parsed));
+            } catch {}
+          }
+        }
+      })
+      .catch(() => {});
+
+    // 2. Real-time direct doc listener
+    const unsubDirect = onSnapshot(
+      doc(db, "settings", SERVICES_CONFIG_ID),
+      (snap) => {
+        if (snap.exists()) {
+          const parsed = parseServicesConfig(snap.data()?.logo_url);
+          if (parsed) {
+            setConfig(parsed);
+            try {
+              localStorage.setItem(LOCAL_SERVICES_KEY, JSON.stringify(parsed));
+            } catch {}
+          }
+        }
+      },
+      () => {}
+    );
+
+    // 3. Collection query listener for backwards-compatibility
+    const q = query(collection(db, "settings"), where("visible", "==", true));
+    const unsubCol = onSnapshot(
+      q,
+      (snap) => {
+        const docSnap = snap.docs.find((d) => d.id === SERVICES_CONFIG_ID);
+        if (docSnap) {
+          const parsed = parseServicesConfig(docSnap.data().logo_url);
+          if (parsed) {
+            setConfig(parsed);
+            try {
+              localStorage.setItem(LOCAL_SERVICES_KEY, JSON.stringify(parsed));
+            } catch {}
+          }
+        }
+      },
+      () => {}
+    );
+
+    return () => {
+      unsubDirect();
+      unsubCol();
+    };
+  }, []);
+
+  const saveServicesConfig = useCallback(async (next: ServicesConfig) => {
+    const serialized = JSON.stringify(next);
+    try {
+      localStorage.setItem(LOCAL_SERVICES_KEY, serialized);
+    } catch {}
+    setConfig(next);
+    await upsertSettingDoc(SERVICES_CONFIG_ID, serialized, { visible: true });
+  }, []);
+
+  const addService = useCallback(
+    async (newService: Omit<ServiceItem, "id" | "sort_order">) => {
+      const newId = `srv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const item: ServiceItem = {
+        ...newService,
+        id: newId,
+        sort_order: (config.services?.length || 0) + 1,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      const next: ServicesConfig = {
+        ...config,
+        services: [...config.services, item],
+      };
+      await saveServicesConfig(next);
+      return item;
+    },
+    [config, saveServicesConfig]
+  );
+
+  const updateService = useCallback(
+    async (id: string, patch: Partial<ServiceItem>) => {
+      const nextServices = config.services.map((s) =>
+        s.id === id ? { ...s, ...patch, updatedAt: new Date().toISOString() } : s
+      );
+      const next: ServicesConfig = { ...config, services: nextServices };
+      await saveServicesConfig(next);
+    },
+    [config, saveServicesConfig]
+  );
+
+  const deleteService = useCallback(
+    async (id: string) => {
+      const nextServices = config.services
+        .filter((s) => s.id !== id)
+        .map((s, idx) => ({ ...s, sort_order: idx + 1 }));
+      const next: ServicesConfig = { ...config, services: nextServices };
+      await saveServicesConfig(next);
+    },
+    [config, saveServicesConfig]
+  );
+
+  const reorderServices = useCallback(
+    async (reordered: ServiceItem[]) => {
+      const normalized = reordered.map((s, idx) => ({ ...s, sort_order: idx + 1 }));
+      const next: ServicesConfig = { ...config, services: normalized };
+      await saveServicesConfig(next);
+    },
+    [config, saveServicesConfig]
+  );
+
+  const updatePageHeader = useCallback(
+    async (title: string, subtitle: string) => {
+      const next: ServicesConfig = {
+        ...config,
+        pageTitle: title,
+        pageSubtitle: subtitle,
+      };
+      await saveServicesConfig(next);
+    },
+    [config, saveServicesConfig]
+  );
+
+  return {
+    config,
+    services: config.services,
+    saveServicesConfig,
+    addService,
+    updateService,
+    deleteService,
+    reorderServices,
+    updatePageHeader,
   };
 }
