@@ -681,12 +681,12 @@ export interface StaffProfileEntry {
 const DEFAULT_STAFF_PROFILES: Record<string, StaffProfileEntry> = {
   super_admin_mahmudul: {
     uid: "super_admin_mahmudul",
-    email: SUPER_ADMIN_EMAIL,
-    full_name: "Mahmudul Hasan (সুপার এডমিন)",
-    username: "mahmudul",
-    phone: "01850999178",
-    designation: "মেইন সুপার এডমিন • স্মার্ট নোয়াখালী",
-    role_label: "সুপার এডমিন",
+    email: "", // Masked for privacy
+    full_name: "সুপার অ্যাডমিন",
+    username: "super_admin",
+    phone: "", // Masked for privacy
+    designation: "মেইন সুপার অ্যাডমিন • স্মার্ট নোয়াখালী",
+    role_label: "সুপার অ্যাডমিন",
     photo_url: "",
     bio: "স্মার্ট নোয়াখালী মেইন এডমিন ও সিস্টেম নিয়ন্ত্রক",
     updated_at: new Date().toISOString(),
@@ -817,8 +817,26 @@ export function useStaffProfiles() {
           (Boolean(p?.username && typeof p.username === "string" && p.username.trim().toLowerCase() === lowerKey))
       );
       if (byMatch) return byMatch;
+      const isCurrentViewerSuperAdmin = isSuperAdminEmail(auth.currentUser?.email);
+
       if (isSuperAdminEmail(key) || key === "super_admin_mahmudul") {
-        return profiles.super_admin_mahmudul || DEFAULT_STAFF_PROFILES.super_admin_mahmudul;
+        const rawProfile = profiles.super_admin_mahmudul || DEFAULT_STAFF_PROFILES.super_admin_mahmudul;
+        if (!isCurrentViewerSuperAdmin) {
+          // Privacy protection: mask sensitive email, phone, and username for non-super-admin viewers
+          return {
+            ...rawProfile,
+            email: "",
+            username: "super_admin",
+            full_name: "সুপার অ্যাডমিন",
+            phone: "",
+            role_label: "সুপার অ্যাডমিন",
+            designation: "মেইন সুপার অ্যাডমিন • স্মার্ট নোয়াখালী",
+          };
+        }
+        return {
+          ...rawProfile,
+          role_label: "সুপার অ্যাডমিন",
+        };
       }
       if (lowerKey === REGULAR_ADMIN_EMAIL.toLowerCase()) {
         return {
@@ -827,8 +845,8 @@ export function useStaffProfiles() {
           full_name: "Admin (Smart Noakhali)",
           username: "admin_bear",
           phone: "",
-          designation: "এডমিন • স্মার্ট নোয়াখালী",
-          role_label: "এডমিন",
+          designation: "অ্যাডমিন • স্মার্ট নোয়াখালী",
+          role_label: "অ্যাডমিন",
           photo_url: "",
           bio: "",
           updated_at: new Date().toISOString(),
@@ -1348,6 +1366,9 @@ export interface SiteMetaConfig {
   siteTitle: string;
   tagline: string;
   helplinePhone: string;
+  contactPhone?: string;
+  contactEmail?: string;
+  contactAddress?: string;
   emergencyNotice: string;
   aiChatEnabled: boolean;
   aiWelcomeMessage: string;
@@ -1362,6 +1383,9 @@ export const DEFAULT_SITE_META: SiteMetaConfig = {
   siteTitle: "স্মার্ট নোয়াখালী",
   tagline: "নোয়াখালী জেলার সকল জরুরী সেবা ও তথ্যের ডিজিটাল প্ল্যাটফর্ম",
   helplinePhone: "01850999178",
+  contactPhone: "01850999178",
+  contactEmail: "e.smartnoakhali@gmail.com",
+  contactAddress: "কালাসর্দ্দা, গোবিন্দপুর, কুতুবের হাট-৩৮৬২, নবীপুর, সেনবাগ, নোয়াখালী, বাংলাদেশ।",
   emergencyNotice: "জরুরী রক্ত বা যেকোনো তথ্যের জন্য নিচের লাইভ চ্যাট বা এআই সহকারী ব্যবহার করুন।",
   aiChatEnabled: true,
   aiWelcomeMessage:

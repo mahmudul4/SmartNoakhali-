@@ -76,7 +76,7 @@ function AccountSecurityStatus({ onLockNow }: { onLockNow?: () => void }) {
       <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 text-xs">
         <div className="rounded-xl bg-muted/40 p-2.5">
           <p className="text-[10px] text-muted-foreground">লগইনকৃত একাউন্ট</p>
-          <p className="mt-0.5 font-semibold text-foreground">{user?.email ?? SUPER_ADMIN_EMAIL}</p>
+          <p className="mt-0.5 font-semibold text-foreground">{user?.email || "স্টাফ অ্যাকাউন্ট"}</p>
         </div>
         <div className="rounded-xl bg-muted/40 p-2.5">
           <p className="text-[10px] text-muted-foreground">অ্যাকসেস লেভেল</p>

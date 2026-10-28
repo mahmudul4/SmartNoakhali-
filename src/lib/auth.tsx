@@ -288,7 +288,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const effectiveRoles: Role[] = isSuper
               ? (Array.from(new Set([...docRoles, "admin", "moderator", "editor", "user"])) as Role[])
               : isRegularBootstrappedAdmin
-              ? (Array.from(new Set([...docRoles, ...vaultRoles, ...sessionRoles, "editor"])) as Role[])
+              ? (Array.from(new Set([...docRoles, ...vaultRoles, ...sessionRoles, "admin", "editor", "user"])) as Role[])
               : (Array.from(new Set([...docRoles, ...vaultRoles, ...sessionRoles])) as Role[]);
             setRoles(effectiveRoles);
             const resolvedUsername =
@@ -306,7 +306,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const effectiveRoles: Role[] = isSuper
               ? ["admin", "moderator", "editor", "user"]
               : isRegularBootstrappedAdmin
-              ? (Array.from(new Set([...vaultRoles, ...sessionRoles, "editor", "user"])) as Role[])
+              ? (Array.from(new Set([...vaultRoles, ...sessionRoles, "admin", "editor", "user"])) as Role[])
               : vaultRoles.length > 0 || sessionRoles.length > 0
               ? (Array.from(new Set([...vaultRoles, ...sessionRoles, "user"])) as Role[])
               : ["user"];
@@ -338,7 +338,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const effectiveRoles: Role[] = isSuper
             ? ["admin", "moderator", "editor", "user"]
             : isRegularBootstrappedAdmin
-            ? (Array.from(new Set([...vaultRoles, ...sessionRoles, "editor", "user"])) as Role[])
+            ? (Array.from(new Set([...vaultRoles, ...sessionRoles, "admin", "editor", "user"])) as Role[])
             : vaultRoles.length > 0 || sessionRoles.length > 0
             ? (Array.from(new Set([...vaultRoles, ...sessionRoles, "user"])) as Role[])
             : ["user"];

@@ -45,6 +45,7 @@ import {
   Sparkles,
   Database,
   Droplet,
+  MapPin,
 } from "lucide-react";
 import { toast } from "sonner";
 import { auth, SUPER_ADMIN_EMAIL } from "@/lib/firebase";
@@ -473,10 +474,10 @@ function getRoleBadgeText(
   isEditor: boolean,
   isModerator: boolean
 ) {
-  if (isMainAdmin) return "সুপার এডমিন (সব অ্যাকসেস)";
-  if (isAdmin) return "এডমিন (নির্ধারিত অ্যাকসেস)";
+  if (isMainAdmin) return "সুপার অ্যাডমিন";
+  if (isAdmin) return "অ্যাডমিন";
   if (isEditor) return "এডিটর";
-  if (isModerator) return "মোডারেটর";
+  if (isModerator) return "মডারেটর";
   return "স্টাফ";
 }
 
@@ -646,7 +647,7 @@ function Dashboard({
                 </span>
               </div>
               <p className="text-xs opacity-90">
-                {user?.email || SUPER_ADMIN_EMAIL} •{" "}
+                {user?.email || (isMainAdmin ? SUPER_ADMIN_EMAIL : "সুপার অ্যাডমিন")} •{" "}
                 {totalPending > 0 ? `${totalPending} টি অপেক্ষমাণ অনুমোদন` : "সব আপডেট ও সিঙ্কড"}
               </p>
               <button
@@ -3957,7 +3958,7 @@ function UsersEditor() {
             <ShieldCheck className="h-4 w-4 text-amber-700" /> সুপার এডমিন মাস্টার ইউজার, অ্যাকসেস ও পাসওয়ার্ড ভল্ট
           </p>
           <p className="mt-0.5 text-[11px] opacity-90">
-            শুধুমাত্র সুপার এডমিন ({SUPER_ADMIN_EMAIL}) এডমিন, এডিটর, মোডারেটর ও সাধারণ ইউজারসহ সকলের পাসওয়ার্ড, ক্যাটাগরি অ্যাকসেস এবং জমাকৃত সকল তথ্য দেখতে ও নিয়ন্ত্রণ করতে পারবেন।
+            শুধুমাত্র প্রধান সুপার অ্যাডমিন এডমিন, এডিটর, মডারেটর ও সাধারণ ইউজারসহ সকলের পাসওয়ার্ড, ক্যাটাগরি অ্যাকসেস এবং জমাকৃত সকল তথ্য দেখতে ও নিয়ন্ত্রণ করতে পারবেন।
           </p>
         </div>
         <button
@@ -4323,7 +4324,7 @@ function UsersEditor() {
                 {/* Role & Account Actions */}
                 {isProtectedSuper ? (
                   <p className="mt-2 rounded-xl bg-amber-500/10 px-3 py-1.5 text-[11px] font-semibold text-amber-900">
-                    🔒 মেইন সুপার এডমিন ({SUPER_ADMIN_EMAIL}) স্থায়ীভাবে সুরক্ষিত — কেউ রিমোভ, স্থগিত বা বাদ দিতে পারবে না।
+                    🔒 মেইন সুপার অ্যাডমিন স্থায়ীভাবে সুরক্ষিত — কেউ রিমোভ, স্থগিত বা বাদ দিতে পারবে না।
                   </p>
                 ) : (
                   <div className="mt-2.5 flex flex-wrap gap-1.5">
@@ -5052,7 +5053,7 @@ function AccessEditor() {
     <div className="space-y-4">
       <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-900">
         <p className="flex items-center gap-1.5 font-bold">
-          <ShieldCheck className="h-4 w-4 text-amber-700" /> মেইন সুপার এডমিন ({SUPER_ADMIN_EMAIL})
+          <ShieldCheck className="h-4 w-4 text-amber-700" /> মেইন সুপার অ্যাডমিন
         </p>
         <p className="mt-0.5">
           সুপার এডমিনের জন্য সকল ক্যাটাগরি ({allCategories.length} টি), অনুদান, ইউজার ও সেটিংস স্বয়ংক্রিয়ভাবে উন্মুক্ত। নিচে গ্রাহকদের পাঠানো ক্যাটাগরি অ্যাকসেস রিকোয়েস্ট অনুমোদন করতে বা যেকোনো ইউজারকে সরাসরি ক্যাটাগরি অ্যাকসেস দিতে ও বাতিল করতে পারবেন।
@@ -5492,12 +5493,30 @@ function SettingsAdminPanel() {
 
   async function handleSaveMeta(e: React.FormEvent) {
     e.preventDefault();
+
+    const phone = (draft.contactPhone || draft.helplinePhone || "").trim();
+    const email = (draft.contactEmail || "").trim();
+    const address = (draft.contactAddress || "").trim();
+
+    const cleanPhoneDigits = phone.replace(/[\s-]/g, "");
+    if (phone && !/^01[3-9]\d{8}$/.test(cleanPhoneDigits)) {
+      return toast.error("সঠিক বাংলাদেশি মোবাইল নম্বর দিন (যেমন: 01850999178)");
+    }
+
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return toast.error("সঠিক ইমেইল এড্রেস লিখুন (যেমন: e.smartnoakhali@gmail.com)");
+    }
+
+    if (!address) {
+      return toast.error("আমাদের সম্পর্কে পেজের জন্য ঠিকানা ফাঁকা রাখা যাবে না");
+    }
+
     setSavingMeta(true);
     try {
       await saveSiteMeta(draft);
-      toast.success("সাইট সেটিংস ও কনফিগারেশন সংরক্ষিত হয়েছে!");
+      toast.success("আমাদের সম্পর্কে যোগাযোগের তথ্য ও সিস্টেম সেটিংস সংরক্ষিত হয়েছে!");
     } catch (err: any) {
-      toast.error(err?.message || "ত্রুটি");
+      toast.error(err?.message || "সংরক্ষণ ত্রুটি");
     } finally {
       setSavingMeta(false);
     }
@@ -5686,6 +5705,76 @@ function SettingsAdminPanel() {
               onChange={(e) => setDraft({ ...draft, aiWelcomeMessage: e.target.value })}
               className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
             />
+          </div>
+        </div>
+
+        {/* Dedicated Section: আমাদের সম্পর্কে — যোগাযোগের তথ্য (About Page Contact Settings) */}
+        <div className="rounded-2xl border-2 border-primary/30 bg-primary/5 p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-primary/20 pb-2.5">
+            <div>
+              <p className="flex items-center gap-1.5 font-display text-sm font-bold text-primary-deep">
+                <MapPin className="h-4 w-4 text-primary" /> আমাদের সম্পর্কে — যোগাযোগের তথ্য (About Page Contact Settings)
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                https://smartnoakhali.com/about পেজের ফোন নম্বর, অফিসিয়াল ইমেইল ও পূর্ণ ঠিকানা এখান থেকে পরিবর্তন ও নিয়ন্ত্রণ করুন।
+              </p>
+            </div>
+            <Link
+              to="/about"
+              target="_blank"
+              className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary hover:bg-primary/20"
+            >
+              পেজ দেখুন ↗
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="text-[11px] font-bold text-foreground">
+                ১. যোগাযোগ / ফোন নম্বর
+              </label>
+              <input
+                value={draft.contactPhone ?? draft.helplinePhone ?? "01850999178"}
+                onChange={(e) => setDraft({ ...draft, contactPhone: e.target.value })}
+                placeholder="01850999178"
+                className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 font-mono text-xs font-semibold focus:border-primary focus:outline-none"
+              />
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                বাংলাদেশি ১১ সংখ্যার নম্বর (যেমন: 01850999178)
+              </p>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-bold text-foreground">
+                ২. অফিসিয়াল ইমেইল
+              </label>
+              <input
+                type="email"
+                value={draft.contactEmail ?? "e.smartnoakhali@gmail.com"}
+                onChange={(e) => setDraft({ ...draft, contactEmail: e.target.value })}
+                placeholder="e.smartnoakhali@gmail.com"
+                className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold focus:border-primary focus:outline-none"
+              />
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                অফিসিয়াল যোগাযোগের ইমেইল অ্যাড্রেস
+              </p>
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="text-[11px] font-bold text-foreground">
+                ৩. পূর্ণ ঠিকানা
+              </label>
+              <textarea
+                value={draft.contactAddress ?? "কালাসর্দ্দা, গোবিন্দপুর, কুতুবের হাট-৩৮৬২, নবীপুর, সেনবাগ, নোয়াখালী, বাংলাদেশ।"}
+                onChange={(e) => setDraft({ ...draft, contactAddress: e.target.value })}
+                rows={2}
+                placeholder="কালাসর্দ্দা, গোবিন্দপুর, কুতুবের হাট-৩৮৬২, নবীপুর, সেনবাগ, নোয়াখালী, বাংলাদেশ।"
+                className="mt-1 w-full rounded-xl border border-border bg-background p-2.5 text-xs font-medium focus:border-primary focus:outline-none"
+              />
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                আমাদের সম্পর্কে পেজে প্রদর্শিত পূর্ণ কার্যালয় বা যোগাযোগের ঠিকানা
+              </p>
+            </div>
           </div>
         </div>
 

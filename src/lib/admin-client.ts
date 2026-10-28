@@ -588,38 +588,40 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
   const vault = await syncVaultFromCloud();
   const staffProfiles = readLocalStaffProfiles();
 
+  const isCurrentViewerSuperAdmin = isSuperAdminEmail(auth.currentUser?.email);
+
   const defaultSuperAdminRow: AdminUserRecord = {
     id:
       auth.currentUser?.uid && isSuperAdminEmail(auth.currentUser.email)
         ? auth.currentUser.uid
         : "super_admin_mahmudul",
-    email: SUPER_ADMIN_EMAIL,
+    email: isCurrentViewerSuperAdmin ? SUPER_ADMIN_EMAIL : "•••••••• (সুরক্ষিত)",
     password: "•••••••• (Firebase Auth সুরক্ষিত)",
     photo_url:
       staffProfiles.super_admin_mahmudul?.photo_url ||
       staffProfiles[SUPER_ADMIN_EMAIL.toLowerCase()]?.photo_url ||
       vault[SUPER_ADMIN_EMAIL.toLowerCase()]?.photo_url ||
       null,
-    designation:
-      staffProfiles.super_admin_mahmudul?.designation ||
-      "মেইন সুপার এডমিন • স্মার্ট নোয়াখালী",
+    designation: isCurrentViewerSuperAdmin
+      ? (staffProfiles.super_admin_mahmudul?.designation || "মেইন সুপার অ্যাডমিন • স্মার্ট নোয়াখালী")
+      : "সিস্টেম কর্তৃপক্ষ • সুপার অ্যাডমিন",
     created_at: new Date().toISOString(),
     last_sign_in_at: new Date().toISOString(),
     banned_until: null,
     roles: ["admin", "moderator", "editor", "user"],
     profile: {
-      full_name:
-        staffProfiles.super_admin_mahmudul?.full_name ||
-        "Mahmudul Hasan (Super Admin)",
-      username: "mahmudul",
-      phone: "01850999178",
+      full_name: isCurrentViewerSuperAdmin
+        ? (staffProfiles.super_admin_mahmudul?.full_name || "Mahmudul Hasan (Super Admin)")
+        : "সুপার অ্যাডমিন",
+      username: isCurrentViewerSuperAdmin ? "mahmudul" : "super_admin",
+      phone: isCurrentViewerSuperAdmin ? "01850999178" : "••••••••",
       suspended: false,
       must_change_password: false,
       photo_url:
         staffProfiles.super_admin_mahmudul?.photo_url ||
         staffProfiles[SUPER_ADMIN_EMAIL.toLowerCase()]?.photo_url ||
         null,
-      designation: "মেইন সুপার এডমিন",
+      designation: isCurrentViewerSuperAdmin ? "মেইন সুপার অ্যাডমিন" : "সুপার অ্যাডমিন",
     },
   };
 
@@ -636,11 +638,11 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
     designation:
       defaultRegularAdminProfile?.designation ||
       defaultRegularAdminVault?.designation ||
-      "এডিটর (সাধারণ এডমিন)",
+      "অ্যাডমিন • স্মার্ট নোয়াখালী",
     created_at: defaultRegularAdminVault?.updated_at || new Date().toISOString(),
     last_sign_in_at: defaultRegularAdminVault?.updated_at || new Date().toISOString(),
     banned_until: defaultRegularAdminVault?.suspended ? "suspended" : null,
-    roles: defaultRegularAdminVault?.roles || ["editor", "user"],
+    roles: Array.from(new Set([...(defaultRegularAdminVault?.roles || []), "admin", "user"])),
     profile: {
       full_name:
         defaultRegularAdminProfile?.full_name ||
@@ -657,7 +659,7 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
         defaultRegularAdminProfile?.photo_url ||
         defaultRegularAdminVault?.photo_url ||
         null,
-      designation: defaultRegularAdminVault?.designation || "শুধু এডমিন",
+      designation: defaultRegularAdminVault?.designation || "অ্যাডমিন",
     },
   };
 
@@ -873,7 +875,25 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
       uniqueMap.set(primaryKey, item);
     }
   }
-  return Array.from(uniqueMap.values());
+  return Array.from(uniqueMap.values()).map((u): AdminUserRecord => {
+    if (!isCurrentViewerSuperAdmin && isProtectedMainSuperAdmin({ id: u.id, email: u.email, username: u.profile?.username })) {
+      return {
+        ...u,
+        email: "•••••••• (সুরক্ষিত)",
+        designation: "সিস্টেম কর্তৃপক্ষ • সুপার অ্যাডমিন",
+        profile: {
+          full_name: "সুপার অ্যাডমিন",
+          username: "super_admin",
+          phone: "••••••••",
+          designation: "সুপার অ্যাডমিন",
+          suspended: false,
+          must_change_password: false,
+          photo_url: u.profile?.photo_url || null,
+        },
+      };
+    }
+    return u;
+  });
 }
 
 export async function createUser(opts?: {

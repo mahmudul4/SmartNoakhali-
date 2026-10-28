@@ -45,6 +45,7 @@ import { auth, ensureFirebaseAuthUser } from "@/lib/firebase";
 import { toast } from "sonner";
 import type { AiChatMessage } from "@/components/FloatingLiveChat";
 import { FormattedChatMessage } from "@/lib/chat-formatter";
+import { resolveStaffMessageRole } from "@/lib/chat-roles";
 
 export const Route = createFileRoute("/chat")({
   head: () => ({ meta: [{ title: "লাইভ চ্যাট ও এআই সহকারী — স্মার্ট নোয়াখালী" }] }),
@@ -104,7 +105,7 @@ const QUICK_PROMPTS = [
 ];
 
 function ChatPage() {
-  const { user, isAuthed, isStaff } = useAuth();
+  const { user, isAuthed, isStaff, isMainAdmin, isAdmin, isEditor, isModerator } = useAuth();
   const { getStaffProfile } = useStaffProfiles();
   const { logo } = useLogo();
   const { meta } = useSiteMetaConfig();
@@ -294,14 +295,31 @@ function ChatPage() {
 
   const effectiveUserName = user?.displayName || guestName || "অতিথি গ্রাহক";
   const effectiveUserPhone = user?.phone || guestPhone || "";
+
+  const senderRoleLabel = isStaff
+    ? isMainAdmin
+      ? "সুপার অ্যাডমিন"
+      : isAdmin
+      ? "অ্যাডমিন"
+      : isEditor
+      ? "এডিটর"
+      : isModerator
+      ? "মডারেটর"
+      : "স্টাফ"
+    : "গ্রাহক";
+
+  const effectiveSenderName = isStaff
+    ? isMainAdmin
+      ? "সুপার অ্যাডমিন"
+      : user?.displayName || "অ্যাডমিন সাপোর্ট"
+    : effectiveUserName;
+
   const userMeta = {
     user_name: effectiveUserName,
-    user_email: user?.email || undefined,
-    user_phone: effectiveUserPhone,
-    sender_name: isStaff
-      ? user?.displayName || "এডমিন সাপোর্ট"
-      : effectiveUserName,
-    sender_role_label: isStaff ? "এডমিন" : "গ্রাহক",
+    user_email: isStaff && isMainAdmin ? undefined : user?.email || undefined,
+    user_phone: isStaff && isMainAdmin ? undefined : effectiveUserPhone || undefined,
+    sender_name: effectiveSenderName,
+    sender_role_label: senderRoleLabel,
   };
 
   async function onSend(e: React.FormEvent) {
@@ -727,8 +745,11 @@ function ChatPage() {
             {items.map((m) => {
               const mine = isStaff ? m.sender_role === "staff" : m.sender_role === "user";
               const staffSender = !mine ? getStaffProfile(m.sender_id) : null;
-              const staffName = m.sender_name || staffSender?.full_name || "এডমিন সাপোর্ট";
-              const staffRole = m.sender_role_label || staffSender?.role_label || "এডমিন";
+              const staffRole = resolveStaffMessageRole(m) || m.sender_role_label || staffSender?.role_label || "অ্যাডমিন";
+              const isSuperStaff = staffRole === "সুপার অ্যাডমিন" || m.sender_id === "super_admin_mahmudul";
+              const staffName = isSuperStaff
+                ? "সুপার অ্যাডমিন"
+                : m.sender_name || staffSender?.full_name || "অ্যাডমিন সাপোর্ট";
               const staffPhoto = m.sender_photo || staffSender?.photo_url || logo;
 
               return (

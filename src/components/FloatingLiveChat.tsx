@@ -39,6 +39,7 @@ import {
 } from "@/lib/cloud";
 import { AttachmentView, VoiceRecorderButton, playChatChime } from "@/routes/chat";
 import { FormattedChatMessage } from "@/lib/chat-formatter";
+import { resolveStaffMessageRole } from "@/lib/chat-roles";
 
 export interface AiChatMessage {
   id: string;
@@ -77,7 +78,7 @@ const QUICK_AI_PROMPTS = [
 ];
 
 export function FloatingLiveChat() {
-  const { user, isAuthed, isStaff } = useAuth();
+  const { user, isAuthed, isStaff, isMainAdmin, isAdmin, isEditor, isModerator } = useAuth();
   const { getStaffProfile } = useStaffProfiles();
   const { logo } = useLogo();
   const { meta } = useSiteMetaConfig();
@@ -297,16 +298,30 @@ export function FloatingLiveChat() {
     }
   }
 
+  const senderRoleLabel = isStaff
+    ? isMainAdmin
+      ? "সুপার অ্যাডমিন"
+      : isAdmin
+      ? "অ্যাডমিন"
+      : isEditor
+      ? "এডিটর"
+      : isModerator
+      ? "মডারেটর"
+      : "স্টাফ"
+    : "গ্রাহক";
+
   const effectiveSenderName = isStaff
-    ? user?.displayName || "এডমিন সাপোর্ট"
+    ? isMainAdmin
+      ? "সুপার অ্যাডমিন"
+      : user?.displayName || "অ্যাডমিন সাপোর্ট"
     : user?.displayName || guestName || "অতিথি গ্রাহক";
 
   const userMeta = {
     user_name: effectiveSenderName,
-    user_email: user?.email || undefined,
-    user_phone: user?.phone || guestPhone || undefined,
+    user_email: isStaff && isMainAdmin ? undefined : user?.email || undefined,
+    user_phone: isStaff && isMainAdmin ? undefined : user?.phone || guestPhone || undefined,
     sender_name: effectiveSenderName,
-    sender_role_label: isStaff ? "এডমিন" : "গ্রাহক",
+    sender_role_label: senderRoleLabel,
   };
 
   async function onSend(e: React.FormEvent) {
@@ -681,8 +696,11 @@ export function FloatingLiveChat() {
                 {items.map((m) => {
                   const mine = m.sender_role === "user";
                   const staffSender = !mine ? getStaffProfile(m.sender_id) : null;
-                  const staffName = m.sender_name || staffSender?.full_name || "এডমিন সাপোর্ট";
-                  const staffRole = m.sender_role_label || staffSender?.role_label || "এডমিন";
+                  const staffRole = resolveStaffMessageRole(m) || m.sender_role_label || staffSender?.role_label || "অ্যাডমিন";
+                  const isSuperStaff = staffRole === "সুপার অ্যাডমিন" || m.sender_id === "super_admin_mahmudul";
+                  const staffName = isSuperStaff
+                    ? "সুপার অ্যাডমিন"
+                    : m.sender_name || staffSender?.full_name || "অ্যাডমিন সাপোর্ট";
                   const staffPhoto = m.sender_photo || staffSender?.photo_url || logo;
 
                   return (

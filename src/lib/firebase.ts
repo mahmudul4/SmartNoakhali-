@@ -289,7 +289,7 @@ export async function ensureCurrentUserProfileDoc(
         const initialRoles = isSuper
           ? ["admin", "moderator", "editor", "user"]
           : isRegAdmin
-          ? ["editor", "user"]
+          ? ["admin", "user"]
           : ["user"];
 
         await setDoc(userRef, {
@@ -317,11 +317,13 @@ export async function ensureCurrentUserProfileDoc(
           }
         }
       } else {
-        // If user exists and is authorized super admin, ensure admin roles are present
-        if (isSuper) {
+        // If user exists and is authorized super admin or regular admin, ensure admin roles are present
+        if (isSuper || isRegAdmin) {
           const data = snap.data();
           const currentRoles: string[] = Array.isArray(data?.roles) ? data.roles : [];
-          const requiredRoles = ["admin", "moderator", "editor", "user"];
+          const requiredRoles = isSuper
+            ? ["admin", "moderator", "editor", "user"]
+            : ["admin", "user"];
           const needsUpdate = requiredRoles.some((r) => !currentRoles.includes(r));
           if (needsUpdate) {
             await setDoc(

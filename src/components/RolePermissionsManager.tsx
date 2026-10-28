@@ -214,7 +214,7 @@ export function RolePermissionsManager() {
         <div className="mt-4 flex items-start gap-2.5 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800">
           <Lock className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
           <div className="space-y-0.5 leading-relaxed">
-            <p className="font-bold">প্রধান এডমিন নিরাপত্তা গ্যারান্টি ({SUPER_ADMIN_EMAIL}):</p>
+            <p className="font-bold">প্রধান সুপার অ্যাডমিন নিরাপত্তা গ্যারান্টি:</p>
             <p className="text-[11px] opacity-90">
               শুধুমাত্র অনুমোদিত প্রধান এডমিন এই পারমিশন পরিবর্তন করতে পারেন। সাধারণ এডমিন বা এডিটররা
               কখনোই প্রধান এডমিনের অধিকার পরিবর্তন বা নিজেদের ক্ষমতা বৃদ্ধি করতে পারবে না।

@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft, Phone, Mail, MapPin } from "lucide-react";
-import { useLogo } from "@/lib/store";
+import { useLogo, useSiteMetaConfig } from "@/lib/store";
 
 export const Route = createFileRoute("/about")({
   head: () => ({ meta: [{ title: "আমাদের সেবা — স্মার্ট নোয়াখালী" }, { name: "description", content: "স্মার্ট নোয়াখালী সম্পর্কে জানুন" }] }),
@@ -9,6 +9,14 @@ export const Route = createFileRoute("/about")({
 
 function About() {
   const { logo } = useLogo();
+  const { meta } = useSiteMetaConfig();
+
+  const phone = meta.contactPhone || meta.helplinePhone || "01850999178";
+  const email = meta.contactEmail || "e.smartnoakhali@gmail.com";
+  const address =
+    meta.contactAddress ||
+    "কালাসর্দ্দা, গোবিন্দপুর, কুতুবের হাট-৩৮৬২, নবীপুর, সেনবাগ, নোয়াখালী, বাংলাদেশ।";
+
   return (
     <div className="mx-auto max-w-3xl px-4 pb-24 pt-4">
       <Link to="/" className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground"><ArrowLeft className="h-4 w-4" /> হোম</Link>
@@ -32,9 +40,9 @@ function About() {
       </div>
 
       <div className="mt-4 grid gap-3">
-        <InfoRow icon={Phone} label="যোগাযোগ" value="01850999178" href="tel:01850999178" />
-        <InfoRow icon={Mail} label="ইমেইল" value="e.smartnoakhali@gmail.com" href="mailto:e.smartnoakhali@gmail.com" />
-        <InfoRow icon={MapPin} label="ঠিকানা" value="কালাসর্দ্দা, গোবিন্দপুর, কুতুবের হাট-৩৮৬২, নবীপুর, সেনবাগ, নোয়াখালী, বাংলাদেশ।" />
+        <InfoRow icon={Phone} label="যোগাযোগ" value={phone} href={`tel:${phone}`} />
+        <InfoRow icon={Mail} label="ইমেইল" value={email} href={`mailto:${email}`} />
+        <InfoRow icon={MapPin} label="ঠিকানা" value={address} />
       </div>
 
       <div className="mt-4 rounded-2xl bg-card p-5 shadow-card">
