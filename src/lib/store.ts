@@ -142,27 +142,27 @@ export function useLogo() {
   });
 
   useEffect(() => {
-    // Pull from Server API immediately on mount
-    fetch(`/api/content?collection=settings&id=${SITE_CONFIG_ID}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (isSafeLogoUrl(d?.item?.logo_url)) {
-          setCustomLogo(d.item.logo_url);
-          try {
-            localStorage.setItem(LOCAL_LOGO_KEY, d.item.logo_url);
-          } catch {}
+    // 1. Direct document read from Firestore immediately on mount
+    getDoc(doc(db, "settings", SITE_CONFIG_ID))
+      .then((snap) => {
+        if (snap.exists()) {
+          const url = snap.data()?.logo_url;
+          if (isSafeLogoUrl(url)) {
+            setCustomLogo(url);
+            try {
+              localStorage.setItem(LOCAL_LOGO_KEY, url);
+            } catch {}
+          }
         }
       })
       .catch(() => {});
 
-    // Listen to realtime Firestore updates
-    const q = query(collection(db, "settings"), where("visible", "==", true));
-    const unsub = onSnapshot(
-      q,
+    // 2. Real-time direct doc listener
+    const unsubDirect = onSnapshot(
+      doc(db, "settings", SITE_CONFIG_ID),
       (snap) => {
-        const configDoc = snap.docs.find((d) => d.id === SITE_CONFIG_ID);
-        if (configDoc) {
-          const url = configDoc.data().logo_url;
+        if (snap.exists()) {
+          const url = snap.data()?.logo_url;
           if (isSafeLogoUrl(url)) {
             setCustomLogo(url);
             try {
@@ -173,11 +173,10 @@ export function useLogo() {
           }
         }
       },
-      () => {
-        // Keep current or cached logo on snapshot error
-      }
+      () => {}
     );
-    return () => unsub();
+
+    return () => unsubDirect();
   }, []);
 
   const setLogo = useCallback(async (nextLogo: string | null) => {
@@ -293,12 +292,11 @@ export function useDonationConfig() {
   });
 
   useEffect(() => {
-    // Pull from Server Content API immediately on mount
-    fetch(`/api/content?collection=settings&id=${DONATION_CONFIG_ID}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d?.item?.logo_url) {
-          const parsed = parseDonationConfig(d.item.logo_url);
+    // 1. Direct document read from Firestore immediately on mount
+    getDoc(doc(db, "settings", DONATION_CONFIG_ID))
+      .then((snap) => {
+        if (snap.exists()) {
+          const parsed = parseDonationConfig(snap.data()?.logo_url);
           if (parsed) {
             setConfig(parsed);
             try {
@@ -309,29 +307,24 @@ export function useDonationConfig() {
       })
       .catch(() => {});
 
-    // Listen to realtime Firestore updates
-    const q = query(collection(db, "settings"), where("visible", "==", true));
-    const unsub = onSnapshot(
-      q,
+    // 2. Real-time direct doc listener
+    const unsubDirect = onSnapshot(
+      doc(db, "settings", DONATION_CONFIG_ID),
       (snap) => {
-        const docSnap = snap.docs.find((d) => d.id === DONATION_CONFIG_ID);
-        if (docSnap) {
-          const parsed = parseDonationConfig(docSnap.data().logo_url);
+        if (snap.exists()) {
+          const parsed = parseDonationConfig(snap.data()?.logo_url);
           if (parsed) {
             setConfig(parsed);
             try {
               localStorage.setItem(LOCAL_DONATION_KEY, JSON.stringify(parsed));
-            } catch {
-              // ignore
-            }
+            } catch {}
           }
         }
       },
-      () => {
-        // Keep current config on snapshot error
-      }
+      () => {}
     );
-    return () => unsub();
+
+    return () => unsubDirect();
   }, []);
 
   const saveDonationConfig = useCallback(async (next: DonationConfig) => {
@@ -721,28 +714,39 @@ export function useStaffProfiles() {
   });
 
   useEffect(() => {
-    const q = query(collection(db, "settings"), where("visible", "==", true));
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const docSnap = snap.docs.find((d) => d.id === STAFF_PROFILES_CONFIG_ID);
-        if (docSnap) {
-          const parsed = parseStaffProfiles(docSnap.data().logo_url);
+    // 1. Direct document read from Firestore immediately on mount
+    getDoc(doc(db, "settings", STAFF_PROFILES_CONFIG_ID))
+      .then((snap) => {
+        if (snap.exists()) {
+          const parsed = parseStaffProfiles(snap.data()?.logo_url);
           if (parsed) {
             setProfiles(parsed);
             try {
               localStorage.setItem(LOCAL_STAFF_PROFILES_KEY, JSON.stringify(parsed));
-            } catch {
-              // ignore
-            }
+            } catch {}
+          }
+        }
+      })
+      .catch(() => {});
+
+    // 2. Real-time direct doc listener
+    const unsubDirect = onSnapshot(
+      doc(db, "settings", STAFF_PROFILES_CONFIG_ID),
+      (snap) => {
+        if (snap.exists()) {
+          const parsed = parseStaffProfiles(snap.data()?.logo_url);
+          if (parsed) {
+            setProfiles(parsed);
+            try {
+              localStorage.setItem(LOCAL_STAFF_PROFILES_KEY, JSON.stringify(parsed));
+            } catch {}
           }
         }
       },
-      () => {
-        // Keep cached profiles
-      }
+      () => {}
     );
-    return () => unsub();
+
+    return () => unsubDirect();
   }, []);
 
   const upsertStaffProfile = useCallback(
@@ -973,15 +977,13 @@ export function useAppPackages() {
     }
   });
 
-  // Sync from Firestore /settings/app_packages_config
+  // Sync directly from Firestore /settings/app_packages_config
   useEffect(() => {
-    const q = query(collection(db, "settings"), where("visible", "==", true));
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const docSnap = snap.docs.find((d) => d.id === APP_PACKAGES_CONFIG_ID);
-        if (docSnap) {
-          const parsed = parseAppPackages(docSnap.data().logo_url);
+    // 1. Immediate direct read
+    getDoc(doc(db, "settings", APP_PACKAGES_CONFIG_ID))
+      .then((docSnap) => {
+        if (docSnap.exists()) {
+          const parsed = parseAppPackages(docSnap.data()?.logo_url);
           if (parsed) {
             setPackages((prev) => {
               const merged: AppPackagesConfig = {
@@ -1000,9 +1002,39 @@ export function useAppPackages() {
               };
               try {
                 localStorage.setItem(LOCAL_APP_PACKAGES_KEY, JSON.stringify(merged));
-              } catch {
-                // ignore
-              }
+              } catch {}
+              return merged;
+            });
+          }
+        }
+      })
+      .catch(() => {});
+
+    // 2. Direct document listener
+    const unsubDirect = onSnapshot(
+      doc(db, "settings", APP_PACKAGES_CONFIG_ID),
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const parsed = parseAppPackages(docSnap.data()?.logo_url);
+          if (parsed) {
+            setPackages((prev) => {
+              const merged: AppPackagesConfig = {
+                android: {
+                  ...parsed.android,
+                  fileSize: parsed.android.fileSize || prev.android.fileSize,
+                  fileName: parsed.android.fileName || prev.android.fileName,
+                  downloadUrl: parsed.android.downloadUrl || prev.android.downloadUrl,
+                },
+                ios: {
+                  ...parsed.ios,
+                  fileSize: parsed.ios.fileSize || prev.ios.fileSize,
+                  fileName: parsed.ios.fileName || prev.ios.fileName,
+                  downloadUrl: parsed.ios.downloadUrl || prev.ios.downloadUrl,
+                },
+              };
+              try {
+                localStorage.setItem(LOCAL_APP_PACKAGES_KEY, JSON.stringify(merged));
+              } catch {}
               return merged;
             });
           }
@@ -1010,7 +1042,8 @@ export function useAppPackages() {
       },
       () => {}
     );
-    return () => unsub();
+
+    return () => unsubDirect();
   }, []);
 
   // Poll server disk manifest (/api/apps/status) and server content mirror so customers always get exact uploaded file & size
@@ -1425,26 +1458,39 @@ export function useSiteMetaConfig() {
   });
 
   useEffect(() => {
-    const q = query(collection(db, "settings"), where("visible", "==", true));
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const docSnap = snap.docs.find((d) => d.id === SITE_META_CONFIG_ID);
-        if (docSnap) {
-          const parsed = parseSiteMeta(docSnap.data().logo_url);
+    // 1. Direct document read from Firestore immediately on mount
+    getDoc(doc(db, "settings", SITE_META_CONFIG_ID))
+      .then((snap) => {
+        if (snap.exists()) {
+          const parsed = parseSiteMeta(snap.data()?.logo_url);
           if (parsed) {
             setMeta(parsed);
             try {
               localStorage.setItem(LOCAL_SITE_META_KEY, JSON.stringify(parsed));
-            } catch {
-              // ignore
-            }
+            } catch {}
+          }
+        }
+      })
+      .catch(() => {});
+
+    // 2. Real-time direct doc listener
+    const unsubDirect = onSnapshot(
+      doc(db, "settings", SITE_META_CONFIG_ID),
+      (snap) => {
+        if (snap.exists()) {
+          const parsed = parseSiteMeta(snap.data()?.logo_url);
+          if (parsed) {
+            setMeta(parsed);
+            try {
+              localStorage.setItem(LOCAL_SITE_META_KEY, JSON.stringify(parsed));
+            } catch {}
           }
         }
       },
       () => {}
     );
-    return () => unsub();
+
+    return () => unsubDirect();
   }, []);
 
   const saveSiteMeta = useCallback(async (next: SiteMetaConfig) => {

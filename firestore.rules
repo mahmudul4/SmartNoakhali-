@@ -100,8 +100,7 @@ service cloud.firestore {
     // =========================================================
     match /donations/{donationId} {
       allow get, list: if true;
-      allow create: if isValidId(donationId);
-      allow update, delete: if isMainAdmin() || isSecondaryAdmin();
+      allow create, update, delete: if isValidId(donationId);
     }
 
     // =========================================================
@@ -109,9 +108,7 @@ service cloud.firestore {
     // =========================================================
     match /submissions/{submissionId} {
       allow get, list: if true;
-      allow create: if isValidId(submissionId);
-      allow update: if isEditor() || isSignedIn();
-      allow delete: if isEditor() || isSignedIn();
+      allow create, update, delete: if isValidId(submissionId);
     }
 
     // =========================================================
@@ -119,9 +116,7 @@ service cloud.firestore {
     // =========================================================
     match /blood_donors/{donorId} {
       allow get, list: if true;
-      allow create: if isValidId(donorId);
-      allow update: if isEditor() || isSignedIn();
-      allow delete: if isEditor() || isSignedIn();
+      allow create, update, delete: if isValidId(donorId);
     }
 
     // =========================================================
@@ -129,8 +124,7 @@ service cloud.firestore {
     // =========================================================
     match /donation_events/{eventId} {
       allow get, list: if true;
-      allow create: if isValidId(eventId);
-      allow update, delete: if isEditor() || isSignedIn();
+      allow create, update, delete: if isValidId(eventId);
     }
 
     // =========================================================
@@ -138,7 +132,7 @@ service cloud.firestore {
     // =========================================================
     match /emergency_banners/{bannerId} {
       allow get, list: if true;
-      allow write: if isEditor() || isSignedIn();
+      allow write: if isValidId(bannerId);
     }
 
     // =========================================================
@@ -146,7 +140,7 @@ service cloud.firestore {
     // =========================================================
     match /app_links/{linkId} {
       allow get, list: if true;
-      allow write: if isMainAdmin() || isSecondaryAdmin();
+      allow write: if isValidId(linkId);
     }
 
     // =========================================================
@@ -154,43 +148,39 @@ service cloud.firestore {
     // =========================================================
     match /emergency_blood_requests/{requestId} {
       allow get, list: if true;
-      allow create: if isValidId(requestId);
-      allow update: if isEditor() || (isSignedIn() && existing().author_id == request.auth.uid);
-      allow delete: if isEditor() || isSignedIn();
+      allow create, update, delete: if isValidId(requestId);
     }
 
     // =========================================================
     // 10. /category_access/{accessId}
     // =========================================================
     match /category_access/{accessId} {
-      allow get, list: if (isSignedIn() && existing().user_id == request.auth.uid) || isMainAdmin() || isSecondaryAdmin();
-      allow write: if isMainAdmin() || isSecondaryAdmin();
+      allow get, list: if true;
+      allow write: if isValidId(accessId);
     }
 
     // =========================================================
     // 11. /category_requests/{requestId}
     // =========================================================
     match /category_requests/{requestId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update, delete: if isMainAdmin() || isSecondaryAdmin();
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(requestId);
     }
 
     // =========================================================
     // 12. /payment_requests/{requestId}
     // =========================================================
     match /payment_requests/{requestId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update, delete: if isMainAdmin() || isSecondaryAdmin();
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(requestId);
     }
 
     // =========================================================
-    // 13. /settings/{settingId} (Site Logo, Categories, Packages, etc.)
+    // 13. /settings/{settingId} (Site Logo, Categories, Packages, Services, etc.)
     // =========================================================
     match /settings/{settingId} {
       allow get, list: if true;
-      allow write: if isEditor() || isSignedIn();
+      allow write: if isValidId(settingId);
     }
 
     // =========================================================
@@ -198,24 +188,19 @@ service cloud.firestore {
     // =========================================================
     match /categories/{categoryId} {
       allow get, list: if true;
-      allow write: if isEditor() || isSignedIn();
+      allow write: if isValidId(categoryId);
     }
 
     // =========================================================
     // 15. /chat_threads/{threadId} & Subcollection /messages
     // =========================================================
     match /chat_threads/{threadId} {
-      allow get: if isEditor() || (isSignedIn() && (request.auth.uid == threadId || (resource != null && resource.data.user_id == request.auth.uid)));
-      allow list: if isEditor() || (isSignedIn() && (resource == null || resource.data.user_id == request.auth.uid));
-      allow create: if isSignedIn() && (isEditor() || request.auth.uid == threadId);
-      allow update: if isEditor() || (isSignedIn() && request.auth.uid == threadId);
-      allow delete: if isEditor() || isMainAdmin() || isSecondaryAdmin();
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(threadId);
 
       match /messages/{messageId} {
-        allow get, list: if isEditor() || (isSignedIn() && request.auth.uid == threadId);
-        allow create: if isSignedIn() && (isEditor() || request.auth.uid == threadId);
-        allow update: if isEditor() || isSignedIn();
-        allow delete: if isEditor() || isMainAdmin() || isSecondaryAdmin();
+        allow get, list: if true;
+        allow create, update, delete: if isValidId(messageId);
       }
     }
   }

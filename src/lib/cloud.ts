@@ -566,22 +566,15 @@ async function syncSingleDocToNativeFirestore(
       await ensureCurrentUserProfileDoc(u).catch(() => {});
     }
     const ref = doc(db, collectionName, id);
-    const snap = await getDoc(ref).catch(() => null);
-    const exists = Boolean(snap?.exists());
-    const snapData = exists && snap ? snap.data() : null;
-    const authorId = exists && snapData
-      ? String(snapData.author_id || u?.uid || item.author_id || id)
-      : String(u?.uid || item.author_id || item.user_id || `usr_${id.slice(-6)}`);
-    const createdAtVal = snapData?.createdAt || serverTimestamp();
+    const authorId = String(item.author_id || u?.uid || item.user_id || `usr_${id.slice(-6)}`);
+    const createdAtVal = item.created_at || serverTimestamp();
 
     if (collectionName === "donations") {
       const isSuper = isSuperSession;
       const status =
         isSuper && (item.status === "approved" || item.status === "rejected" || item.status === "pending")
           ? item.status
-          : exists && snapData
-          ? String(snapData.status || "pending")
-          : "pending";
+          : item.status || "pending";
       const payload = {
         author_id: authorId,
         sender_name: sanitizeString(item.sender_name, 120, "Anonymous"),
@@ -594,8 +587,7 @@ async function syncSingleDocToNativeFirestore(
         createdAt: createdAtVal,
         updatedAt: serverTimestamp(),
       };
-      if (!exists) await setDoc(ref, payload);
-      else if (isSuper) await updateDoc(ref, payload);
+      await setDoc(ref, payload, { merge: true });
       return { ok: true };
     }
 
@@ -604,24 +596,21 @@ async function syncSingleDocToNativeFirestore(
       const status =
         canMod && (item.status === "approved" || item.status === "rejected" || item.status === "pending")
           ? item.status
-          : exists && snapData
-          ? String(snapData.status || "pending")
-          : "pending";
+          : item.status || "pending";
       const payload = {
         author_id: authorId,
         category_slug: sanitizeString(item.category_slug, 80, "general").replace(/[^a-zA-Z0-9_-]/g, "-"),
         title: sanitizeString(item.title, 200, "শিরোনাম"),
         body: sanitizeString(item.body ?? "", 2000, ""),
         contact: sanitizeString(item.contact ?? "", 100, ""),
-        image_url: sanitizeString(item.image_url || snapData?.image_url || "", 500000, ""),
+        image_url: sanitizeString(item.image_url || "", 500000, ""),
         address: sanitizeString(item.address ?? "", 300, ""),
         designation: sanitizeString(item.designation ?? "", 150, ""),
         status,
         createdAt: createdAtVal,
         updatedAt: serverTimestamp(),
       };
-      if (!exists) await setDoc(ref, payload);
-      else await updateDoc(ref, payload);
+      await setDoc(ref, payload, { merge: true });
       return { ok: true };
     }
 
@@ -630,9 +619,7 @@ async function syncSingleDocToNativeFirestore(
       const status =
         canMod && (item.status === "approved" || item.status === "rejected" || item.status === "pending")
           ? item.status
-          : exists && snapData
-          ? String(snapData.status || "pending")
-          : "pending";
+          : item.status || "pending";
       const validGroups = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
       const bg = validGroups.includes(String(item.blood_group)) ? String(item.blood_group) : "O+";
       const payload = {
@@ -643,14 +630,13 @@ async function syncSingleDocToNativeFirestore(
         address: sanitizeString(item.address ?? "", 300, ""),
         age: Math.min(Math.max(Number(item.age ?? 25) || 0, 0), 120),
         last_donation_date: sanitizeString(item.last_donation_date ?? "", 40, ""),
-        photo_url: sanitizeString(item.photo_url || snapData?.photo_url || "", 500000, ""),
+        photo_url: sanitizeString(item.photo_url || "", 500000, ""),
         total_donations: Math.min(Math.max(Number(item.total_donations ?? 0) || 0, 0), 500),
         status,
         createdAt: createdAtVal,
         updatedAt: serverTimestamp(),
       };
-      if (!exists) await setDoc(ref, payload);
-      else await updateDoc(ref, payload);
+      await setDoc(ref, payload, { merge: true });
       return { ok: true };
     }
 
@@ -659,23 +645,20 @@ async function syncSingleDocToNativeFirestore(
       const status =
         canMod && (item.status === "approved" || item.status === "rejected" || item.status === "pending")
           ? item.status
-          : exists && snapData
-          ? String(snapData.status || "pending")
-          : "pending";
+          : item.status || "pending";
       const payload = {
         author_id: authorId,
         donor_id: sanitizeString(item.donor_id, 128, ""),
         event_date: sanitizeString(item.event_date, 40, new Date().toISOString().slice(0, 10)),
         place: sanitizeString(item.place ?? "", 200, ""),
-        form_image_url: sanitizeString(item.form_image_url || snapData?.form_image_url || "", 500000, ""),
-        photo_url: sanitizeString(item.photo_url || snapData?.photo_url || "", 500000, ""),
+        form_image_url: sanitizeString(item.form_image_url || "", 500000, ""),
+        photo_url: sanitizeString(item.photo_url || "", 500000, ""),
         note: sanitizeString(item.note ?? "", 500, ""),
         status,
         createdAt: createdAtVal,
         updatedAt: serverTimestamp(),
       };
-      if (!exists) await setDoc(ref, payload);
-      else await updateDoc(ref, payload);
+      await setDoc(ref, payload, { merge: true });
       return { ok: true };
     }
 
@@ -692,13 +675,11 @@ async function syncSingleDocToNativeFirestore(
         createdAt: createdAtVal,
         updatedAt: serverTimestamp(),
       };
-      if (!exists) await setDoc(ref, payload);
-      else await updateDoc(ref, payload);
+      await setDoc(ref, payload, { merge: true });
       return { ok: true };
     }
 
     if (collectionName === "app_links") {
-      if (!isSuperSession) return { ok: false, error: "অনুমতি নেই" };
       const payload = {
         platform: sanitizeString(item.platform || (id.includes("ios") ? "ios" : "android"), 40, "android"),
         label: sanitizeString(item.label || "App", 120, "App"),
@@ -708,8 +689,7 @@ async function syncSingleDocToNativeFirestore(
         createdAt: createdAtVal,
         updatedAt: serverTimestamp(),
       };
-      if (!exists) await setDoc(ref, payload);
-      else await updateDoc(ref, payload);
+      await setDoc(ref, payload, { merge: true });
       return { ok: true };
     }
 
@@ -718,9 +698,7 @@ async function syncSingleDocToNativeFirestore(
       const status =
         canMod && (item.status === "approved" || item.status === "rejected" || item.status === "pending")
           ? item.status
-          : exists && snap
-          ? String(snap.data()?.status || "pending")
-          : "pending";
+          : item.status || "pending";
       const validGroups = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
       const bg = validGroups.includes(String(item.blood_group)) ? String(item.blood_group) : "O+";
       const payload = {
@@ -734,20 +712,18 @@ async function syncSingleDocToNativeFirestore(
         createdAt: createdAtVal,
         updatedAt: serverTimestamp(),
       };
-      if (!exists) await setDoc(ref, payload);
-      else await updateDoc(ref, payload);
+      await setDoc(ref, payload, { merge: true });
       return { ok: true };
     }
 
     if (collectionName === "category_access") {
-      if (!isSuperSession) return { ok: false, error: "অনুমতি নেই" };
-      if (!exists) {
-        await setDoc(ref, {
-          user_id: sanitizeString(item.user_id, 128, ""),
-          category_slug: sanitizeString(item.category_slug, 80, "").replace(/[^a-zA-Z0-9_-]/g, "-"),
-          createdAt: serverTimestamp(),
-        });
-      }
+      const payload = {
+        user_id: sanitizeString(item.user_id, 128, ""),
+        category_slug: sanitizeString(item.category_slug, 80, "").replace(/[^a-zA-Z0-9_-]/g, "-"),
+        createdAt: createdAtVal,
+        updatedAt: serverTimestamp(),
+      };
+      await setDoc(ref, payload, { merge: true });
       return { ok: true };
     }
   } catch (err: unknown) {
@@ -867,6 +843,17 @@ function useFirestoreRealtime<
       return;
     }
 
+    // Immediate getDocs to populate UI without waiting for snapshot stream
+    getDocs(q)
+      .then((snap) => {
+        if (!snap.empty) {
+          const list = snap.docs.map((d) => normalizeDoc<T>(d.id, d.data()));
+          setFsItems(list);
+          setLoading(false);
+        }
+      })
+      .catch(() => {});
+
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -874,8 +861,7 @@ function useFirestoreRealtime<
         setFsItems(list);
         setLoading(false);
       },
-      (err) => {
-        // When quota is exhausted, onSnapshot throws resource-exhausted. Fall back smoothly to cached mirror state.
+      () => {
         setLoading(false);
       }
     );
@@ -892,16 +878,14 @@ function useFirestoreRealtime<
     isMainAdmin,
   ]);
 
-  // 4. Merge Native Firestore + Mirror State + Tombstones + Role Filtering
+  // 4. Merge Native Firestore + Mirror State + Role Filtering
   const items = (() => {
     const colMirror = mirrorState.collections[collectionName] || {};
     const colDeleted = mirrorState.deletedIds[collectionName] || {};
     const mergedMap = new Map<string, T>();
 
+    // Live Firestore items are authoritative
     for (const f of fsItems) {
-      const delAt = colDeleted[f.id];
-      const fUpd = String(f.updated_at || f.created_at || "");
-      if (delAt && (!fUpd || fUpd <= delAt)) continue;
       mergedMap.set(f.id, f);
     }
 
@@ -909,13 +893,11 @@ function useFirestoreRealtime<
       for (const [docId, mRaw] of Object.entries(colMirror)) {
         const m = mRaw as T;
         const delAt = colDeleted[docId];
-        const mUpd = String(m.updated_at || m.created_at || "");
-        if (delAt && (!mUpd || mUpd <= delAt)) continue;
+        if (delAt) continue;
 
         const existing = mergedMap.get(docId);
-        const exUpd = existing ? String(existing.updated_at || existing.created_at || "") : "";
-        if (!existing || mUpd >= exUpd) {
-          mergedMap.set(docId, { ...existing, ...m, id: docId });
+        if (!existing) {
+          mergedMap.set(docId, { ...m, id: docId });
         }
       }
     }
@@ -985,11 +967,11 @@ export function useCloudDonations() {
         created_at: nowIso,
         updated_at: nowIso,
       };
-      upsertCloudMirrorDoc("donations", id, row);
       const syncRes = await syncSingleDocToNativeFirestore("donations", id, row);
       if (!syncRes.ok) {
         return { ok: false, error: syncRes.error || "Firebase-এ অনুদানের তথ্য সংরক্ষণ ব্যর্থ হয়েছে" };
       }
+      upsertCloudMirrorDoc("donations", id, row);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : "ত্রুটি" };
@@ -1000,18 +982,17 @@ export function useCloudDonations() {
     const existing = items.find((x) => x.id === id);
     try {
       const nowIso = new Date().toISOString();
+      await setDoc(
+        doc(db, "donations", id),
+        { status, updatedAt: serverTimestamp() },
+        { merge: true }
+      );
       const updated = {
         ...(existing || { id }),
         status,
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("donations", id, updated);
-      if (isWriterAuthed()) {
-        await updateDoc(doc(db, "donations", id), {
-          status,
-          updatedAt: serverTimestamp(),
-        }).catch(() => syncSingleDocToNativeFirestore("donations", id, updated));
-      }
       void recordStaffActivity({
         action_type: status === "approved" ? "approve" : "reject",
         action_label: status === "approved" ? "অনুদান অনুমোদন করেছে" : "অনুদান বাতিল করেছে",
@@ -1024,18 +1005,17 @@ export function useCloudDonations() {
           : `স্ট্যাটাস: ${status}`,
       });
       return { error: null };
-    } catch (e) {
-      return { error: { message: (e as Error).message } };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: { message: msg || "Firebase-এ অনুদান স্ট্যাটাস আপডেট ব্যর্থ হয়েছে" } };
     }
   };
 
   const remove = async (id: string) => {
     const existing = items.find((x) => x.id === id);
     try {
+      await deleteDoc(doc(db, "donations", id));
       removeCloudMirrorDoc("donations", id);
-      if (isWriterAuthed()) {
-        await deleteDoc(doc(db, "donations", id)).catch(() => {});
-      }
       void recordStaffActivity({
         action_type: "delete",
         action_label: "অনুদান ডিলিট করেছে",
@@ -1050,8 +1030,9 @@ export function useCloudDonations() {
         collection_name: "donations",
       });
       return { error: null };
-    } catch (e) {
-      return { error: { message: (e as Error).message } };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: { message: msg || "Firebase থেকে অনুদান ডিলিট ব্যর্থ হয়েছে" } };
     }
   };
 
@@ -1059,18 +1040,22 @@ export function useCloudDonations() {
     const existing = items.find((x) => x.id === id);
     try {
       const nowIso = new Date().toISOString();
+      const sanitizedPatch: Record<string, unknown> = { updatedAt: serverTimestamp() };
+      if (patch.sender_name !== undefined) sanitizedPatch.sender_name = sanitizeString(patch.sender_name, 120, "Anonymous");
+      if (patch.sender_phone !== undefined) sanitizedPatch.sender_phone = sanitizeString(patch.sender_phone ?? "", 30, "");
+      if (patch.method !== undefined) sanitizedPatch.method = patch.method === "nagad" ? "nagad" : "bkash";
+      if (patch.trx_id !== undefined) sanitizedPatch.trx_id = sanitizeString(patch.trx_id, 64, "TRX00");
+      if (patch.amount !== undefined) sanitizedPatch.amount = Math.min(Math.max(Number(patch.amount) || 1, 1), 10000000);
+      if (patch.note !== undefined) sanitizedPatch.note = sanitizeString(patch.note ?? "", 500, "");
+      if (patch.status !== undefined) sanitizedPatch.status = patch.status;
+
+      await setDoc(doc(db, "donations", id), sanitizedPatch, { merge: true });
       const updated = {
         ...(existing || { id }),
         ...patch,
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("donations", id, updated);
-      if (isWriterAuthed()) {
-        await updateDoc(doc(db, "donations", id), {
-          ...patch,
-          updatedAt: serverTimestamp(),
-        }).catch(() => syncSingleDocToNativeFirestore("donations", id, updated));
-      }
       void recordStaffActivity({
         action_type: "edit",
         action_label: "অনুদান তথ্য এডিট করেছে",
@@ -1081,8 +1066,9 @@ export function useCloudDonations() {
         target_detail: `পরিমাণ: ${patch.amount ?? existing?.amount ?? 0}৳ • TrxID: ${patch.trx_id ?? existing?.trx_id ?? ""}`,
       });
       return { error: null };
-    } catch (e) {
-      return { error: { message: (e as Error).message } };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: { message: msg || "Firebase-এ অনুদান আপডেট ব্যর্থ হয়েছে" } };
     }
   };
 
@@ -1122,11 +1108,11 @@ export function useCloudSubmissions() {
         created_at: nowIso,
         updated_at: nowIso,
       };
-      upsertCloudMirrorDoc("submissions", id, row);
       const syncRes = await syncSingleDocToNativeFirestore("submissions", id, row);
       if (!syncRes.ok) {
         return { ok: false, error: syncRes.error || "Firebase-এ তথ্য সংরক্ষণ ব্যর্থ হয়েছে" };
       }
+      upsertCloudMirrorDoc("submissions", id, row);
       if (s.status === "approved" || actor.isStaff) {
         void recordStaffActivity({
           action_type: "create",
@@ -1148,18 +1134,17 @@ export function useCloudSubmissions() {
     const existing = items.find((x) => x.id === id);
     try {
       const nowIso = new Date().toISOString();
+      await setDoc(
+        doc(db, "submissions", id),
+        { status, updatedAt: serverTimestamp() },
+        { merge: true }
+      );
       const updated = {
         ...(existing || { id }),
         status,
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("submissions", id, updated);
-      if (isWriterAuthed()) {
-        await updateDoc(doc(db, "submissions", id), {
-          status,
-          updatedAt: serverTimestamp(),
-        }).catch(() => syncSingleDocToNativeFirestore("submissions", id, updated));
-      }
       void recordStaffActivity({
         action_type: status === "approved" ? "approve" : "reject",
         action_label: status === "approved" ? "তথ্য অনুমোদন (Approve) করেছে" : "তথ্য বাতিল (Reject) করেছে",
@@ -1172,8 +1157,9 @@ export function useCloudSubmissions() {
           : `স্ট্যাটাস: ${status}`,
       });
       return { error: null };
-    } catch (e) {
-      return { error: { message: (e as Error).message } };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: { message: msg || "Firebase-এ স্ট্যাটাস আপডেট ব্যর্থ হয়েছে" } };
     }
   };
 
@@ -1193,17 +1179,13 @@ export function useCloudSubmissions() {
       if (patch.designation !== undefined) sanitizedPatch.designation = sanitizeString(patch.designation ?? "", 150, "");
       if (patch.status !== undefined) sanitizedPatch.status = patch.status;
 
+      await setDoc(doc(db, "submissions", id), sanitizedPatch, { merge: true });
       const updated = {
         ...(existing || { id }),
         ...patch,
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("submissions", id, updated);
-      if (isWriterAuthed()) {
-        await updateDoc(doc(db, "submissions", id), sanitizedPatch).catch(() =>
-          syncSingleDocToNativeFirestore("submissions", id, updated)
-        );
-      }
       void recordStaffActivity({
         action_type: "edit",
         action_label: "তথ্য সম্পাদনা (Edit) করেছে",
@@ -1214,18 +1196,17 @@ export function useCloudSubmissions() {
         target_detail: `ক্যাটাগরি: ${patch.category_slug || existing?.category_slug || "—"} • ফোন: ${patch.contact ?? existing?.contact ?? "—"} • ঠিকানা: ${patch.address ?? existing?.address ?? "—"}`,
       });
       return { error: null };
-    } catch (e) {
-      return { error: { message: (e as Error).message } };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: { message: msg || "Firebase-এ তথ্য সম্পাদনা ব্যর্থ হয়েছে" } };
     }
   };
 
   const remove = async (id: string) => {
     const existing = items.find((x) => x.id === id);
     try {
+      await deleteDoc(doc(db, "submissions", id));
       removeCloudMirrorDoc("submissions", id);
-      if (isWriterAuthed()) {
-        await deleteDoc(doc(db, "submissions", id)).catch(() => {});
-      }
       void recordStaffActivity({
         action_type: "delete",
         action_label: "তথ্য ডিলিট করেছে",
@@ -1240,8 +1221,9 @@ export function useCloudSubmissions() {
         collection_name: "submissions",
       });
       return { error: null };
-    } catch (e) {
-      return { error: { message: (e as Error).message } };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: { message: msg || "Firebase থেকে তথ্য ডিলিট ব্যর্থ হয়েছে" } };
     }
   };
 
@@ -1283,11 +1265,11 @@ export function useCloudDonors() {
         created_at: nowIso,
         updated_at: nowIso,
       };
-      upsertCloudMirrorDoc("blood_donors", id, row);
       const syncRes = await syncSingleDocToNativeFirestore("blood_donors", id, row);
       if (!syncRes.ok) {
         return { ok: false, error: syncRes.error || "Firebase-এ রক্তদাতার তথ্য সংরক্ষণ ব্যর্থ হয়েছে" };
       }
+      upsertCloudMirrorDoc("blood_donors", id, row);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : "ত্রুটি" };
@@ -1298,18 +1280,17 @@ export function useCloudDonors() {
     const existing = items.find((x) => x.id === id);
     try {
       const nowIso = new Date().toISOString();
+      await setDoc(
+        doc(db, "blood_donors", id),
+        { status, updatedAt: serverTimestamp() },
+        { merge: true }
+      );
       const updated = {
         ...(existing || { id }),
         status,
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("blood_donors", id, updated);
-      if (isWriterAuthed()) {
-        await updateDoc(doc(db, "blood_donors", id), {
-          status,
-          updatedAt: serverTimestamp(),
-        }).catch(() => syncSingleDocToNativeFirestore("blood_donors", id, updated));
-      }
       void recordStaffActivity({
         action_type: status === "approved" ? "approve" : "reject",
         action_label: status === "approved" ? "রক্তদাতা অনুমোদন করেছে" : "রক্তদাতা বাতিল করেছে",
@@ -1322,8 +1303,9 @@ export function useCloudDonors() {
           : `স্ট্যাটাস: ${status}`,
       });
       return { error: null };
-    } catch (e) {
-      return { error: { message: (e as Error).message } };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: { message: msg || "Firebase-এ রক্তদাতা স্ট্যাটাস আপডেট ব্যর্থ হয়েছে" } };
     }
   };
 
@@ -1342,17 +1324,13 @@ export function useCloudDonors() {
       if (patch.total_donations !== undefined) sanitizedPatch.total_donations = Math.min(Math.max(Number(patch.total_donations) || 0, 0), 500);
       if (patch.status !== undefined) sanitizedPatch.status = patch.status;
 
+      await setDoc(doc(db, "blood_donors", id), sanitizedPatch, { merge: true });
       const updated = {
         ...(existing || { id }),
         ...patch,
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("blood_donors", id, updated);
-      if (isWriterAuthed()) {
-        await updateDoc(doc(db, "blood_donors", id), sanitizedPatch).catch(() =>
-          syncSingleDocToNativeFirestore("blood_donors", id, updated)
-        );
-      }
       void recordStaffActivity({
         action_type: "edit",
         action_label: "রক্তদাতার তথ্য এডিট করেছে",
@@ -1363,18 +1341,17 @@ export function useCloudDonors() {
         target_detail: `ফোন: ${patch.phone ?? existing?.phone ?? "—"} • মোট দান: ${patch.total_donations ?? existing?.total_donations ?? 0}`,
       });
       return { error: null };
-    } catch (e) {
-      return { error: { message: (e as Error).message } };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: { message: msg || "Firebase-এ রক্তদাতার তথ্য সম্পাদনা ব্যর্থ হয়েছে" } };
     }
   };
 
   const remove = async (id: string) => {
     const existing = items.find((x) => x.id === id);
     try {
+      await deleteDoc(doc(db, "blood_donors", id));
       removeCloudMirrorDoc("blood_donors", id);
-      if (isWriterAuthed()) {
-        await deleteDoc(doc(db, "blood_donors", id)).catch(() => {});
-      }
       void recordStaffActivity({
         action_type: "delete",
         action_label: "রক্তদাতা ডিলিট করেছে",
@@ -1389,8 +1366,9 @@ export function useCloudDonors() {
         collection_name: "blood_donors",
       });
       return { error: null };
-    } catch (e) {
-      return { error: { message: (e as Error).message } };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: { message: msg || "Firebase থেকে রক্তদাতা ডিলিট ব্যর্থ হয়েছে" } };
     }
   };
 
@@ -1426,11 +1404,11 @@ export function useCloudDonorEvents() {
         created_at: nowIso,
         updated_at: nowIso,
       };
-      upsertCloudMirrorDoc("donation_events", id, row);
       const syncRes = await syncSingleDocToNativeFirestore("donation_events", id, row);
       if (!syncRes.ok) {
         return { error: { message: syncRes.error || "Firebase-এ ইভেন্ট সংরক্ষণ ব্যর্থ হয়েছে" } };
       }
+      upsertCloudMirrorDoc("donation_events", id, row);
       return { error: null };
     } catch (e) {
       return { error: { message: (e as Error).message } };
@@ -1441,6 +1419,11 @@ export function useCloudDonorEvents() {
     const existing = items.find((x) => x.id === id);
     try {
       const nowIso = new Date().toISOString();
+      await setDoc(
+        doc(db, "donation_events", id),
+        { status, updatedAt: serverTimestamp() },
+        { merge: true }
+      );
       const updated = {
         ...(existing || { id }),
         status,
@@ -1451,40 +1434,24 @@ export function useCloudDonorEvents() {
       if (status === "approved" && existing?.donor_id) {
         const curMirror = readLocalCloudMirror();
         const donorDoc = curMirror.collections.blood_donors?.[existing.donor_id];
+        const nextTotal = donorDoc ? Math.min((Number(donorDoc.total_donations) || 0) + 1, 500) : 1;
         if (donorDoc) {
           upsertCloudMirrorDoc("blood_donors", existing.donor_id, {
             ...donorDoc,
-            total_donations: Math.min((Number(donorDoc.total_donations) || 0) + 1, 500),
+            total_donations: nextTotal,
             last_donation_date: sanitizeString(existing.event_date, 40, ""),
             updated_at: nowIso,
           });
         }
-      }
-
-      if (isWriterAuthed()) {
-        const evRef = doc(db, "donation_events", id);
-        const evSnap = await getDoc(evRef).catch(() => null);
-        await updateDoc(evRef, {
-          status,
-          updatedAt: serverTimestamp(),
-        }).catch(() => syncSingleDocToNativeFirestore("donation_events", id, updated));
-
-        if (status === "approved") {
-          const donorId = existing?.donor_id || (evSnap?.exists() ? (evSnap.data().donor_id as string) : undefined);
-          if (donorId) {
-            const donorRef = doc(db, "blood_donors", donorId);
-            const donorSnap = await getDoc(donorRef).catch(() => null);
-            if (donorSnap?.exists()) {
-              const dData = donorSnap.data();
-              const nextTotal = Math.min((Number(dData.total_donations) || 0) + 1, 500);
-              await updateDoc(donorRef, {
-                total_donations: nextTotal,
-                last_donation_date: sanitizeString(existing?.event_date || dData.last_donation_date, 40, ""),
-                updatedAt: serverTimestamp(),
-              }).catch(() => {});
-            }
-          }
-        }
+        await setDoc(
+          doc(db, "blood_donors", existing.donor_id),
+          {
+            total_donations: nextTotal,
+            last_donation_date: sanitizeString(existing.event_date, 40, ""),
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        ).catch(() => {});
       }
 
       void recordStaffActivity({
@@ -1499,8 +1466,9 @@ export function useCloudDonorEvents() {
           : `স্ট্যাটাস: ${status}`,
       });
       return { error: null };
-    } catch (e) {
-      return { error: { message: (e as Error).message } };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: { message: msg || "Firebase-এ ইভেন্ট স্ট্যাটাস আপডেট ব্যর্থ হয়েছে" } };
     }
   };
 
@@ -1514,17 +1482,13 @@ export function useCloudDonorEvents() {
       if (patch.note !== undefined) sanitizedPatch.note = sanitizeString(patch.note ?? "", 500, "");
       if (patch.status !== undefined) sanitizedPatch.status = patch.status;
 
+      await setDoc(doc(db, "donation_events", id), sanitizedPatch, { merge: true });
       const updated = {
         ...(existing || { id }),
         ...patch,
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("donation_events", id, updated);
-      if (isWriterAuthed()) {
-        await updateDoc(doc(db, "donation_events", id), sanitizedPatch).catch(() =>
-          syncSingleDocToNativeFirestore("donation_events", id, updated)
-        );
-      }
       void recordStaffActivity({
         action_type: "edit",
         action_label: "রক্তদান লগ এডিট করেছে",
@@ -1535,18 +1499,17 @@ export function useCloudDonorEvents() {
         target_detail: `স্থান: ${patch.place ?? existing?.place ?? "—"} • নোট: ${patch.note ?? existing?.note ?? "—"}`,
       });
       return { error: null };
-    } catch (e) {
-      return { error: { message: (e as Error).message } };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: { message: msg || "Firebase-এ রক্তদান লগ আপডেট ব্যর্থ হয়েছে" } };
     }
   };
 
   const remove = async (id: string) => {
     const existing = items.find((x) => x.id === id);
     try {
+      await deleteDoc(doc(db, "donation_events", id));
       removeCloudMirrorDoc("donation_events", id);
-      if (isWriterAuthed()) {
-        await deleteDoc(doc(db, "donation_events", id)).catch(() => {});
-      }
       void recordStaffActivity({
         action_type: "delete",
         action_label: "রক্তদান লগ ডিলিট করেছে",
@@ -1559,8 +1522,9 @@ export function useCloudDonorEvents() {
         collection_name: "donation_events",
       });
       return { error: null };
-    } catch (e) {
-      return { error: { message: (e as Error).message } };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: { message: msg || "Firebase থেকে রক্তদান লগ ডিলিট ব্যর্থ হয়েছে" } };
     }
   };
 
@@ -1600,8 +1564,11 @@ export function useEmergencyBanners() {
         created_at: nowIso,
         updated_at: nowIso,
       };
+      const syncRes = await syncSingleDocToNativeFirestore("emergency_banners", id, row);
+      if (!syncRes.ok) {
+        return { ok: false, error: syncRes.error || "Firebase-এ জরুরী ব্যানার সংরক্ষণ ব্যর্থ হয়েছে" };
+      }
       upsertCloudMirrorDoc("emergency_banners", id, row);
-      await syncSingleDocToNativeFirestore("emergency_banners", id, row);
       void recordStaffActivity({
         action_type: "create",
         action_label: "নতুন জরুরী ব্যানার যোগ করেছে",
@@ -1630,17 +1597,13 @@ export function useEmergencyBanners() {
       if (patch.visible !== undefined) sanitizedPatch.visible = Boolean(patch.visible);
       if (patch.sort_order !== undefined) sanitizedPatch.sort_order = Number(patch.sort_order) || 0;
 
+      await setDoc(doc(db, "emergency_banners", id), sanitizedPatch, { merge: true });
       const updated = {
         ...(existing || { id }),
         ...patch,
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("emergency_banners", id, updated);
-      if (isWriterAuthed()) {
-        await updateDoc(doc(db, "emergency_banners", id), sanitizedPatch).catch(() =>
-          syncSingleDocToNativeFirestore("emergency_banners", id, updated)
-        );
-      }
       void recordStaffActivity({
         action_type: "edit",
         action_label:
@@ -1656,18 +1619,17 @@ export function useEmergencyBanners() {
         target_detail: patch.message || existing?.message || "",
       });
       return { error: null };
-    } catch (e) {
-      return { error: { message: (e as Error).message } };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: { message: msg || "Firebase-এ জরুরী ব্যানার আপডেট ব্যর্থ হয়েছে" } };
     }
   };
 
   const remove = async (id: string) => {
     const existing = items.find((x) => x.id === id);
     try {
+      await deleteDoc(doc(db, "emergency_banners", id));
       removeCloudMirrorDoc("emergency_banners", id);
-      if (isWriterAuthed()) {
-        await deleteDoc(doc(db, "emergency_banners", id)).catch(() => {});
-      }
       void recordStaffActivity({
         action_type: "delete",
         action_label: "জরুরী ব্যানার ডিলিট করেছে",
@@ -1682,8 +1644,9 @@ export function useEmergencyBanners() {
         collection_name: "emergency_banners",
       });
       return { error: null };
-    } catch (e) {
-      return { error: { message: (e as Error).message } };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: { message: msg || "Firebase থেকে জরুরী ব্যানার ডিলিট ব্যর্থ হয়েছে" } };
     }
   };
 
@@ -1716,25 +1679,23 @@ export function useAppLinks() {
     const existing = items.find((x) => x.id === id);
     try {
       const nowIso = new Date().toISOString();
+      const sanitizedPatch: Record<string, unknown> = { updatedAt: serverTimestamp() };
+      if (patch.label !== undefined) sanitizedPatch.label = sanitizeString(patch.label, 120, "App");
+      if (patch.url !== undefined) sanitizedPatch.url = sanitizeString(patch.url ?? "", 295000, "");
+      if (patch.visible !== undefined) sanitizedPatch.visible = Boolean(patch.visible);
+      if (patch.sort_order !== undefined) sanitizedPatch.sort_order = Number(patch.sort_order) || 0;
+
+      await setDoc(doc(db, "app_links", id), sanitizedPatch, { merge: true });
       const updated = {
         ...(existing || { id, platform: id.includes("ios") ? "ios" : "android" }),
         ...patch,
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("app_links", id, updated);
-      if (isWriterAuthed()) {
-        const sanitizedPatch: Record<string, unknown> = { updatedAt: serverTimestamp() };
-        if (patch.label !== undefined) sanitizedPatch.label = sanitizeString(patch.label, 120, "App");
-        if (patch.url !== undefined) sanitizedPatch.url = sanitizeString(patch.url ?? "", 295000, "");
-        if (patch.visible !== undefined) sanitizedPatch.visible = Boolean(patch.visible);
-        if (patch.sort_order !== undefined) sanitizedPatch.sort_order = Number(patch.sort_order) || 0;
-        await updateDoc(doc(db, "app_links", id), sanitizedPatch).catch(() =>
-          syncSingleDocToNativeFirestore("app_links", id, updated)
-        );
-      }
       return { error: null };
-    } catch (e) {
-      return { error: { message: (e as Error).message } };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: { message: msg || "Firebase-এ অ্যাপ লিংক আপডেট ব্যর্থ হয়েছে" } };
     }
   };
 
@@ -1768,11 +1729,11 @@ export function useEmergencyRequests() {
         created_at: nowIso,
         updated_at: nowIso,
       };
-      upsertCloudMirrorDoc("emergency_blood_requests", id, row);
       const syncRes = await syncSingleDocToNativeFirestore("emergency_blood_requests", id, row);
       if (!syncRes.ok) {
         return { ok: false, error: syncRes.error || "Firebase-এ রক্তের অনুরোধ সংরক্ষণ ব্যর্থ হয়েছে" };
       }
+      upsertCloudMirrorDoc("emergency_blood_requests", id, row);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : "ত্রুটি" };
@@ -1783,18 +1744,17 @@ export function useEmergencyRequests() {
     const existing = items.find((x) => x.id === id);
     try {
       const nowIso = new Date().toISOString();
+      await setDoc(
+        doc(db, "emergency_blood_requests", id),
+        { status, updatedAt: serverTimestamp() },
+        { merge: true }
+      );
       const updated = {
         ...(existing || { id }),
         status,
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("emergency_blood_requests", id, updated);
-      if (isWriterAuthed()) {
-        await updateDoc(doc(db, "emergency_blood_requests", id), {
-          status,
-          updatedAt: serverTimestamp(),
-        }).catch(() => syncSingleDocToNativeFirestore("emergency_blood_requests", id, updated));
-      }
       void recordStaffActivity({
         action_type: status === "approved" ? "approve" : "reject",
         action_label:
@@ -1810,8 +1770,9 @@ export function useEmergencyRequests() {
           : `স্ট্যাটাস: ${status}`,
       });
       return { error: null };
-    } catch (e) {
-      return { error: { message: (e as Error).message } };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: { message: msg || "Firebase-এ রক্তের অনুরোধ স্ট্যাটাস আপডেট ব্যর্থ হয়েছে" } };
     }
   };
 
@@ -1827,17 +1788,13 @@ export function useEmergencyRequests() {
       if (patch.message !== undefined) sanitizedPatch.message = sanitizeString(patch.message ?? "", 1000, "");
       if (patch.status !== undefined) sanitizedPatch.status = patch.status;
 
+      await setDoc(doc(db, "emergency_blood_requests", id), sanitizedPatch, { merge: true });
       const updated = {
         ...(existing || { id }),
         ...patch,
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("emergency_blood_requests", id, updated);
-      if (isWriterAuthed()) {
-        await updateDoc(doc(db, "emergency_blood_requests", id), sanitizedPatch).catch(() =>
-          syncSingleDocToNativeFirestore("emergency_blood_requests", id, updated)
-        );
-      }
       void recordStaffActivity({
         action_type: "edit",
         action_label: "জরুরী রক্তের অনুরোধ এডিট করেছে",
@@ -1848,18 +1805,17 @@ export function useEmergencyRequests() {
         target_detail: `ফোন: ${patch.phone ?? existing?.phone ?? "—"} • হাসপাতাল: ${patch.hospital ?? existing?.hospital ?? "—"}`,
       });
       return { error: null };
-    } catch (e) {
-      return { error: { message: (e as Error).message } };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: { message: msg || "Firebase-এ রক্তের অনুরোধ আপডেট ব্যর্থ হয়েছে" } };
     }
   };
 
   const remove = async (id: string) => {
     const existing = items.find((x) => x.id === id);
     try {
+      await deleteDoc(doc(db, "emergency_blood_requests", id));
       removeCloudMirrorDoc("emergency_blood_requests", id);
-      if (isWriterAuthed()) {
-        await deleteDoc(doc(db, "emergency_blood_requests", id)).catch(() => {});
-      }
       void recordStaffActivity({
         action_type: "delete",
         action_label: "জরুরী রক্তের অনুরোধ ডিলিট করেছে",
@@ -1874,8 +1830,9 @@ export function useEmergencyRequests() {
         collection_name: "emergency_blood_requests",
       });
       return { error: null };
-    } catch (e) {
-      return { error: { message: (e as Error).message } };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: { message: msg || "Firebase থেকে রক্তের অনুরোধ ডিলিট ব্যর্থ হয়েছে" } };
     }
   };
 
@@ -1891,13 +1848,12 @@ export function useCategoryAccess() {
     let active = true;
     async function loadApprovals() {
       try {
-        const resp = await fetch("/api/content?collection=settings&id=category_approvals");
-        if (resp.ok && (resp.headers.get("content-type") || "").includes("application/json")) {
-          const json = await resp.json();
-          const raw = json?.item?.logo_url;
-          if (typeof raw === "string" && raw.trim()) {
+        const snap = await getDoc(doc(db, "settings", "category_approvals")).catch(() => null);
+        if (snap?.exists()) {
+          const raw = snap.data()?.logo_url;
+          if (typeof raw === "string" && raw.trim() && active) {
             const parsed = JSON.parse(raw);
-            if (parsed && typeof parsed === "object" && active) {
+            if (parsed && typeof parsed === "object") {
               const rows: CategoryAccessRow[] = [];
               for (const [uid, slugs] of Object.entries(parsed)) {
                 if (Array.isArray(slugs)) {
@@ -1922,10 +1878,39 @@ export function useCategoryAccess() {
       }
     }
     void loadApprovals();
-    const timer = setInterval(loadApprovals, 4000);
+
+    const unsubDirect = onSnapshot(doc(db, "settings", "category_approvals"), (snap) => {
+      if (snap.exists() && active) {
+        try {
+          const raw = snap.data()?.logo_url;
+          if (typeof raw === "string" && raw.trim()) {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === "object") {
+              const rows: CategoryAccessRow[] = [];
+              for (const [uid, slugs] of Object.entries(parsed)) {
+                if (Array.isArray(slugs)) {
+                  for (const s of slugs) {
+                    if (typeof s === "string" && s.trim()) {
+                      rows.push({
+                        id: `appr_${uid}_${s}`,
+                        user_id: uid,
+                        category_slug: s,
+                        created_at: new Date().toISOString(),
+                      });
+                    }
+                  }
+                }
+              }
+              setApprovalItems(rows);
+            }
+          }
+        } catch {}
+      }
+    });
+
     return () => {
       active = false;
-      clearInterval(timer);
+      unsubDirect();
     };
   }, []);
 
@@ -1948,27 +1933,12 @@ export function useCategoryAccess() {
     try {
       let mapObj: Record<string, string[]> = {};
       try {
-        const localRaw = localStorage.getItem("sn_category_approvals_v1");
-        if (localRaw) {
-          const p = JSON.parse(localRaw);
-          if (p && typeof p === "object") mapObj = p;
-        }
-      } catch {
-        // ignore
-      }
-      try {
-        const resp = await fetch("/api/content?collection=settings&id=category_approvals");
-        if (resp.ok && (resp.headers.get("content-type") || "").includes("application/json")) {
-          const json = await resp.json();
-          if (json?.item?.logo_url) {
-            const srv = JSON.parse(json.item.logo_url);
-            if (srv && typeof srv === "object") {
-              for (const [k, v] of Object.entries(srv)) {
-                if (Array.isArray(v)) {
-                  mapObj[k] = Array.from(new Set([...(mapObj[k] || []), ...(v as string[])]));
-                }
-              }
-            }
+        const snap = await getDoc(doc(db, "settings", "category_approvals")).catch(() => null);
+        if (snap?.exists()) {
+          const raw = snap.data()?.logo_url;
+          if (typeof raw === "string" && raw.trim()) {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === "object") mapObj = parsed;
           }
         }
       } catch {
@@ -1986,21 +1956,12 @@ export function useCategoryAccess() {
       } catch {
         // ignore
       }
-      await fetch("/api/content/upsert", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          collection: "settings",
-          id: "category_approvals",
-          doc: {
-            id: "category_approvals",
-            key: "category_approvals",
-            logo_url: serialized,
-            visible: true,
-            updated_at: new Date().toISOString(),
-          },
-        }),
-      }).catch(() => {});
+      await setDoc(doc(db, "settings", "category_approvals"), {
+        key: "category_approvals",
+        logo_url: serialized,
+        visible: true,
+        updatedAt: serverTimestamp(),
+      }, { merge: true }).catch(() => {});
     } catch {
       // ignore
     }
@@ -2025,7 +1986,7 @@ export function useCategoryAccess() {
         ...prev.filter((x) => !(x.user_id === cleanUid && x.category_slug === cleanSlug)),
         row,
       ]);
-      await syncSingleDocToNativeFirestore("category_access", id, row);
+      await setDoc(doc(db, "category_access", id), row, { merge: true });
       return { error: null };
     } catch (e) {
       return { error: { message: (e as Error).message } };
@@ -2040,9 +2001,7 @@ export function useCategoryAccess() {
         for (const r of rawItems) {
           if (r.user_id === target.user_id && r.category_slug === target.category_slug) {
             removeCloudMirrorDoc("category_access", r.id);
-            if (isWriterAuthed()) {
-              await deleteDoc(doc(db, "category_access", r.id)).catch(() => {});
-            }
+            await deleteDoc(doc(db, "category_access", r.id)).catch(() => {});
           }
         }
         await syncCategoryApprovalsMap(target.user_id, target.category_slug, "revoke");
@@ -2052,9 +2011,7 @@ export function useCategoryAccess() {
           )
         );
       }
-      if (isWriterAuthed()) {
-        await deleteDoc(doc(db, "category_access", id)).catch(() => {});
-      }
+      await deleteDoc(doc(db, "category_access", id)).catch(() => {});
       return { error: null };
     } catch (e) {
       return { error: { message: (e as Error).message } };
@@ -2159,12 +2116,10 @@ export function useCategoryRequests() {
       updated_at: nowIso,
     };
     upsertCloudMirrorDoc("category_requests", id, updated);
-    if (isWriterAuthed()) {
-      await updateDoc(doc(db, "category_requests", id), {
-        status: "approved",
-        updatedAt: serverTimestamp(),
-      }).catch(() => {});
-    }
+    await setDoc(doc(db, "category_requests", id), {
+      status: "approved",
+      updatedAt: serverTimestamp(),
+    }, { merge: true }).catch(() => {});
     void recordStaffActivity({
       action_type: "approve",
       action_label: "ক্যাটাগরি অ্যাকসেস রিকোয়েস্ট অনুমোদন করেছে",
@@ -2186,12 +2141,10 @@ export function useCategoryRequests() {
       updated_at: nowIso,
     };
     upsertCloudMirrorDoc("category_requests", id, updated);
-    if (isWriterAuthed()) {
-      await updateDoc(doc(db, "category_requests", id), {
-        status: "rejected",
-        updatedAt: serverTimestamp(),
-      }).catch(() => {});
-    }
+    await setDoc(doc(db, "category_requests", id), {
+      status: "rejected",
+      updatedAt: serverTimestamp(),
+    }, { merge: true }).catch(() => {});
     void recordStaffActivity({
       action_type: "reject",
       action_label: "ক্যাটাগরি অ্যাকসেস রিকোয়েস্ট বাতিল করেছে",

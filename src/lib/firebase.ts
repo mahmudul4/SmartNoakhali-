@@ -61,6 +61,7 @@ storage.maxUploadRetryTime = 10000;
 storage.maxOperationRetryTime = 10000;
 
 let anonAuthPromise: Promise<User | null> | null = null;
+let anonAuthDisabled = false;
 /**
  * Ensures an authenticated Firebase Auth session exists.
  * If user is not yet signed in, seamlessly signs in anonymously so that
@@ -68,14 +69,20 @@ let anonAuthPromise: Promise<User | null> | null = null;
  */
 export async function ensureFirebaseAuthUser(): Promise<User | null> {
   if (auth.currentUser) return auth.currentUser;
+  if (anonAuthDisabled) return null;
   if (anonAuthPromise) return anonAuthPromise;
 
   anonAuthPromise = (async () => {
     try {
       const cred = await signInAnonymously(auth);
       return cred.user;
-    } catch (err) {
-      console.warn("Firebase anonymous authentication notice:", err);
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code;
+      if (code === "auth/admin-restricted-operation" || code === "auth/operation-not-allowed") {
+        anonAuthDisabled = true;
+      } else {
+        console.warn("Firebase anonymous authentication notice:", err);
+      }
       return auth.currentUser || null;
     } finally {
       anonAuthPromise = null;
