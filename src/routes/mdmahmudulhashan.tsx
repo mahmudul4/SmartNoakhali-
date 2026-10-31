@@ -1766,6 +1766,7 @@ function CategoriesEditor() {
     deleteCategory,
     moveCategory,
     resetCategories,
+    checkCategoryReferences,
   } = useCategories();
   const [search, setSearch] = useState("");
   const [divisionFilter, setDivisionFilter] = useState("all");
@@ -1782,6 +1783,13 @@ function CategoriesEditor() {
   const [auditing, setAuditing] = useState(false);
   const [showAuditModal, setShowAuditModal] = useState(false);
 
+  // Safe Deletion confirmation states
+  const [categoryToDelete, setCategoryToDelete] = useState<CategoryConfigItem | null>(null);
+  const [checkingRefs, setCheckingRefs] = useState(false);
+  const [deleteRefs, setDeleteRefs] = useState<{ submissionsCount: number; donationsCount: number; total: number } | null>(null);
+  const [confirmForceHardDelete, setConfirmForceHardDelete] = useState(false);
+  const [deletingBusy, setDeletingBusy] = useState(false);
+
   const [newCat, setNewCat] = useState({
     slug: "",
     divisionId: "division-2-shopping-market",
@@ -1791,6 +1799,7 @@ function CategoriesEditor() {
     tint: CATEGORY_TINTS[0].value,
     description: "",
     formType: "shopping",
+    sort_order: 100,
     visible: true,
   });
 
@@ -1824,11 +1833,49 @@ function CategoriesEditor() {
     try {
       await updateCategory(slug, editDraft);
       setEditingSlug(null);
-      toast.success("ক্যাটাগরি সফলভাবে আপডেট হয়েছে");
+      toast.success("ক্যাটাগরি সফলভাবে ফায়ারবেস ডেটাবেসে আপডেট ও সংরক্ষিত হয়েছে");
     } catch (e) {
       toast.error((e as Error).message || "আপডেট ব্যর্থ হয়েছে");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function initiateDelete(c: CategoryConfigItem) {
+    setCategoryToDelete(c);
+    setCheckingRefs(true);
+    setDeleteRefs(null);
+    setConfirmForceHardDelete(false);
+    try {
+      const refs = await checkCategoryReferences(c.slug);
+      setDeleteRefs(refs);
+    } catch {
+      setDeleteRefs({ submissionsCount: 0, donationsCount: 0, total: 0 });
+    } finally {
+      setCheckingRefs(false);
+    }
+  }
+
+  async function handleConfirmDelete(softDeleteOnly: boolean) {
+    if (!categoryToDelete) return;
+    setDeletingBusy(true);
+    try {
+      await deleteCategory(categoryToDelete.slug, {
+        softDeleteOnly,
+        force: !softDeleteOnly && confirmForceHardDelete,
+      });
+      toast.success(
+        softDeleteOnly
+          ? `"${categoryToDelete.bn}" ক্যাটাগরি সফলভাবে নিষ্ক্রিয় ও আর্কাইভ করা হয়েছে`
+          : `"${categoryToDelete.bn}" ক্যাটাগরি ডেটাবেস থেকে স্থায়ীভাবে মুছে ফেলা হয়েছে`
+      );
+      setCategoryToDelete(null);
+      setDeleteRefs(null);
+      setConfirmForceHardDelete(false);
+    } catch (err: any) {
+      toast.error(err?.message || "ক্যাটাগরি মোছা সম্ভব হয়নি");
+    } finally {
+      setDeletingBusy(false);
     }
   }
 
@@ -1847,9 +1894,10 @@ function CategoriesEditor() {
         tint: newCat.tint,
         description: newCat.description.trim() || newCat.bn.trim(),
         formType: newCat.formType,
+        sort_order: Number(newCat.sort_order) || rawItems.length + 1,
         visible: newCat.visible,
       });
-      toast.success("নতুন ক্যাটাগরি তৈরি হয়েছে");
+      toast.success("নতুন ক্যাটাগরি সফলভাবে তৈরি ও ফায়ারবেসে সংরক্ষিত হয়েছে!");
       setNewCat({
         slug: "",
         divisionId: "division-2-shopping-market",
@@ -1859,6 +1907,7 @@ function CategoriesEditor() {
         tint: CATEGORY_TINTS[0].value,
         description: "",
         formType: "shopping",
+        sort_order: rawItems.length + 2,
         visible: true,
       });
       setShowAdd(false);
@@ -2097,6 +2146,13 @@ function CategoriesEditor() {
                 placeholder="সংক্ষিপ্ত বিবরণ"
                 className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
               />
+              <input
+                type="number"
+                value={newCat.sort_order}
+                onChange={(e) => setNewCat({ ...newCat, sort_order: parseInt(e.target.value) || 1 })}
+                placeholder="ডিসপ্লে ক্রম (যেমন: 101)"
+                className="rounded-xl border border-border bg-background px-3 py-2 text-sm font-mono"
+              />
               <select
                 value={newCat.iconName}
                 onChange={(e) => setNewCat({ ...newCat, iconName: e.target.value })}
@@ -2307,6 +2363,34 @@ function CategoriesEditor() {
                       ))}
                     </select>
                   </div>
+
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted-foreground">
+                      ডিসপ্লে ক্রম (অর্ডার)
+                    </label>
+                    <input
+                      type="number"
+                      value={editDraft.sort_order ?? c.sort_order ?? 1}
+                      onChange={(e) =>
+                        setEditDraft({ ...editDraft, sort_order: parseInt(e.target.value) || 1 })
+                      }
+                      className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted-foreground">
+                      কাস্টম আইকন URL (ঐচ্ছিক)
+                    </label>
+                    <input
+                      value={editDraft.customIconUrl ?? ""}
+                      onChange={(e) =>
+                        setEditDraft({ ...editDraft, customIconUrl: e.target.value })
+                      }
+                      placeholder="https://... বা খালি রাখুন"
+                      className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs"
+                    />
+                  </div>
                 </div>
 
                 <label className="flex items-center gap-2 text-xs font-semibold">
@@ -2325,7 +2409,7 @@ function CategoriesEditor() {
                     type="button"
                     disabled={busy}
                     onClick={() => void saveEdit(c.slug)}
-                    className="flex items-center gap-1 rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground"
+                    className="flex items-center gap-1 rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground shadow"
                   >
                     <Save className="h-3.5 w-3.5" /> সংরক্ষণ করুন
                   </button>
@@ -2421,14 +2505,8 @@ function CategoriesEditor() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    if (confirm(`আপনি কি "${c.bn}" ক্যাটাগরি মুছে ফেলতে চান?`)) {
-                      void deleteCategory(c.slug).then(() =>
-                        toast.success("ক্যাটাগরি মুছে ফেলা হয়েছে")
-                      );
-                    }
-                  }}
-                  title="মুছুন"
+                  onClick={() => initiateDelete(c)}
+                  title="মুছুন বা নিষ্ক্রিয় করুন"
                   className="rounded-full bg-destructive/10 p-1.5 text-destructive hover:bg-destructive/20"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -2512,6 +2590,127 @@ function CategoriesEditor() {
               >
                 বন্ধ করুন
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. Safe Category Delete Confirmation Modal */}
+      {categoryToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-5">
+          <div className="w-full max-w-lg rounded-3xl border border-destructive/30 bg-card p-5 sm:p-6 shadow-2xl space-y-4">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-destructive/15 text-destructive">
+                  <Trash2 className="h-5 w-5" />
+                </span>
+                <div>
+                  <h3 className="font-display text-base font-bold text-foreground">
+                    ক্যাটাগরি মোছার নিশ্চিতকরণ
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    স্লাগ: <span className="font-mono text-primary font-bold">{categoryToDelete.slug}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCategoryToDelete(null)}
+                className="rounded-full bg-muted p-1.5 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="rounded-2xl border border-border bg-muted/40 p-3.5 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">বাংলা নাম:</span>
+                <span className="font-bold text-foreground">{categoryToDelete.bn}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">ইংরেজি নাম:</span>
+                <span className="font-mono text-foreground">{categoryToDelete.en}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">বিভাগ:</span>
+                <span className="font-semibold text-primary">{categoryToDelete.divisionId ? divisionMap.get(categoryToDelete.divisionId) || categoryToDelete.divisionId : "সাধারণ"}</span>
+              </div>
+            </div>
+
+            {/* Reference Checking Status */}
+            {checkingRefs ? (
+              <div className="flex items-center gap-2 rounded-2xl border border-primary/20 bg-primary/5 p-3.5 text-xs text-primary font-semibold">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>ডেটাবেসের সংশ্লিষ্ট রেকর্ড (লিস্টিং ও অনুদান) পরীক্ষা করা হচ্ছে...</span>
+              </div>
+            ) : deleteRefs && deleteRefs.total > 0 ? (
+              <div className="space-y-2.5 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
+                <div className="flex items-center gap-2 text-xs font-bold text-amber-700">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span>সতর্কতা: সংশ্লিষ্ট রেকর্ড পাওয়া গেছে ({deleteRefs.total} টি)!</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded-xl bg-card p-2 text-center border border-amber-500/20">
+                    <p className="text-muted-foreground text-[10px]">তালিকাভুক্ত সার্ভিস</p>
+                    <p className="font-bold text-foreground text-sm">{deleteRefs.submissionsCount} টি</p>
+                  </div>
+                  <div className="rounded-xl bg-card p-2 text-center border border-amber-500/20">
+                    <p className="text-muted-foreground text-[10px]">সম্পর্কিত অনুদান</p>
+                    <p className="font-bold text-foreground text-sm">{deleteRefs.donationsCount} টি</p>
+                  </div>
+                </div>
+                <p className="text-[11px] text-amber-800 leading-relaxed">
+                  সরাসরি ডেটাবেস থেকে মুছে ফেলা হলে ব্যবহারকারীদের বিদ্যমান পোস্ট বা রেকর্ডে শূন্যতা সৃষ্টি হতে পারে। নিরাপদ ব্যবস্থাপনার জন্য <strong>নিরাপদে নিষ্ক্রিয় (Soft Delete / Archive)</strong> সুপারিশ করা হলো।
+                </p>
+                <label className="flex items-start gap-2 pt-1 text-[11px] font-semibold text-muted-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={confirmForceHardDelete}
+                    onChange={(e) => setConfirmForceHardDelete(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>আমি ঝুঁকি জেনেও জোরপূর্বক স্থায়ীভাবে ডিলিট (Hard Delete) করতে চাই</span>
+                </label>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 text-xs font-semibold text-emerald-800">
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                <span>এই ক্যাটাগরিতে কোনো সংশ্লিষ্ট ডেটা নেই। স্থায়ীভাবে মুছে ফেলা নিরাপদ।</span>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                disabled={deletingBusy}
+                onClick={() => setCategoryToDelete(null)}
+                className="rounded-xl border border-border bg-muted/60 px-4 py-2 text-xs font-semibold text-foreground hover:bg-muted"
+              >
+                বাতিল
+              </button>
+
+              {deleteRefs && deleteRefs.total > 0 && !confirmForceHardDelete ? (
+                <button
+                  type="button"
+                  disabled={deletingBusy}
+                  onClick={() => handleConfirmDelete(true)}
+                  className="flex items-center justify-center gap-1.5 rounded-xl bg-amber-600 px-4 py-2 text-xs font-bold text-white shadow hover:bg-amber-700 disabled:opacity-50"
+                >
+                  {deletingBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <EyeOff className="h-3.5 w-3.5" />}
+                  <span>নিরাপদে নিষ্ক্রিয় ও আর্কাইভ করুন (Soft Delete)</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={deletingBusy || Boolean(deleteRefs && deleteRefs.total > 0 && !confirmForceHardDelete)}
+                  onClick={() => handleConfirmDelete(false)}
+                  className="flex items-center justify-center gap-1.5 rounded-xl bg-destructive px-4 py-2 text-xs font-bold text-destructive-foreground shadow hover:bg-destructive/90 disabled:opacity-50"
+                >
+                  {deletingBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                  <span>স্থায়ীভাবে ডেটাবেস থেকে মুছুন (Permanent Delete)</span>
+                </button>
+              )}
             </div>
           </div>
         </div>

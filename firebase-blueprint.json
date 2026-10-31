@@ -810,9 +810,55 @@
         }
       },
       "required": ["id", "title", "status", "createdByUid", "createdAt", "updatedAt"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Smart Noakhali service category with full metadata and persistent Firestore sync.",
+      "type": "object",
+      "properties": {
+        "slug": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "bn": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "en": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "divisionId": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "departmentId": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "iconName": { "type": "string" },
+        "tint": { "type": "string" },
+        "description": { "type": "string" },
+        "formType": { "type": "string" },
+        "customIconUrl": { "type": "string" },
+        "sort_order": { "type": "number" },
+        "displayOrder": { "type": "number" },
+        "visible": { "type": "boolean" },
+        "isActive": { "type": "boolean" },
+        "isDeleted": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["slug", "bn", "en", "divisionId", "sort_order", "visible"]
+    },
+    "Department": {
+      "title": "Department",
+      "description": "Main administrative department / division of Smart Noakhali.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "bn": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "en": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "sort_order": { "type": "number" },
+        "visible": { "type": "boolean" }
+      },
+      "required": ["id", "bn", "sort_order", "visible"]
     }
   },
   "firestore": {
+    "/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "Dynamic service categories persistent across all devices."
+    },
+    "/departments/{departmentId}": {
+      "schema": "Department",
+      "description": "22 main service departments / divisions."
+    },
     "/test/{docId}": {
       "schema": "Test",
       "description": "Health check document path used to validate Firestore connectivity on boot."

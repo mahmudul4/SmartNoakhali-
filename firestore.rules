@@ -192,6 +192,14 @@ service cloud.firestore {
     }
 
     // =========================================================
+    // 14b. /departments/{departmentId}
+    // =========================================================
+    match /departments/{departmentId} {
+      allow get, list: if true;
+      allow write: if isValidId(departmentId);
+    }
+
+    // =========================================================
     // 15. /chat_threads/{threadId} & Subcollection /messages
     // =========================================================
     match /chat_threads/{threadId} {

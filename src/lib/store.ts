@@ -3,8 +3,10 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
   setDoc,
   updateDoc,
+  deleteDoc,
   onSnapshot,
   query,
   where,
@@ -650,49 +652,129 @@ export function useDivisions() {
 }
 
 export interface CategoryConfigItem {
+  id?: string;
+  name?: string;
   slug: string;
+  departmentId?: string;
   divisionId?: string;
   bn: string;
   en: string;
+  icon?: string;
   iconName: string;
   tint: string;
   description: string;
   formType?: string;
   customIconUrl?: string;
-  visible: boolean;
+  displayOrder?: number;
   sort_order: number;
+  isActive?: boolean;
+  visible: boolean;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  createdAt?: any;
+  updatedAt?: any;
+  createdBy?: string;
+  updatedBy?: string;
+}
+
+export async function checkCategoryReferences(slug: string): Promise<{
+  submissionsCount: number;
+  donationsCount: number;
+  total: number;
+}> {
+  let submissionsCount = 0;
+  let donationsCount = 0;
+  try {
+    const q1 = query(collection(db, "submissions"), where("category_slug", "==", slug));
+    const snap1 = await getDocs(q1);
+    submissionsCount = snap1.size;
+  } catch {
+    try {
+      const q1Alt = query(collection(db, "submissions"), where("category", "==", slug));
+      const snap1Alt = await getDocs(q1Alt);
+      submissionsCount = Math.max(submissionsCount, snap1Alt.size);
+    } catch {}
+  }
+
+  try {
+    const q2 = query(collection(db, "donations"), where("category", "==", slug));
+    const snap2 = await getDocs(q2);
+    donationsCount = snap2.size;
+  } catch {}
+
+  return {
+    submissionsCount,
+    donationsCount,
+    total: submissionsCount + donationsCount,
+  };
 }
 
 const DEFAULT_CATEGORY_ITEMS: CategoryConfigItem[] = defaultCategories
   .filter((c) => c.slug !== "chat" && c.slug !== "app-download")
   .map((c, idx) => ({
+    id: c.slug,
+    name: c.bn,
     slug: c.slug,
+    departmentId: c.divisionId,
     divisionId: c.divisionId,
     bn: c.bn,
     en: c.en,
+    icon: c.iconName || "Users",
     iconName: c.iconName || "Users",
     tint: c.tint,
     description: c.description,
     formType: c.formType || "general",
     customIconUrl: c.customIconUrl,
-    visible: true,
+    displayOrder: c.sort_order || idx + 1,
     sort_order: c.sort_order || idx + 1,
+    isActive: true,
+    visible: true,
+    isDeleted: false,
   }));
 
 function parseCategoryConfig(raw: string | null | undefined): CategoryConfigItem[] | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      const catMap = new Map<string, CategoryConfigItem>();
-      // 1. Seed with ALL 181+ default categories from master categories list
-      for (const d of DEFAULT_CATEGORY_ITEMS) {
-        catMap.set(d.slug, { ...d });
+    let itemsList: any[] = [];
+    const deletedSlugs = new Set<string>();
+
+    if (Array.isArray(parsed)) {
+      itemsList = parsed;
+    } else if (parsed && typeof parsed === "object" && Array.isArray(parsed.items)) {
+      itemsList = parsed.items;
+      if (Array.isArray(parsed.deletedSlugs)) {
+        parsed.deletedSlugs.forEach((s: string) => deletedSlugs.add(String(s)));
       }
-      // 2. Apply any saved customization or edits
-      for (const item of parsed) {
+    }
+
+    if (itemsList.length > 0) {
+      const catMap = new Map<string, CategoryConfigItem>();
+
+      // 1. Gather all explicit deletions
+      for (const item of itemsList) {
+        if (!item || typeof item.slug !== "string") continue;
+        if (item.isDeleted === true) {
+          deletedSlugs.add(String(item.slug));
+        }
+      }
+
+      // 2. Seed with master default categories ONLY if NOT marked deleted
+      for (const d of DEFAULT_CATEGORY_ITEMS) {
+        if (!deletedSlugs.has(d.slug)) {
+          catMap.set(d.slug, { ...d });
+        }
+      }
+
+      // 3. Apply customizations or add custom categories
+      for (const item of itemsList) {
         if (!item || typeof item.slug !== "string" || item.slug === "chat" || item.slug === "app-download") continue;
         const slug = String(item.slug);
+        if (item.isDeleted === true || deletedSlugs.has(slug)) {
+          catMap.delete(slug);
+          continue;
+        }
+
         const fallback = defaultCategories.find((d) => d.slug === slug);
         const rawIcon = String(item.iconName || item.icon || "");
         const iconName = (rawIcon && rawIcon !== "Users" && CATEGORY_ICONS[rawIcon])
@@ -702,26 +784,38 @@ function parseCategoryConfig(raw: string | null | undefined): CategoryConfigItem
         const tint = (rawTint && rawTint !== "from-emerald-500/15 to-emerald-700/10")
           ? rawTint
           : (fallback?.tint || "from-emerald-500/15 to-emerald-700/10");
-        const description = String(item.description || fallback?.description || "");
-        const divisionId = String(item.divisionId || fallback?.divisionId || "shopping");
+        const description = String(item.description ?? fallback?.description ?? "");
+        const divisionId = String(item.divisionId || item.departmentId || fallback?.divisionId || "division-2-shopping-market");
         const formType = String(item.formType || fallback?.formType || "general");
         const customIconUrl = item.customIconUrl || fallback?.customIconUrl;
+        const sortOrder = typeof item.sort_order === "number" ? item.sort_order : (typeof item.displayOrder === "number" ? item.displayOrder : (fallback?.sort_order || 999));
 
         catMap.set(slug, {
+          id: slug,
+          name: String(item.bn || fallback?.bn || item.slug),
           slug,
           divisionId,
+          departmentId: divisionId,
           bn: String(item.bn || fallback?.bn || item.slug),
           en: String(item.en || fallback?.en || item.slug),
+          icon: iconName,
           iconName,
           tint,
           description,
           formType,
           customIconUrl,
-          visible: item.visible !== false,
-          sort_order: typeof item.sort_order === "number" ? item.sort_order : (fallback?.sort_order || 999),
+          displayOrder: sortOrder,
+          sort_order: sortOrder,
+          isActive: item.isActive !== false && item.visible !== false,
+          visible: item.visible !== false && item.isActive !== false,
+          isDeleted: false,
+          updatedAt: item.updatedAt,
         });
       }
-      return Array.from(catMap.values()).sort((a, b) => a.sort_order - b.sort_order);
+
+      return Array.from(catMap.values())
+        .filter((c) => !deletedSlugs.has(c.slug) && c.isDeleted !== true)
+        .sort((a, b) => a.sort_order - b.sort_order);
     }
   } catch {
     // ignore
@@ -767,13 +861,13 @@ export function useCategories() {
   });
 
   useEffect(() => {
-    // Pull from Server Content API immediately on mount
+    // 1. Pull from Server Content API immediately on mount
     fetch(`/api/content?collection=settings&id=${CATEGORIES_CONFIG_ID}`)
       .then((r) => r.json())
       .then((d) => {
         if (d?.item?.logo_url) {
           const parsed = parseCategoryConfig(d.item.logo_url);
-          if (parsed) {
+          if (parsed && parsed.length > 0) {
             setItems(parsed);
             try {
               localStorage.setItem(LOCAL_CATEGORIES_KEY, JSON.stringify(parsed));
@@ -783,13 +877,89 @@ export function useCategories() {
       })
       .catch(() => {});
 
-    // Listen directly to the categories config document in Firestore for instant cross-session sync
+    // 2. Real-time sync directly from Firestore /categories collection
+    const unsubCategories = onSnapshot(
+      collection(db, "categories"),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const firestoreMap = new Map<string, CategoryConfigItem>();
+          const deletedSet = new Set<string>();
+
+          snapshot.forEach((docSnap) => {
+            const data = docSnap.data();
+            const slug = docSnap.id;
+            if (data.isDeleted === true) {
+              deletedSet.add(slug);
+            } else {
+              const fallback = defaultCategories.find((d) => d.slug === slug);
+              const rawIcon = String(data.iconName || data.icon || "");
+              const iconName = (rawIcon && rawIcon !== "Users" && CATEGORY_ICONS[rawIcon])
+                ? rawIcon
+                : (fallback && CATEGORY_ICONS[fallback.iconName || "Users"] ? (fallback.iconName || "Users") : (rawIcon || "Users"));
+              const sortOrder = typeof data.sort_order === "number" ? data.sort_order : (typeof data.displayOrder === "number" ? data.displayOrder : (fallback?.sort_order || 999));
+              const divId = String(data.divisionId || data.departmentId || fallback?.divisionId || "division-2-shopping-market");
+
+              firestoreMap.set(slug, {
+                id: slug,
+                slug,
+                name: String(data.bn || data.name || fallback?.bn || slug),
+                bn: String(data.bn || data.name || fallback?.bn || slug),
+                en: String(data.en || fallback?.en || slug),
+                divisionId: divId,
+                departmentId: divId,
+                icon: iconName,
+                iconName,
+                tint: data.tint || fallback?.tint || "from-emerald-500/15 to-emerald-700/10",
+                description: String(data.description ?? fallback?.description ?? ""),
+                formType: String(data.formType || fallback?.formType || "general"),
+                customIconUrl: data.customIconUrl || fallback?.customIconUrl,
+                displayOrder: sortOrder,
+                sort_order: sortOrder,
+                isActive: data.isActive !== false && data.visible !== false,
+                visible: data.visible !== false && data.isActive !== false,
+                isDeleted: false,
+                updatedAt: data.updatedAt,
+              });
+            }
+          });
+
+          // Merge with DEFAULT_CATEGORY_ITEMS only for categories not in firestoreMap and not deleted
+          if (firestoreMap.size > 0) {
+            for (const def of DEFAULT_CATEGORY_ITEMS) {
+              if (!firestoreMap.has(def.slug) && !deletedSet.has(def.slug)) {
+                firestoreMap.set(def.slug, { ...def });
+              }
+            }
+            const mergedList = Array.from(firestoreMap.values())
+              .filter((c) => !deletedSet.has(c.slug) && c.isDeleted !== true)
+              .sort((a, b) => a.sort_order - b.sort_order);
+
+            setItems(mergedList);
+            try {
+              localStorage.setItem(
+                LOCAL_CATEGORIES_KEY,
+                JSON.stringify({
+                  items: mergedList,
+                  deletedSlugs: Array.from(deletedSet),
+                  updatedAt: new Date().toISOString(),
+                })
+              );
+            } catch {}
+          }
+        }
+      },
+      (err) => {
+        console.warn("Firestore /categories listener notice:", err?.message);
+      }
+    );
+
+    // 3. Listen directly to settings document for backwards compatibility
     const unsubDirect = onSnapshot(
       doc(db, "settings", CATEGORIES_CONFIG_ID),
       (docSnap) => {
         if (docSnap.exists()) {
           const parsed = parseCategoryConfig(docSnap.data()?.logo_url);
-          if (parsed) {
+          if (parsed && parsed.length > 0) {
             setItems(parsed);
             try {
               localStorage.setItem(LOCAL_CATEGORIES_KEY, JSON.stringify(parsed));
@@ -800,50 +970,77 @@ export function useCategories() {
       () => {}
     );
 
-    // Also listen to settings collection queries for backwards-compatibility
-    const q = query(collection(db, "settings"), where("visible", "==", true));
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const docSnap = snap.docs.find((d) => d.id === CATEGORIES_CONFIG_ID);
-        if (docSnap) {
-          const parsed = parseCategoryConfig(docSnap.data().logo_url);
-          if (parsed) {
-            setItems(parsed);
-            try {
-              localStorage.setItem(LOCAL_CATEGORIES_KEY, JSON.stringify(parsed));
-            } catch {
-              // ignore
-            }
-          }
-        }
-      },
-      () => {
-        // Keep current categories on snapshot error
-      }
-    );
     return () => {
+      unsubCategories();
       unsubDirect();
-      unsub();
     };
   }, []);
 
-  const saveCategories = useCallback(async (nextList: CategoryConfigItem[]) => {
+  const saveCategories = useCallback(async (nextList: CategoryConfigItem[], deletedSlug?: string) => {
+    let existingDeleted: string[] = [];
+    try {
+      const raw = localStorage.getItem(LOCAL_CATEGORIES_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && Array.isArray(parsed.deletedSlugs)) {
+          existingDeleted = parsed.deletedSlugs;
+        }
+      }
+    } catch {}
+
+    const allDeleted = Array.from(new Set([...existingDeleted, ...(deletedSlug ? [deletedSlug] : [])]));
+
     const normalized = nextList
-      .filter((c) => c.slug !== "chat" && c.slug !== "app-download")
-      .map((c, idx) => ({ ...c, sort_order: idx + 1 }));
-    const serialized = JSON.stringify(normalized);
+      .filter((c) => c.slug !== "chat" && c.slug !== "app-download" && c.isDeleted !== true && !allDeleted.includes(c.slug))
+      .map((c, idx) => ({
+        ...c,
+        sort_order: idx + 1,
+        displayOrder: idx + 1,
+        isActive: c.visible !== false,
+      }));
+
+    const payloadToStore = {
+      items: normalized,
+      deletedSlugs: allDeleted,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const serialized = JSON.stringify(payloadToStore);
     try {
       localStorage.setItem(LOCAL_CATEGORIES_KEY, serialized);
-    } catch {
-      // ignore
-    }
+    } catch {}
+
     setItems(normalized);
     await upsertSettingDoc(CATEGORIES_CONFIG_ID, serialized);
   }, []);
 
   const updateCategory = useCallback(
     async (slug: string, patch: Partial<CategoryConfigItem>) => {
+      // 1. Direct write to Firestore /categories/{slug} with merge
+      try {
+        const docRef = doc(db, "categories", slug);
+        const updatePayload: Record<string, any> = {
+          ...patch,
+          updatedAt: serverTimestamp(),
+          updatedBy: auth.currentUser?.email || "admin",
+        };
+        if (patch.bn) updatePayload.name = patch.bn;
+        if (patch.divisionId) updatePayload.departmentId = patch.divisionId;
+        if (patch.sort_order !== undefined) updatePayload.displayOrder = patch.sort_order;
+        if (patch.visible !== undefined) updatePayload.isActive = patch.visible;
+
+        await setDoc(docRef, updatePayload, { merge: true });
+
+        // Verification: read back
+        const verifiedSnap = await getDoc(docRef);
+        if (!verifiedSnap.exists()) {
+          console.warn(`Firestore category write verification warning for ${slug}`);
+        }
+      } catch (fsErr) {
+        console.error("Firestore /categories update error:", fsErr);
+      }
+
+      // 2. Update local state and mirror settings doc
       const next = items.map((c) => (c.slug === slug ? { ...c, ...patch } : c));
       await saveCategories(next);
     },
@@ -851,33 +1048,100 @@ export function useCategories() {
   );
 
   const addCategory = useCallback(
-    async (newCat: Omit<CategoryConfigItem, "sort_order">) => {
+    async (newCat: Omit<CategoryConfigItem, "sort_order"> & { sort_order?: number }) => {
       const rawSlug = typeof newCat?.slug === "string" ? newCat.slug : "";
       const cleanSlug = rawSlug
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9_-]/g, "-");
       if (!cleanSlug) throw new Error("সঠিক ক্যাটাগরি স্লাগ (ইংরেজি অক্ষর) দিন");
-      if (items.some((c) => (c?.slug || "").toLowerCase() === cleanSlug)) {
-        throw new Error("এই স্লাগের ক্যাটাগরি ইতিমধ্যে আছে");
+      if (items.some((c) => (c?.slug || "").toLowerCase() === cleanSlug && c.isDeleted !== true)) {
+        throw new Error("এই স্লাগের ক্যাটাগরি ইতিমধ্যে ডেটাবেসে বিদ্যমান রয়েছে");
       }
-      const next: CategoryConfigItem[] = [
-        ...items,
-        {
-          ...newCat,
-          slug: cleanSlug,
-          sort_order: items.length + 1,
-        },
-      ];
+
+      const sortOrder = typeof newCat.sort_order === "number" ? newCat.sort_order : items.length + 1;
+      const itemToInsert: CategoryConfigItem = {
+        ...newCat,
+        id: cleanSlug,
+        slug: cleanSlug,
+        name: newCat.bn,
+        departmentId: newCat.divisionId || "division-2-shopping-market",
+        divisionId: newCat.divisionId || "division-2-shopping-market",
+        displayOrder: sortOrder,
+        sort_order: sortOrder,
+        isActive: newCat.visible !== false,
+        visible: newCat.visible !== false,
+        isDeleted: false,
+      };
+
+      // 1. Direct write to Firestore /categories/{cleanSlug}
+      const docRef = doc(db, "categories", cleanSlug);
+      await setDoc(docRef, {
+        ...itemToInsert,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        createdBy: auth.currentUser?.email || "admin",
+        updatedBy: auth.currentUser?.email || "admin",
+      });
+
+      // Verification: Read back to confirm Firestore persistence
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) {
+        throw new Error("ফায়ারবেস ডেটাবেসে ক্যাটাগরি সংরক্ষণ নিশ্চিত করা যায়নি");
+      }
+
+      // 2. Update local state and mirror settings doc
+      const next: CategoryConfigItem[] = [...items, itemToInsert];
       await saveCategories(next);
+      return itemToInsert;
     },
     [items, saveCategories]
   );
 
   const deleteCategory = useCallback(
-    async (slug: string) => {
+    async (slug: string, options?: { softDeleteOnly?: boolean; force?: boolean }) => {
+      // 1. Reference check
+      const refs = await checkCategoryReferences(slug);
+      const hasRefs = refs.total > 0;
+
+      if (hasRefs && !options?.softDeleteOnly && !options?.force) {
+        throw new Error(
+          `এই ক্যাটাগরিতে ${refs.submissionsCount}টি তালিকা এবং ${refs.donationsCount}টি অনুদান রেকর্ড রয়েছে। সরাসরি মুছে ফেলা সম্ভব নয়; নিরাপদে নিষ্ক্রিয় (Archive / Soft Delete) করুন।`
+        );
+      }
+
+      if (hasRefs || options?.softDeleteOnly) {
+        // Soft Delete in Firestore /categories/{slug}
+        try {
+          const docRef = doc(db, "categories", slug);
+          await setDoc(
+            docRef,
+            {
+              isDeleted: true,
+              visible: false,
+              isActive: false,
+              deletedAt: new Date().toISOString(),
+              updatedAt: serverTimestamp(),
+              updatedBy: auth.currentUser?.email || "admin",
+            },
+            { merge: true }
+          );
+        } catch (err) {
+          console.error("Firestore soft-delete error:", err);
+        }
+      } else {
+        // Hard Delete from Firestore /categories/{slug}
+        try {
+          const docRef = doc(db, "categories", slug);
+          await deleteDoc(docRef);
+        } catch (err) {
+          console.error("Firestore deleteDoc error:", err);
+        }
+      }
+
+      // 2. Remove from active state and persist deletedSlugs
       const next = items.filter((c) => c.slug !== slug);
-      await saveCategories(next);
+      await saveCategories(next, slug);
     },
     [items, saveCategories]
   );
@@ -897,6 +1161,9 @@ export function useCategories() {
   );
 
   const resetCategories = useCallback(async () => {
+    try {
+      localStorage.removeItem(LOCAL_CATEGORIES_KEY);
+    } catch {}
     await saveCategories(DEFAULT_CATEGORY_ITEMS);
   }, [saveCategories]);
 
@@ -933,6 +1200,7 @@ export function useCategories() {
     deleteCategory,
     moveCategory,
     resetCategories,
+    checkCategoryReferences,
   };
 }
 
