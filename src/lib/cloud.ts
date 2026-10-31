@@ -32,16 +32,169 @@ import { uploadImageToFirebaseStorage, type ImageUploadCategory } from "@/lib/im
 export type BloodGroupType = "A+" | "A-" | "B+" | "B-" | "AB+" | "AB-" | "O+" | "O-";
 export type ModerationStatus = "pending" | "approved" | "rejected";
 
+export type DonationCategory =
+  | "general"
+  | "treatment"
+  | "education"
+  | "zakat"
+  | "orphans_helpless"
+  | "emergency_relief"
+  | "food_clothing"
+  | "individual_family"
+  | "religious_institution"
+  | "social_project"
+  | "reports";
+
+export type DonationMethod = "bkash" | "nagad" | "rocket" | "upay" | "bank" | "card";
+
+export const DONATION_CATEGORY_LABELS: Record<string, string> = {
+  general: "সাধারণ অনুদান",
+  treatment: "চিকিৎসা অনুদান",
+  education: "শিক্ষা অনুদান",
+  zakat: "যাকাত ও সদকা",
+  orphans_helpless: "এতিম ও অসহায়দের সহায়তা",
+  emergency_relief: "জরুরি ত্রাণ",
+  food_clothing: "খাদ্য ও বস্ত্র বিতরণ",
+  individual_family: "ব্যক্তি ও পরিবারভিত্তিক অনুদান",
+  religious_institution: "ধর্মীয় প্রতিষ্ঠানে অনুদান",
+  social_project: "সামাজিক প্রকল্প",
+  reports: "অনুদানের হিসাব ও রিপোর্ট",
+};
+
 export interface DonationRow {
   id: string;
   author_id?: string;
   sender_name: string;
   sender_phone: string | null;
-  method: "bkash" | "nagad";
+  method: DonationMethod;
+  category?: string;
+  category_label?: string;
   trx_id: string;
   amount: number;
   note: string | null;
   status: ModerationStatus;
+  is_anonymous?: boolean;
+  campaign_id?: string;
+  campaign_title?: string;
+  payment_type?: "personal" | "merchant" | "bank" | "card";
+  account_number?: string;
+  sender_account_last4?: string;
+  bank_name?: string;
+  branch_name?: string;
+  routing_number?: string;
+  deposit_slip_url?: string;
+  receipt_url?: string;
+  verified_by?: string;
+  verified_at?: string;
+  admin_note?: string;
+  rejection_reason?: string;
+  district?: string;
+  upazila?: string;
+  area?: string;
+  donor_address?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export type ExpenseCategory =
+  | "orphans_helpless"
+  | "emergency_relief"
+  | "food_clothing"
+  | "individual_family"
+  | "religious_institution"
+  | "social_project";
+
+export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
+  orphans_helpless: "এতিম ও অসহায়দের সহায়তা",
+  emergency_relief: "জরুরি ত্রাণ",
+  food_clothing: "খাদ্য ও বস্ত্র বিতরণ",
+  individual_family: "ব্যক্তি ও পরিবারভিত্তিক অনুদান",
+  religious_institution: "ধর্মীয় প্রতিষ্ঠানে অনুদান",
+  social_project: "সামাজিক প্রকল্প",
+};
+
+export interface ExpenseRow {
+  id: string;
+  author_id?: string;
+  title: string;
+  category: ExpenseCategory;
+  category_label?: string;
+  donation_category?: string;
+  amount: number;
+  expense_date: string;
+  location?: string;
+  district?: string;
+  upazila?: string;
+  area?: string;
+  quantity?: number;
+  unit?: string;
+  unit_price?: number;
+  description?: string;
+  responsible_person?: string;
+  entry_by?: string;
+  receipt_url?: string;
+  supporting_documents?: string[];
+  status: ModerationStatus;
+  expense_status?: "draft" | "pending" | "approved" | "rejected" | "cancelled";
+  approved_by?: string;
+  approved_at?: string;
+  admin_note?: string;
+  rejection_reason?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface DonationCampaignRow {
+  id: string;
+  author_id?: string;
+  category: string;
+  category_label: string;
+  title: string;
+  purpose: string;
+  description: string;
+  target_amount: number;
+  collected_amount?: number;
+  start_date: string;
+  end_date?: string;
+  district?: string;
+  upazila?: string;
+  area?: string;
+  address?: string;
+  responsible_person: string;
+  contact_phone: string;
+  image_url?: string;
+  supporting_docs?: string[];
+  unit?: string;
+  quantity?: number;
+  is_sensitive?: boolean; // For confidential individual/family aid
+  status: "active" | "completed" | "paused" | "draft";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FinancialAuditLogRow {
+  id: string;
+  event_type:
+    | "donation_submitted"
+    | "donation_verified"
+    | "donation_rejected"
+    | "donation_updated"
+    | "donation_deleted"
+    | "expense_created"
+    | "expense_approved"
+    | "expense_rejected"
+    | "expense_deleted"
+    | "adjustment";
+  reference_id: string;
+  reference_type: "donation" | "expense" | "campaign" | "adjustment";
+  amount: number;
+  category?: string;
+  previous_status?: string;
+  new_status?: string;
+  actor_email?: string;
+  actor_name?: string;
+  reason?: string;
+  admin_note?: string;
   created_at: string;
 }
 
@@ -183,13 +336,15 @@ function genId(): string {
   return crypto.randomUUID().replace(/[^a-zA-Z0-9_-]/g, "");
 }
 
-function getCurrentActorInfo(): { uid: string; isStaff: boolean; isSuper: boolean } {
+function getCurrentActorInfo(): { uid: string; isStaff: boolean; isSuper: boolean; email?: string } {
   let isSuper = false;
   let isStaff = false;
   let resolvedUid = auth.currentUser?.uid || "";
+  let resolvedEmail: string | undefined = auth.currentUser?.email || undefined;
 
   // 1. Check direct Firebase Auth email
   if (auth.currentUser?.email) {
+    resolvedEmail = auth.currentUser.email;
     if (isSuperAdminEmail(auth.currentUser.email)) {
       isSuper = true;
       isStaff = true;
@@ -214,6 +369,9 @@ function getCurrentActorInfo(): { uid: string; isStaff: boolean; isSuper: boolea
       const parsed = JSON.parse(raw);
       const u = parsed?.user;
       const roles: string[] = Array.isArray(parsed?.roles) ? parsed.roles : [];
+      if (u?.email) {
+        resolvedEmail = u.email;
+      }
       if (u?.email && isSuperAdminEmail(u.email)) {
         isSuper = true;
         isStaff = true;
@@ -239,6 +397,7 @@ function getCurrentActorInfo(): { uid: string; isStaff: boolean; isSuper: boolea
       uid: resolvedUid,
       isStaff,
       isSuper,
+      email: resolvedEmail,
     };
   }
 
@@ -252,7 +411,7 @@ function getCurrentActorInfo(): { uid: string; isStaff: boolean; isSuper: boolea
   } catch {
     anonId = `user_${genId().slice(0, 16)}`;
   }
-  return { uid: anonId, isStaff: false, isSuper: false };
+  return { uid: anonId, isStaff: false, isSuper: false, email: resolvedEmail };
 }
 
 // ============================================================================
@@ -575,14 +734,42 @@ async function syncSingleDocToNativeFirestore(
         isSuper && (item.status === "approved" || item.status === "rejected" || item.status === "pending")
           ? item.status
           : item.status || "pending";
+      const validMethods = ["bkash", "nagad", "rocket", "upay", "bank", "card"];
+      const method = validMethods.includes(String(item.method)) ? item.method : "bkash";
       const payload = {
         author_id: authorId,
         sender_name: sanitizeString(item.sender_name, 120, "Anonymous"),
         sender_phone: sanitizeString(item.sender_phone ?? "", 30, ""),
-        method: item.method === "nagad" ? "nagad" : "bkash",
+        method,
+        category: sanitizeString(item.category ?? "general", 50, "general"),
+        category_label: sanitizeString(item.category_label ?? "", 100, ""),
         trx_id: sanitizeString(item.trx_id, 64, "TRX00"),
         amount: Math.min(Math.max(Number(item.amount) || 1, 1), 10000000),
         note: sanitizeString(item.note ?? "", 500, ""),
+        status,
+        createdAt: createdAtVal,
+        updatedAt: serverTimestamp(),
+      };
+      await setDoc(ref, payload, { merge: true });
+      return { ok: true };
+    }
+
+    if (collectionName === "expenses") {
+      const status =
+        isStaffSession && (item.status === "approved" || item.status === "rejected" || item.status === "pending")
+          ? item.status
+          : "approved";
+      const payload = {
+        author_id: authorId,
+        title: sanitizeString(item.title, 200, "মানবিক ব্যয়"),
+        category: sanitizeString(item.category, 50, "emergency_relief"),
+        category_label: sanitizeString(item.category_label ?? "", 100, ""),
+        amount: Math.min(Math.max(Number(item.amount) || 1, 1), 100000000),
+        expense_date: sanitizeString(item.expense_date ?? "", 40, new Date().toISOString().split("T")[0]),
+        location: sanitizeString(item.location ?? "", 150, ""),
+        description: sanitizeString(item.description ?? "", 1000, ""),
+        responsible_person: sanitizeString(item.responsible_person ?? "", 150, ""),
+        receipt_url: sanitizeString(item.receipt_url ?? "", 500, ""),
         status,
         createdAt: createdAtVal,
         updatedAt: serverTimestamp(),
@@ -936,6 +1123,154 @@ function useFirestoreRealtime<
   return { items, loading };
 }
 
+// ---------- Financial Audit Ledger Helper ----------
+export async function recordFinancialAudit(entry: Omit<FinancialAuditLogRow, "id" | "created_at">) {
+  try {
+    const id = genId();
+    const nowIso = new Date().toISOString();
+    const row: FinancialAuditLogRow = {
+      id,
+      ...entry,
+      created_at: nowIso,
+    };
+    await setDoc(doc(db, "financial_audit_logs", id), {
+      ...row,
+      createdAt: serverTimestamp(),
+    });
+    upsertCloudMirrorDoc("financial_audit_logs", id, row);
+  } catch {
+    // Non-blocking error handling
+  }
+}
+
+export function useFinancialAuditLogs() {
+  const { items, loading } = useFirestoreRealtime<FinancialAuditLogRow>("financial_audit_logs", "moderated", {
+    col: "created_at",
+    asc: false,
+  });
+  return { items, loading };
+}
+
+// ---------- Donation Campaigns (৪টি প্রধান ও ৬টি মানবিক প্রকল্প) ----------
+export function useCloudCampaigns() {
+  const { items, loading } = useFirestoreRealtime<DonationCampaignRow>("campaigns", "moderated", {
+    col: "created_at",
+    asc: false,
+  });
+
+  const add = async (c: {
+    category: string;
+    category_label: string;
+    title: string;
+    purpose: string;
+    description: string;
+    target_amount: number;
+    start_date?: string;
+    end_date?: string;
+    district?: string;
+    upazila?: string;
+    area?: string;
+    address?: string;
+    responsible_person: string;
+    contact_phone: string;
+    image_url?: string;
+    supporting_docs?: string[];
+    unit?: string;
+    quantity?: number;
+    is_sensitive?: boolean;
+    status?: "active" | "completed" | "paused" | "draft";
+  }) => {
+    try {
+      const actor = getCurrentActorInfo();
+      const id = genId();
+      const nowIso = new Date().toISOString();
+      const row: DonationCampaignRow = {
+        id,
+        author_id: actor.uid,
+        category: sanitizeString(c.category, 60, "general"),
+        category_label: sanitizeString(c.category_label, 100, "সাধারণ অনুদান"),
+        title: sanitizeString(c.title, 200, "ক্যাম্পেইন শিরোনাম"),
+        purpose: sanitizeString(c.purpose, 200, "অনুদানের উদ্দেশ্য"),
+        description: sanitizeString(c.description, 3000, ""),
+        target_amount: Math.min(Math.max(Number(c.target_amount) || 1, 1), 50000000),
+        collected_amount: 0,
+        start_date: c.start_date || nowIso.split("T")[0],
+        end_date: c.end_date || undefined,
+        district: sanitizeString(c.district ?? "নোয়াখালী", 60, "নোয়াখালী"),
+        upazila: sanitizeString(c.upazila ?? "সদর", 60, "সদর"),
+        area: sanitizeString(c.area ?? "", 100, ""),
+        address: sanitizeString(c.address ?? "", 200, ""),
+        responsible_person: sanitizeString(c.responsible_person, 100, "দায়িত্বপ্রাপ্ত ব্যক্তি"),
+        contact_phone: sanitizeString(c.contact_phone, 30, ""),
+        image_url: sanitizeString(c.image_url ?? "", 500, ""),
+        supporting_docs: c.supporting_docs || [],
+        unit: c.unit ? sanitizeString(c.unit, 40, "") : undefined,
+        quantity: c.quantity ? Number(c.quantity) : undefined,
+        is_sensitive: Boolean(c.is_sensitive),
+        status: c.status || "active",
+        created_at: nowIso,
+        updated_at: nowIso,
+      };
+
+      const syncRes = await syncSingleDocToNativeFirestore("campaigns", id, row);
+      if (!syncRes.ok) {
+        return { ok: false, error: syncRes.error || "ক্যাম্পেইন তৈরি ব্যর্থ হয়েছে" };
+      }
+      upsertCloudMirrorDoc("campaigns", id, row);
+      void recordFinancialAudit({
+        event_type: "adjustment",
+        reference_id: id,
+        reference_type: "campaign",
+        amount: row.target_amount,
+        category: row.category,
+        actor_email: actor.email,
+        admin_note: `নতুন ক্যাম্পেইন তৈরি হয়েছে: ${row.title}`,
+      });
+      return { ok: true, id };
+    } catch (err: any) {
+      return { ok: false, error: err?.message || "ত্রুটি" };
+    }
+  };
+
+  const update = async (id: string, patch: Partial<DonationCampaignRow>) => {
+    try {
+      const existing = items.find((x) => x.id === id);
+      const nowIso = new Date().toISOString();
+      const sanitizedPatch: Record<string, unknown> = {
+        updatedAt: serverTimestamp(),
+      };
+      if (patch.title !== undefined) sanitizedPatch.title = sanitizeString(patch.title, 200, "");
+      if (patch.purpose !== undefined) sanitizedPatch.purpose = sanitizeString(patch.purpose, 200, "");
+      if (patch.description !== undefined) sanitizedPatch.description = sanitizeString(patch.description, 3000, "");
+      if (patch.target_amount !== undefined) sanitizedPatch.target_amount = Number(patch.target_amount);
+      if (patch.status !== undefined) sanitizedPatch.status = patch.status;
+      if (patch.responsible_person !== undefined) sanitizedPatch.responsible_person = sanitizeString(patch.responsible_person, 100, "");
+      if (patch.contact_phone !== undefined) sanitizedPatch.contact_phone = sanitizeString(patch.contact_phone, 30, "");
+      if (patch.image_url !== undefined) sanitizedPatch.image_url = sanitizeString(patch.image_url ?? "", 500, "");
+      if (patch.is_sensitive !== undefined) sanitizedPatch.is_sensitive = patch.is_sensitive;
+
+      await setDoc(doc(db, "campaigns", id), sanitizedPatch, { merge: true });
+      const updated = { ...(existing || { id }), ...patch, updated_at: nowIso };
+      upsertCloudMirrorDoc("campaigns", id, updated);
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err?.message || "আপডেট ব্যর্থ" };
+    }
+  };
+
+  const remove = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, "campaigns", id));
+      removeCloudMirrorDoc("campaigns", id);
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err?.message || "মুছে ফেলা ব্যর্থ" };
+    }
+  };
+
+  return { items, loading, add, update, remove };
+}
+
 // ---------- Donations ----------
 export function useCloudDonations() {
   const { items, loading } = useFirestoreRealtime<DonationRow>("donations", "moderated");
@@ -943,67 +1278,176 @@ export function useCloudDonations() {
   const add = async (d: {
     sender_name: string;
     sender_phone?: string;
-    method: "bkash" | "nagad";
+    method: DonationMethod;
+    category?: string;
+    category_label?: string;
     trx_id: string;
     amount: number;
     note?: string;
+    is_anonymous?: boolean;
+    campaign_id?: string;
+    campaign_title?: string;
+    payment_type?: "personal" | "merchant" | "bank" | "card";
+    account_number?: string;
+    sender_account_last4?: string;
+    bank_name?: string;
+    branch_name?: string;
+    routing_number?: string;
+    deposit_slip_url?: string;
+    receipt_url?: string;
+    district?: string;
+    upazila?: string;
+    area?: string;
+    donor_address?: string;
     status?: "pending" | "approved" | "rejected";
   }) => {
     try {
+      const cleanTrx = sanitizeString(d.trx_id, 64, "").trim();
+      if (!cleanTrx) {
+        return { ok: false, error: "Transaction ID (TrxID) প্রদান করা আবশ্যক" };
+      }
+
+      // Check for duplicate TrxID among non-rejected donations
+      const isDuplicate = items.some(
+        (existing) =>
+          existing.status !== "rejected" &&
+          existing.trx_id.trim().toLowerCase() === cleanTrx.toLowerCase()
+      );
+      if (isDuplicate) {
+        return {
+          ok: false,
+          error: `এই Transaction ID (${cleanTrx}) ইতিমধ্যে সিস্টেমে জমা দেওয়া হয়েছে। একই TrxID দ্বিতীয়বার ব্যবহার করা যাবে না।`,
+        };
+      }
+
       const actor = getCurrentActorInfo();
       const id = genId();
       const nowIso = new Date().toISOString();
       const nextStatus = actor.isSuper && d.status ? d.status : "pending";
+      const catLabel =
+        d.category_label ||
+        (d.category && DONATION_CATEGORY_LABELS[d.category]) ||
+        "সাধারণ অনুদান";
+
       const row: DonationRow & { updated_at: string } = {
         id,
         author_id: actor.uid,
         sender_name: sanitizeString(d.sender_name, 120, "Anonymous"),
         sender_phone: sanitizeString(d.sender_phone ?? "", 30, ""),
-        method: d.method === "nagad" ? "nagad" : "bkash",
-        trx_id: sanitizeString(d.trx_id, 64, "TRX00"),
+        method: d.method || "bkash",
+        category: d.category || "general",
+        category_label: catLabel,
+        trx_id: cleanTrx,
         amount: Math.min(Math.max(Number(d.amount) || 1, 1), 10000000),
         note: sanitizeString(d.note ?? "", 500, ""),
         status: nextStatus,
+        is_anonymous: Boolean(d.is_anonymous),
+        campaign_id: d.campaign_id ? sanitizeString(d.campaign_id, 80, "") : undefined,
+        campaign_title: d.campaign_title ? sanitizeString(d.campaign_title, 200, "") : undefined,
+        payment_type: d.payment_type || (d.method === "bank" ? "bank" : d.method === "card" ? "card" : "personal"),
+        account_number: d.account_number ? sanitizeString(d.account_number, 50, "") : undefined,
+        sender_account_last4: d.sender_account_last4 ? sanitizeString(d.sender_account_last4, 10, "") : undefined,
+        bank_name: d.bank_name ? sanitizeString(d.bank_name, 100, "") : undefined,
+        branch_name: d.branch_name ? sanitizeString(d.branch_name, 100, "") : undefined,
+        routing_number: d.routing_number ? sanitizeString(d.routing_number, 50, "") : undefined,
+        deposit_slip_url: d.deposit_slip_url ? sanitizeString(d.deposit_slip_url, 500, "") : undefined,
+        receipt_url: d.receipt_url ? sanitizeString(d.receipt_url, 500, "") : undefined,
+        district: d.district ? sanitizeString(d.district, 60, "") : undefined,
+        upazila: d.upazila ? sanitizeString(d.upazila, 60, "") : undefined,
+        area: d.area ? sanitizeString(d.area, 100, "") : undefined,
+        donor_address: d.donor_address ? sanitizeString(d.donor_address, 200, "") : undefined,
         created_at: nowIso,
         updated_at: nowIso,
       };
+
       const syncRes = await syncSingleDocToNativeFirestore("donations", id, row);
       if (!syncRes.ok) {
         return { ok: false, error: syncRes.error || "Firebase-এ অনুদানের তথ্য সংরক্ষণ ব্যর্থ হয়েছে" };
       }
       upsertCloudMirrorDoc("donations", id, row);
-      return { ok: true };
-    } catch (err) {
+
+      void recordFinancialAudit({
+        event_type: "donation_submitted",
+        reference_id: id,
+        reference_type: "donation",
+        amount: row.amount,
+        category: row.category,
+        previous_status: undefined,
+        new_status: nextStatus,
+        actor_email: actor.email,
+        actor_name: row.sender_name,
+        admin_note: `অনুদান জমা হয়েছে (${row.method.toUpperCase()} • TrxID: ${row.trx_id})`,
+      });
+
+      return { ok: true, id };
+    } catch (err: any) {
       return { ok: false, error: err instanceof Error ? err.message : "ত্রুটি" };
     }
   };
 
-  const setStatus = async (id: string, status: "approved" | "rejected" | "pending") => {
+  const setStatus = async (
+    id: string,
+    status: "approved" | "rejected" | "pending",
+    options?: { admin_note?: string; rejection_reason?: string }
+  ) => {
     const existing = items.find((x) => x.id === id);
+    if (!existing) {
+      return { error: { message: "অনুদান পাওয়া যায়নি" } };
+    }
+
+    // Idempotent check: if already approved, do not double-approve
+    if (existing.status === status) {
+      return { error: null };
+    }
+
     try {
+      const actor = getCurrentActorInfo();
       const nowIso = new Date().toISOString();
-      await setDoc(
-        doc(db, "donations", id),
-        { status, updatedAt: serverTimestamp() },
-        { merge: true }
-      );
-      const updated = {
-        ...(existing || { id }),
+      const patch: Record<string, any> = {
         status,
+        updatedAt: serverTimestamp(),
+      };
+
+      if (status === "approved") {
+        patch.verified_by = actor.email;
+        patch.verified_at = nowIso;
+        if (options?.admin_note) patch.admin_note = options.admin_note;
+      } else if (status === "rejected") {
+        patch.rejection_reason = options?.rejection_reason || "ভুল TrxID বা অসঙ্গতিপূর্ণ পেমেন্ট তথ্য";
+        if (options?.admin_note) patch.admin_note = options.admin_note;
+      }
+
+      await setDoc(doc(db, "donations", id), patch, { merge: true });
+      const updated = {
+        ...existing,
+        ...patch,
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("donations", id, updated);
+
       void recordStaffActivity({
         action_type: status === "approved" ? "approve" : "reject",
-        action_label: status === "approved" ? "অনুদান অনুমোদন করেছে" : "অনুদান বাতিল করেছে",
+        action_label: status === "approved" ? "অনুদান যাচাই ও অনুমোদন করেছে" : "অনুদান বাতিল করেছে",
         module: "donation",
         module_label: "অনুদান",
         target_id: id,
-        target_title: existing ? `${existing.sender_name} (${existing.amount}৳)` : id,
-        target_detail: existing
-          ? `মাধ্যম: ${existing.method} • ফোন: ${existing.sender_phone || "—"} • TrxID: ${existing.trx_id}`
-          : `স্ট্যাটাস: ${status}`,
+        target_title: `${existing.sender_name} (${existing.amount}৳)`,
+        target_detail: `মাধ্যম: ${existing.method} • ফোন: ${existing.sender_phone || "—"} • TrxID: ${existing.trx_id}`,
       });
+
+      void recordFinancialAudit({
+        event_type: status === "approved" ? "donation_verified" : "donation_rejected",
+        reference_id: id,
+        reference_type: "donation",
+        amount: existing.amount,
+        category: existing.category,
+        previous_status: existing.status,
+        new_status: status,
+        actor_email: actor.email,
+        reason: options?.rejection_reason,
+        admin_note: options?.admin_note || (status === "approved" ? "যাচাইকৃত ও অনুমোদিত" : "বাতিলকৃত"),
+      });
+
       return { error: null };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1014,6 +1458,7 @@ export function useCloudDonations() {
   const remove = async (id: string) => {
     const existing = items.find((x) => x.id === id);
     try {
+      const actor = getCurrentActorInfo();
       await deleteDoc(doc(db, "donations", id));
       removeCloudMirrorDoc("donations", id);
       void recordStaffActivity({
@@ -1029,6 +1474,20 @@ export function useCloudDonations() {
         deleted_snapshot: existing ? ({ ...existing } as unknown as Record<string, unknown>) : null,
         collection_name: "donations",
       });
+
+      if (existing) {
+        void recordFinancialAudit({
+          event_type: "donation_deleted",
+          reference_id: id,
+          reference_type: "donation",
+          amount: existing.amount,
+          category: existing.category,
+          previous_status: existing.status,
+          actor_email: actor.email,
+          admin_note: `অনুদান রেকর্ড মুছে ফেলা হয়েছে (TrxID: ${existing.trx_id})`,
+        });
+      }
+
       return { error: null };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1043,11 +1502,14 @@ export function useCloudDonations() {
       const sanitizedPatch: Record<string, unknown> = { updatedAt: serverTimestamp() };
       if (patch.sender_name !== undefined) sanitizedPatch.sender_name = sanitizeString(patch.sender_name, 120, "Anonymous");
       if (patch.sender_phone !== undefined) sanitizedPatch.sender_phone = sanitizeString(patch.sender_phone ?? "", 30, "");
-      if (patch.method !== undefined) sanitizedPatch.method = patch.method === "nagad" ? "nagad" : "bkash";
+      if (patch.method !== undefined) sanitizedPatch.method = patch.method;
       if (patch.trx_id !== undefined) sanitizedPatch.trx_id = sanitizeString(patch.trx_id, 64, "TRX00");
       if (patch.amount !== undefined) sanitizedPatch.amount = Math.min(Math.max(Number(patch.amount) || 1, 1), 10000000);
       if (patch.note !== undefined) sanitizedPatch.note = sanitizeString(patch.note ?? "", 500, "");
       if (patch.status !== undefined) sanitizedPatch.status = patch.status;
+      if (patch.is_anonymous !== undefined) sanitizedPatch.is_anonymous = patch.is_anonymous;
+      if (patch.admin_note !== undefined) sanitizedPatch.admin_note = patch.admin_note;
+      if (patch.rejection_reason !== undefined) sanitizedPatch.rejection_reason = patch.rejection_reason;
 
       await setDoc(doc(db, "donations", id), sanitizedPatch, { merge: true });
       const updated = {
@@ -1073,6 +1535,237 @@ export function useCloudDonations() {
   };
 
   return { items, loading, add, setStatus, remove, update };
+}
+
+// ---------- Humanitarian Relief & Expenses ----------
+export function useCloudExpenses() {
+  const { items, loading } = useFirestoreRealtime<ExpenseRow>("expenses", "moderated");
+
+  const add = async (e: {
+    title: string;
+    category: ExpenseCategory;
+    category_label?: string;
+    donation_category?: string;
+    amount: number;
+    expense_date?: string;
+    location?: string;
+    district?: string;
+    upazila?: string;
+    area?: string;
+    quantity?: number;
+    unit?: string;
+    unit_price?: number;
+    description?: string;
+    responsible_person?: string;
+    entry_by?: string;
+    receipt_url?: string;
+    supporting_documents?: string[];
+    status?: ModerationStatus;
+    expense_status?: "draft" | "pending" | "approved" | "rejected" | "cancelled";
+    admin_note?: string;
+  }) => {
+    try {
+      const actor = getCurrentActorInfo();
+      const id = genId();
+      const nowIso = new Date().toISOString();
+      const catLabel = e.category_label || EXPENSE_CATEGORY_LABELS[e.category] || "মানবিক ব্যয়";
+      const initialStatus: ModerationStatus = actor.isSuper ? (e.status || "approved") : "pending";
+
+      const row: ExpenseRow & { updated_at: string } = {
+        id,
+        author_id: actor.uid,
+        title: sanitizeString(e.title, 200, "মানবিক ব্যয়"),
+        category: e.category,
+        category_label: catLabel,
+        donation_category: e.donation_category ? sanitizeString(e.donation_category, 60, "") : undefined,
+        amount: Math.min(Math.max(Number(e.amount) || 1, 1), 100000000),
+        expense_date: e.expense_date || nowIso.split("T")[0],
+        location: sanitizeString(e.location ?? "", 150, ""),
+        district: sanitizeString(e.district ?? "নোয়াখালী", 60, "নোয়াখালী"),
+        upazila: sanitizeString(e.upazila ?? "সদর", 60, "সদর"),
+        area: sanitizeString(e.area ?? "", 100, ""),
+        quantity: e.quantity ? Number(e.quantity) : undefined,
+        unit: e.unit ? sanitizeString(e.unit, 40, "") : undefined,
+        unit_price: e.unit_price ? Number(e.unit_price) : undefined,
+        description: sanitizeString(e.description ?? "", 1000, ""),
+        responsible_person: sanitizeString(e.responsible_person ?? "", 150, ""),
+        entry_by: e.entry_by ? sanitizeString(e.entry_by, 100, "") : actor.email,
+        receipt_url: sanitizeString(e.receipt_url ?? "", 500, ""),
+        supporting_documents: e.supporting_documents || [],
+        status: initialStatus,
+        expense_status: e.expense_status || (initialStatus === "approved" ? "approved" : "pending"),
+        approved_by: initialStatus === "approved" ? actor.email : undefined,
+        approved_at: initialStatus === "approved" ? nowIso : undefined,
+        admin_note: e.admin_note ? sanitizeString(e.admin_note, 500, "") : undefined,
+        created_at: nowIso,
+        updated_at: nowIso,
+      };
+
+      const syncRes = await syncSingleDocToNativeFirestore("expenses", id, row);
+      if (!syncRes.ok) {
+        return { ok: false, error: syncRes.error || "Firebase-এ খরচের তথ্য সংরক্ষণ ব্যর্থ হয়েছে" };
+      }
+      upsertCloudMirrorDoc("expenses", id, row);
+
+      void recordStaffActivity({
+        action_type: "create",
+        action_label: "মানবিক ব্যয়ের হিসাব যুক্ত করেছে",
+        module: "expense",
+        module_label: "ব্যয়",
+        target_id: id,
+        target_title: `${row.title} (${row.amount}৳)`,
+        target_detail: `বিভাগ: ${row.category_label} • তারিখ: ${row.expense_date}`,
+      });
+
+      void recordFinancialAudit({
+        event_type: "expense_created",
+        reference_id: id,
+        reference_type: "expense",
+        amount: row.amount,
+        category: row.category,
+        previous_status: undefined,
+        new_status: initialStatus,
+        actor_email: actor.email,
+        admin_note: `মানবিক ব্যয় যুক্ত হয়েছে (${row.title} - ${row.amount}৳)`,
+      });
+
+      return { ok: true, id };
+    } catch (err: any) {
+      return { ok: false, error: err instanceof Error ? err.message : "ত্রুটি" };
+    }
+  };
+
+  const setStatus = async (
+    id: string,
+    status: "approved" | "rejected" | "pending",
+    options?: { admin_note?: string; rejection_reason?: string }
+  ) => {
+    const existing = items.find((x) => x.id === id);
+    if (!existing) return { error: { message: "ব্যয়ের রেকর্ড পাওয়া যায়নি" } };
+
+    try {
+      const actor = getCurrentActorInfo();
+      const nowIso = new Date().toISOString();
+      const patch: Record<string, any> = {
+        status,
+        expense_status: status === "approved" ? "approved" : status === "rejected" ? "rejected" : "pending",
+        updatedAt: serverTimestamp(),
+      };
+      if (status === "approved") {
+        patch.approved_by = actor.email;
+        patch.approved_at = nowIso;
+        if (options?.admin_note) patch.admin_note = options.admin_note;
+      } else if (status === "rejected") {
+        patch.rejection_reason = options?.rejection_reason || "ব্যয় বাতিল করা হয়েছে";
+        if (options?.admin_note) patch.admin_note = options.admin_note;
+      }
+
+      await setDoc(doc(db, "expenses", id), patch, { merge: true });
+      const updated = { ...existing, ...patch, updated_at: nowIso };
+      upsertCloudMirrorDoc("expenses", id, updated);
+
+      void recordFinancialAudit({
+        event_type: status === "approved" ? "expense_approved" : "expense_rejected",
+        reference_id: id,
+        reference_type: "expense",
+        amount: existing.amount,
+        category: existing.category,
+        previous_status: existing.status,
+        new_status: status,
+        actor_email: actor.email,
+        admin_note: options?.admin_note || (status === "approved" ? "অনুমোদিত ব্যয়" : "বাতিলকৃত ব্যয়"),
+      });
+
+      return { error: null };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: { message: msg || "ব্যয়ের অবস্থা আপডেট ব্যর্থ হয়েছে" } };
+    }
+  };
+
+  const update = async (id: string, patch: Partial<ExpenseRow>) => {
+    const existing = items.find((x) => x.id === id);
+    try {
+      const nowIso = new Date().toISOString();
+      const sanitizedPatch: Record<string, unknown> = { updatedAt: serverTimestamp() };
+      if (patch.title !== undefined) sanitizedPatch.title = sanitizeString(patch.title, 200, "মানবিক ব্যয়");
+      if (patch.category !== undefined) {
+        sanitizedPatch.category = patch.category;
+        sanitizedPatch.category_label = EXPENSE_CATEGORY_LABELS[patch.category] || "মানবিক ব্যয়";
+      }
+      if (patch.donation_category !== undefined) sanitizedPatch.donation_category = patch.donation_category;
+      if (patch.amount !== undefined) sanitizedPatch.amount = Math.min(Math.max(Number(patch.amount) || 1, 1), 100000000);
+      if (patch.expense_date !== undefined) sanitizedPatch.expense_date = sanitizeString(patch.expense_date, 40, "");
+      if (patch.location !== undefined) sanitizedPatch.location = sanitizeString(patch.location ?? "", 150, "");
+      if (patch.district !== undefined) sanitizedPatch.district = sanitizeString(patch.district ?? "", 60, "");
+      if (patch.upazila !== undefined) sanitizedPatch.upazila = sanitizeString(patch.upazila ?? "", 60, "");
+      if (patch.area !== undefined) sanitizedPatch.area = sanitizeString(patch.area ?? "", 100, "");
+      if (patch.quantity !== undefined) sanitizedPatch.quantity = Number(patch.quantity);
+      if (patch.unit !== undefined) sanitizedPatch.unit = sanitizeString(patch.unit ?? "", 40, "");
+      if (patch.unit_price !== undefined) sanitizedPatch.unit_price = Number(patch.unit_price);
+      if (patch.description !== undefined) sanitizedPatch.description = sanitizeString(patch.description ?? "", 1000, "");
+      if (patch.responsible_person !== undefined) sanitizedPatch.responsible_person = sanitizeString(patch.responsible_person ?? "", 150, "");
+      if (patch.receipt_url !== undefined) sanitizedPatch.receipt_url = sanitizeString(patch.receipt_url ?? "", 500, "");
+      if (patch.status !== undefined) sanitizedPatch.status = patch.status;
+      if (patch.admin_note !== undefined) sanitizedPatch.admin_note = patch.admin_note;
+      if (patch.rejection_reason !== undefined) sanitizedPatch.rejection_reason = patch.rejection_reason;
+
+      await setDoc(doc(db, "expenses", id), sanitizedPatch, { merge: true });
+      const updated = {
+        ...(existing || { id }),
+        ...patch,
+        updated_at: nowIso,
+      };
+      upsertCloudMirrorDoc("expenses", id, updated);
+      void recordStaffActivity({
+        action_type: "edit",
+        action_label: "মানবিক ব্যয়ের তথ্য এডিট করেছে",
+        module: "expense",
+        module_label: "ব্যয়",
+        target_id: id,
+        target_title: patch.title || existing?.title || id,
+      });
+      return { ok: true, error: null };
+    } catch (e: unknown) {
+      return { ok: false, error: { message: e instanceof Error ? e.message : String(e) } };
+    }
+  };
+
+  const remove = async (id: string) => {
+    const existing = items.find((x) => x.id === id);
+    try {
+      const actor = getCurrentActorInfo();
+      await deleteDoc(doc(db, "expenses", id));
+      removeCloudMirrorDoc("expenses", id);
+      void recordStaffActivity({
+        action_type: "delete",
+        action_label: "মানবিক ব্যয়ের হিসাব মুছে ফেলেছে",
+        module: "expense",
+        module_label: "ব্যয়",
+        target_id: id,
+        target_title: existing ? `${existing.title} (${existing.amount}৳)` : id,
+      });
+
+      if (existing) {
+        void recordFinancialAudit({
+          event_type: "expense_deleted",
+          reference_id: id,
+          reference_type: "expense",
+          amount: existing.amount,
+          category: existing.category,
+          previous_status: existing.status,
+          actor_email: actor.email,
+          admin_note: `ব্যয়ের রেকর্ড মুছে ফেলা হয়েছে (${existing.title})`,
+        });
+      }
+
+      return { error: null };
+    } catch (e: unknown) {
+      return { error: { message: e instanceof Error ? e.message : String(e) } };
+    }
+  };
+
+  return { items, loading, add, setStatus, update, remove };
 }
 
 // ---------- Submissions ----------

@@ -30,6 +30,7 @@ export type AuditModuleType =
   | "banners"
   | "chat"
   | "donation"
+  | "expense"
   | "categories"
   | "users"
   | "access"
@@ -59,6 +60,7 @@ export interface StaffActivityLogEntry {
     | "emergency_blood_requests"
     | "emergency_banners"
     | "donations"
+    | "expenses"
     | "category_requests"
     | "payment_requests";
   restored?: boolean;

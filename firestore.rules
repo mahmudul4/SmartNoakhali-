@@ -203,5 +203,29 @@ service cloud.firestore {
         allow create, update, delete: if isValidId(messageId);
       }
     }
+
+    // =========================================================
+    // 16. /expenses/{expenseId} (Relief & Humanitarian Expenses)
+    // =========================================================
+    match /expenses/{expenseId} {
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(expenseId);
+    }
+
+    // =========================================================
+    // 17. /campaigns/{campaignId} (Donation Campaigns)
+    // =========================================================
+    match /campaigns/{campaignId} {
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(campaignId);
+    }
+
+    // =========================================================
+    // 18. /financial_audit_logs/{logId} (Financial Audit Trail)
+    // =========================================================
+    match /financial_audit_logs/{logId} {
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(logId);
+    }
   }
 }

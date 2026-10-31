@@ -22,8 +22,10 @@ import {
 } from "@/lib/firebase";
 import {
   categories as defaultCategories,
+  DIVISIONS,
   CATEGORY_ICONS,
   type Category,
+  type Division,
 } from "@/data/categories";
 import defaultLogoUrl from "@/assets/logo.png";
 import { clearBinaryFromIdb, saveBinaryToIdb, sanitizeAppFileName } from "@/lib/pwa";
@@ -31,19 +33,21 @@ import { clearBinaryFromIdb, saveBinaryToIdb, sanitizeAppFileName } from "@/lib/
 export const defaultLogo: string = defaultLogoUrl;
 
 export const SITE_CONFIG_ID = "site_config";
-const DONATION_CONFIG_ID = "donation_config";
-const CATEGORIES_CONFIG_ID = "categories_config";
-const STAFF_PROFILES_CONFIG_ID = "staff_profiles_config";
-const APP_PACKAGES_CONFIG_ID = "app_packages_config";
-const SITE_META_CONFIG_ID = "site_meta_config";
+export const DIVISIONS_CONFIG_ID = "divisions_config";
+export const DONATION_CONFIG_ID = "donation_config";
+export const CATEGORIES_CONFIG_ID = "categories_config";
+export const STAFF_PROFILES_CONFIG_ID = "staff_profiles_config";
+export const APP_PACKAGES_CONFIG_ID = "app_packages_config";
+export const SITE_META_CONFIG_ID = "site_meta_config";
 export const SERVICES_CONFIG_ID = "services_config";
 
 export const LOCAL_LOGO_KEY = "sn_site_logo_v3";
-const LOCAL_DONATION_KEY = "sn_donation_config_v1";
-const LOCAL_CATEGORIES_KEY = "sn_categories_config_v1";
-const LOCAL_STAFF_PROFILES_KEY = "sn_staff_profiles_v1";
-const LOCAL_APP_PACKAGES_KEY = "sn_app_packages_v1";
-const LOCAL_SITE_META_KEY = "sn_site_meta_v1";
+export const LOCAL_DIVISIONS_KEY = "sn_divisions_config_v1";
+export const LOCAL_DONATION_KEY = "sn_donation_config_v1";
+export const LOCAL_CATEGORIES_KEY = "sn_categories_config_v1";
+export const LOCAL_STAFF_PROFILES_KEY = "sn_staff_profiles_v1";
+export const LOCAL_APP_PACKAGES_KEY = "sn_app_packages_v1";
+export const LOCAL_SITE_META_KEY = "sn_site_meta_v1";
 export const LOCAL_SERVICES_KEY = "sn_services_config_v1";
 
 export async function upsertSettingDoc(
@@ -73,6 +77,8 @@ export async function upsertSettingDoc(
       localStorage.setItem(LOCAL_SITE_META_KEY, cleanUrl);
     } else if (settingId === SERVICES_CONFIG_ID) {
       localStorage.setItem(LOCAL_SERVICES_KEY, cleanUrl);
+    } else if (settingId === DIVISIONS_CONFIG_ID) {
+      localStorage.setItem(LOCAL_DIVISIONS_KEY, cleanUrl);
     }
   } catch {
     // ignore
@@ -201,54 +207,172 @@ export function useLogo() {
 // ============================================================================
 // 2. Donation Numbers Configuration Hook (/settings/donation_config)
 // ============================================================================
+export type DonationAccountType = "personal" | "merchant" | "bank" | "gateway";
+export type DonationMethodType = "bkash" | "nagad" | "rocket" | "upay" | "bank" | "card";
+
 export interface DonationNumberItem {
   id: string;
-  method: "bkash" | "nagad" | "rocket" | "upay";
+  method: DonationMethodType;
+  type: DonationAccountType;
   label: string;
   number: string;
   active: boolean;
   tone: string;
+  bankName?: string;
+  accountName?: string;
+  branchName?: string;
+  routingNumber?: string;
+  instructions?: string;
+  displayOrder?: number;
+  setupStatus?: "connected" | "setup_required" | "disabled";
+  isGatewayConfigured?: boolean;
 }
 
 export interface DonationConfig {
-  numbers: DonationNumberItem[];
   subtitle: string;
+  numbers: DonationNumberItem[];
 }
 
 export const DEFAULT_DONATION_CONFIG: DonationConfig = {
-  subtitle: "আপনার সহযোগিতাই আমাদের শক্তি",
+  subtitle: "আপনার সহযোগিতাই আমাদের শক্তি — মানবতার সেবায় এগিয়ে আসুন",
   numbers: [
     {
-      id: "bkash_main",
+      id: "bkash_personal",
       method: "bkash",
-      label: "bKash (Personal)",
+      type: "personal",
+      label: "bKash Personal (Send Money)",
       number: "01850999178",
       active: true,
       tone: "from-pink-500 to-rose-600",
+      instructions: "বিকাশ অ্যাপ বা *247# ডায়াল করে Send Money অপশন ব্যবহার করুন এবং প্রাপ্ত Transaction ID (TrxID) নিচে দিন।",
+      setupStatus: "connected",
+      displayOrder: 1,
     },
     {
-      id: "nagad_main",
+      id: "bkash_merchant",
+      method: "bkash",
+      type: "merchant",
+      label: "bKash Merchant (Payment)",
+      number: "01850999178",
+      active: false,
+      tone: "from-pink-600 to-rose-700",
+      instructions: "বিকাশ অ্যাপ থেকে Make Payment অপশনে গিয়ে মার্চেন্ট নম্বরে পেমেন্ট করুন।",
+      setupStatus: "setup_required",
+      displayOrder: 2,
+    },
+    {
+      id: "nagad_personal",
       method: "nagad",
-      label: "Nagad (Personal)",
+      type: "personal",
+      label: "Nagad Personal (Send Money)",
       number: "01850999178",
       active: true,
       tone: "from-orange-500 to-red-600",
+      instructions: "নগদ অ্যাপ বা *167# ডায়াল করে Send Money করুন এবং প্রাপ্ত Transaction ID নিচে লিখুন।",
+      setupStatus: "connected",
+      displayOrder: 3,
     },
     {
-      id: "rocket_main",
+      id: "nagad_merchant",
+      method: "nagad",
+      type: "merchant",
+      label: "Nagad Merchant (Payment)",
+      number: "01850999178",
+      active: false,
+      tone: "from-orange-600 to-amber-700",
+      instructions: "নগদ অ্যাপ থেকে মার্চেন্ট পেমেন্ট অপশন ব্যবহার করুন।",
+      setupStatus: "setup_required",
+      displayOrder: 4,
+    },
+    {
+      id: "rocket_personal",
       method: "rocket",
-      label: "Rocket (Personal)",
+      type: "personal",
+      label: "Rocket Personal (Send Money)",
       number: "01850999178",
-      active: false,
+      active: true,
       tone: "from-purple-600 to-indigo-700",
+      instructions: "রকেট অ্যাপ বা *322# থেকে Send Money করুন এবং Transaction ID সংগ্রহ করুন।",
+      setupStatus: "connected",
+      displayOrder: 5,
     },
     {
-      id: "upay_main",
-      method: "upay",
-      label: "Upay (Personal)",
+      id: "rocket_merchant",
+      method: "rocket",
+      type: "merchant",
+      label: "Rocket Merchant (Payment)",
       number: "01850999178",
       active: false,
+      tone: "from-purple-700 to-violet-800",
+      instructions: "রকেট মার্চেন্ট পেমেন্ট করুন।",
+      setupStatus: "setup_required",
+      displayOrder: 6,
+    },
+    {
+      id: "upay_personal",
+      method: "upay",
+      type: "personal",
+      label: "Upay Personal (Send Money)",
+      number: "01850999178",
+      active: true,
       tone: "from-sky-500 to-blue-700",
+      instructions: "উপায় অ্যাপ বা *268# থেকে Send Money করুন।",
+      setupStatus: "connected",
+      displayOrder: 7,
+    },
+    {
+      id: "upay_merchant",
+      method: "upay",
+      type: "merchant",
+      label: "Upay Merchant (Payment)",
+      number: "01850999178",
+      active: false,
+      tone: "from-sky-600 to-indigo-800",
+      instructions: "উপায় মার্চেন্ট পেমেন্ট অপশন ব্যবহার করুন।",
+      setupStatus: "setup_required",
+      displayOrder: 8,
+    },
+    {
+      id: "bank_transfer",
+      method: "bank",
+      type: "bank",
+      label: "ব্যাংক ট্রান্সফার (Bank Transfer)",
+      number: "2050123456789010",
+      bankName: "ইসলামী ব্যাংক বাংলাদেশ পিএলসি (IBBL)",
+      accountName: "স্মার্ট নোয়াখালী ওয়েলফেয়ার ট্রাস্ট",
+      branchName: "মাইজদী কোর্ট শাখা, নোয়াখালী",
+      routingNumber: "125551234",
+      active: true,
+      tone: "from-emerald-600 to-teal-800",
+      instructions: "যেকোনো ব্যাংক একাউন্ট বা ইন্টারনেট ব্যাংকিং (NPSB/BEFTN/RTGS) এর মাধ্যমে ডিপোজিট করুন এবং ডিপোজিট স্লিপ বা ট্রানজেকশন রেফারেন্স জমা দিন।",
+      setupStatus: "connected",
+      displayOrder: 9,
+    },
+    {
+      id: "debit_card",
+      method: "card",
+      type: "gateway",
+      label: "ডেবিট কার্ড (Visa / Mastercard)",
+      number: "card-gateway",
+      isGatewayConfigured: false,
+      active: true,
+      tone: "from-blue-600 to-indigo-800",
+      instructions: "অনুমোদিত গেটওয়ে দিয়ে নিরাপদ ডেবিট কার্ড পেমেন্ট।",
+      setupStatus: "setup_required",
+      displayOrder: 10,
+    },
+    {
+      id: "credit_card",
+      method: "card",
+      type: "gateway",
+      label: "ক্রেডিট কার্ড (Visa / Mastercard / Amex)",
+      number: "card-gateway",
+      isGatewayConfigured: false,
+      active: true,
+      tone: "from-indigo-600 to-violet-800",
+      instructions: "অনুমোদিত গেটওয়ে দিয়ে নিরাপদ ক্রেডিট কার্ড পেমেন্ট।",
+      setupStatus: "setup_required",
+      displayOrder: 11,
     },
   ],
 };
@@ -263,16 +387,38 @@ function parseDonationConfig(raw: string | null | undefined): DonationConfig | n
           typeof parsed.subtitle === "string" && parsed.subtitle.trim()
             ? parsed.subtitle.trim()
             : DEFAULT_DONATION_CONFIG.subtitle,
-        numbers: parsed.numbers.map((n, idx) => ({
-          id: String(n.id || `num_${idx}`),
-          method: (["bkash", "nagad", "rocket", "upay"].includes(String(n.method))
-            ? n.method
-            : "bkash") as DonationNumberItem["method"],
-          label: String(n.label || "bKash (Personal)"),
-          number: String(n.number || "01850999178"),
-          active: Boolean(n.active ?? true),
-          tone: String(n.tone || "from-pink-500 to-rose-600"),
-        })),
+        numbers: parsed.numbers.map((n, idx) => {
+          const validMethods: DonationMethodType[] = ["bkash", "nagad", "rocket", "upay", "bank", "card"];
+          const method = validMethods.includes(n.method as DonationMethodType)
+            ? (n.method as DonationMethodType)
+            : "bkash";
+          const validTypes: DonationAccountType[] = ["personal", "merchant", "bank", "gateway"];
+          const type = validTypes.includes(n.type as DonationAccountType)
+            ? (n.type as DonationAccountType)
+            : method === "bank"
+              ? "bank"
+              : method === "card"
+                ? "gateway"
+                : "personal";
+
+          return {
+            id: String(n.id || `num_${idx}`),
+            method,
+            type,
+            label: String(n.label || "bKash Personal"),
+            number: String(n.number || "01850999178"),
+            active: Boolean(n.active ?? true),
+            tone: String(n.tone || "from-pink-500 to-rose-600"),
+            bankName: n.bankName ? String(n.bankName) : undefined,
+            accountName: n.accountName ? String(n.accountName) : undefined,
+            branchName: n.branchName ? String(n.branchName) : undefined,
+            routingNumber: n.routingNumber ? String(n.routingNumber) : undefined,
+            instructions: n.instructions ? String(n.instructions) : undefined,
+            displayOrder: Number(n.displayOrder ?? idx + 1),
+            setupStatus: (n.setupStatus as any) || (type === "gateway" || type === "merchant" ? "setup_required" : "connected"),
+            isGatewayConfigured: Boolean(n.isGatewayConfigured ?? false),
+          };
+        }),
       };
     }
   } catch {
@@ -346,15 +492,173 @@ export function useDonationConfig() {
 }
 
 // ============================================================================
-// 3. Dynamic Categories Hook (/settings/categories_config)
+// 3. Dynamic Divisions & Categories Hooks (/settings/divisions_config & /settings/categories_config)
 // ============================================================================
-export interface CategoryConfigItem {
-  slug: string;
+export interface DivisionConfigItem {
+  id: string;
   bn: string;
   en: string;
   iconName: string;
   tint: string;
   description: string;
+  visible: boolean;
+  sort_order: number;
+  customIconUrl?: string;
+}
+
+export const DEFAULT_DIVISION_ITEMS: DivisionConfigItem[] = DIVISIONS.map((d, idx) => ({
+  id: d.id,
+  bn: d.bn,
+  en: d.en,
+  iconName: d.iconName,
+  tint: d.tint,
+  description: d.description,
+  visible: true,
+  sort_order: d.sort_order || idx + 1,
+  customIconUrl: d.customIconUrl,
+}));
+
+function parseDivisionConfig(raw: string | null | undefined): DivisionConfigItem[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      const divMap = new Map<string, DivisionConfigItem>();
+      // 1. Seed with all 22 default divisions
+      for (const d of DEFAULT_DIVISION_ITEMS) {
+        divMap.set(d.id, { ...d });
+      }
+      // 2. Apply any custom edits or overrides
+      for (const item of parsed) {
+        if (!item || typeof item.id !== "string") continue;
+        const id = String(item.id);
+        const fallback = DIVISIONS.find((d) => d.id === id);
+        const iconName = item.iconName && CATEGORY_ICONS[item.iconName] ? item.iconName : fallback?.iconName || "PhoneCall";
+        divMap.set(id, {
+          id,
+          bn: String(item.bn || fallback?.bn || item.id),
+          en: String(item.en || fallback?.en || item.id),
+          iconName,
+          tint: String(item.tint || fallback?.tint || "from-emerald-500/20 to-teal-700/10"),
+          description: String(item.description || fallback?.description || ""),
+          visible: item.visible !== false,
+          sort_order: typeof item.sort_order === "number" ? item.sort_order : (fallback?.sort_order || 99),
+          customIconUrl: item.customIconUrl || fallback?.customIconUrl,
+        });
+      }
+      return Array.from(divMap.values()).sort((a, b) => a.sort_order - b.sort_order);
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function toResolvedDivision(item: DivisionConfigItem): Division {
+  const fallback = DIVISIONS.find((d) => d.id === item.id);
+  const iconKey = item.iconName && CATEGORY_ICONS[item.iconName] ? item.iconName : fallback?.iconName || "PhoneCall";
+  const IconComp = CATEGORY_ICONS[iconKey] || CATEGORY_ICONS.PhoneCall;
+  return {
+    id: item.id,
+    bn: item.bn,
+    en: item.en,
+    icon: IconComp,
+    iconName: iconKey,
+    tint: item.tint || fallback?.tint || "from-emerald-500/20 to-teal-700/10",
+    description: item.description || fallback?.description || "",
+    sort_order: item.sort_order,
+    customIconUrl: item.customIconUrl || fallback?.customIconUrl,
+    visible: item.visible !== false,
+  };
+}
+
+export function useDivisions() {
+  const [items, setItems] = useState<DivisionConfigItem[]>(() => {
+    try {
+      const cached = localStorage.getItem(LOCAL_DIVISIONS_KEY);
+      return parseDivisionConfig(cached) ?? DEFAULT_DIVISION_ITEMS;
+    } catch {
+      return DEFAULT_DIVISION_ITEMS;
+    }
+  });
+
+  useEffect(() => {
+    fetch(`/api/content?collection=settings&id=${DIVISIONS_CONFIG_ID}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.item?.logo_url) {
+          const parsed = parseDivisionConfig(d.item.logo_url);
+          if (parsed) {
+            setItems(parsed);
+            try {
+              localStorage.setItem(LOCAL_DIVISIONS_KEY, JSON.stringify(parsed));
+            } catch {}
+          }
+        }
+      })
+      .catch(() => {});
+
+    const unsubDirect = onSnapshot(
+      doc(db, "settings", DIVISIONS_CONFIG_ID),
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const parsed = parseDivisionConfig(docSnap.data()?.logo_url);
+          if (parsed) {
+            setItems(parsed);
+            try {
+              localStorage.setItem(LOCAL_DIVISIONS_KEY, JSON.stringify(parsed));
+            } catch {}
+          }
+        }
+      },
+      () => {}
+    );
+    return () => unsubDirect();
+  }, []);
+
+  const saveDivisionsConfig = useCallback(async (next: DivisionConfigItem[]) => {
+    const serialized = JSON.stringify(next);
+    try {
+      localStorage.setItem(LOCAL_DIVISIONS_KEY, serialized);
+    } catch {}
+    setItems(next);
+    await upsertSettingDoc(DIVISIONS_CONFIG_ID, serialized);
+  }, []);
+
+  const updateDivision = useCallback(
+    async (id: string, patch: Partial<DivisionConfigItem>) => {
+      const next = items.map((d) => (d.id === id ? { ...d, ...patch } : d));
+      await saveDivisionsConfig(next);
+    },
+    [items, saveDivisionsConfig]
+  );
+
+  const resolvedDivisions = useMemo(() => items.map(toResolvedDivision), [items]);
+  const visibleDivisions = useMemo(
+    () => resolvedDivisions.filter((d) => d.visible !== false).sort((a, b) => a.sort_order - b.sort_order),
+    [resolvedDivisions]
+  );
+
+  return {
+    divisions: visibleDivisions,
+    allDivisions: resolvedDivisions,
+    rawDivisions: items,
+    saveDivisionsConfig,
+    updateDivision,
+    getDivisionById: (id: string) => resolvedDivisions.find((d) => d.id === id),
+  };
+}
+
+export interface CategoryConfigItem {
+  slug: string;
+  divisionId?: string;
+  bn: string;
+  en: string;
+  iconName: string;
+  tint: string;
+  description: string;
+  formType?: string;
+  customIconUrl?: string;
   visible: boolean;
   sort_order: number;
 }
@@ -363,90 +667,61 @@ const DEFAULT_CATEGORY_ITEMS: CategoryConfigItem[] = defaultCategories
   .filter((c) => c.slug !== "chat" && c.slug !== "app-download")
   .map((c, idx) => ({
     slug: c.slug,
+    divisionId: c.divisionId,
     bn: c.bn,
     en: c.en,
     iconName: c.iconName || "Users",
     tint: c.tint,
     description: c.description,
+    formType: c.formType || "general",
+    customIconUrl: c.customIconUrl,
     visible: true,
-    sort_order: idx + 1,
+    sort_order: c.sort_order || idx + 1,
   }));
-
-const DEFAULT_CATEGORY_FALLBACKS: Record<string, { iconName: string; tint: string; description: string }> = {
-  doctor: { iconName: "Stethoscope", tint: "from-teal-500/15 to-teal-700/10", description: "চিকিৎসক ও বিশেষজ্ঞ" },
-  hospital: { iconName: "Building2", tint: "from-sky-500/15 to-sky-700/10", description: "হাসপাতাল ও ক্লিনিক" },
-  ambulance: { iconName: "Truck", tint: "from-red-500/15 to-red-700/10", description: "জরুরী অ্যাম্বুলেন্স" },
-  "blood-donor": { iconName: "Droplet", tint: "from-rose-500/20 to-rose-700/10", description: "স্বেচ্ছা রক্তদাতাদের তালিকা" },
-  police: { iconName: "Shield", tint: "from-blue-500/15 to-blue-700/10", description: "থানা ও পুলিশ ফাঁড়ি" },
-  "fire-service": { iconName: "Flame", tint: "from-orange-500/15 to-red-600/10", description: "অগ্নিনির্বাপন ও উদ্ধার" },
-  fire: { iconName: "Flame", tint: "from-orange-500/15 to-red-600/10", description: "অগ্নিনির্বাপন ও উদ্ধার" },
-  electricity: { iconName: "Zap", tint: "from-yellow-500/15 to-yellow-700/10", description: "বিদ্যুৎ অভিযোগ ও সেবা" },
-  electrician: { iconName: "Zap", tint: "from-yellow-500/15 to-yellow-700/10", description: "বৈদ্যুতিক মিস্ত্রি" },
-  journalist: { iconName: "Newspaper", tint: "from-slate-500/15 to-slate-700/10", description: "স্থানীয় সংবাদকর্মী ও প্রেস" },
-  lawyer: { iconName: "Scale", tint: "from-indigo-500/15 to-indigo-700/10", description: "আইনজীবী ও নোটারি" },
-  education: { iconName: "GraduationCap", tint: "from-emerald-500/15 to-emerald-700/10", description: "শিক্ষা প্রতিষ্ঠান" },
-  school: { iconName: "GraduationCap", tint: "from-indigo-500/15 to-indigo-700/10", description: "শিক্ষা প্রতিষ্ঠান" },
-  hotel: { iconName: "Hotel", tint: "from-amber-500/15 to-amber-700/10", description: "হোটেল ও রেস্টুরেন্ট" },
-  "tourist-spot": { iconName: "Camera", tint: "from-pink-500/15 to-pink-700/10", description: "দর্শনীয় স্থান ও পার্ক" },
-  courier: { iconName: "Package", tint: "from-violet-500/15 to-violet-700/10", description: "কুরিয়ার ও পার্সেল" },
-  bus: { iconName: "Bus", tint: "from-cyan-500/15 to-cyan-700/10", description: "বাস সার্ভিস ও কাউন্টার" },
-  train: { iconName: "Train", tint: "from-sky-500/15 to-sky-700/10", description: "ট্রেন সময়সূচী ও স্টেশন" },
-  "rent-a-car": { iconName: "Car", tint: "from-stone-500/15 to-stone-700/10", description: "রেন্ট-এ-কার ও মাইক্রোবাস" },
-  garage: { iconName: "Wrench", tint: "from-zinc-500/15 to-zinc-700/10", description: "গাড়ি মেরামত" },
-  gas: { iconName: "Fuel", tint: "from-orange-500/15 to-red-600/10", description: "গ্যাস ও এলপিজি সিলিন্ডার" },
-  bank: { iconName: "Landmark", tint: "from-emerald-600/15 to-teal-700/10", description: "ব্যাংক ও এটিএম বুথ" },
-  service: { iconName: "Layers", tint: "from-teal-500/15 to-emerald-700/10", description: "অন্যান্য জরুরি সেবা" },
-  janapratinidhi: { iconName: "Users", tint: "from-emerald-500/15 to-emerald-700/10", description: "ইউনিয়ন ও পৌর জনপ্রতিনিধি" },
-  helpline: { iconName: "PhoneCall", tint: "from-emerald-600/20 to-emerald-800/10", description: "জরুরী হেল্পলাইন" },
-  "electricity-office": { iconName: "Building2", tint: "from-sky-500/15 to-sky-700/10", description: "পল্লী বিদ্যুৎ সমিতি" },
-  mason: { iconName: "HardHat", tint: "from-stone-500/15 to-stone-700/10", description: "নির্মাণ মিস্ত্রি" },
-  disabled: { iconName: "Accessibility", tint: "from-violet-500/15 to-violet-700/10", description: "প্রতিবন্ধী সেবা" },
-  expatriate: { iconName: "Plane", tint: "from-cyan-500/15 to-cyan-700/10", description: "প্রবাসী তথ্য" },
-  "service-org": { iconName: "HeartHandshake", tint: "from-pink-500/15 to-pink-700/10", description: "সেবামূলক সংগঠন" },
-  "board-result": { iconName: "FileText", tint: "from-emerald-500/15 to-teal-700/10", description: "পরীক্ষার ফলাফল" },
-  "special-persons": { iconName: "Star", tint: "from-amber-400/20 to-amber-600/10", description: "বিশেষ ব্যাক্তিবর্গ" },
-  donation: { iconName: "HandCoins", tint: "from-emerald-500/20 to-amber-500/10", description: "অনুদান দিন ও তালিকা দেখুন" },
-  "submit-info": { iconName: "Send", tint: "from-emerald-500/20 to-emerald-700/10", description: "নতুন তথ্য জমা দিন" },
-  about: { iconName: "Info", tint: "from-emerald-600/15 to-emerald-800/10", description: "আমাদের সম্পর্কে" },
-};
 
 function parseCategoryConfig(raw: string | null | undefined): CategoryConfigItem[] | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      return parsed
-        .filter(
-          (item) =>
-            item &&
-            typeof item.slug === "string" &&
-            item.slug !== "chat" &&
-            item.slug !== "app-download"
-        )
-        .map((item, idx) => {
-          const slug = String(item.slug);
-          const fallback = DEFAULT_CATEGORY_FALLBACKS[slug] || defaultCategories.find((d) => d.slug === slug);
-          const rawIcon = String(item.iconName || item.icon || "");
-          const iconName = (rawIcon && rawIcon !== "Users" && CATEGORY_ICONS[rawIcon])
-            ? rawIcon
-            : (fallback && CATEGORY_ICONS[fallback.iconName] ? fallback.iconName : (rawIcon || "Users"));
-          const rawTint = String(item.tint || "");
-          const tint = (rawTint && rawTint !== "from-emerald-500/15 to-emerald-700/10")
-            ? rawTint
-            : (fallback?.tint || "from-emerald-500/15 to-emerald-700/10");
-          const description = String(item.description || fallback?.description || "");
+      const catMap = new Map<string, CategoryConfigItem>();
+      // 1. Seed with ALL 181+ default categories from master categories list
+      for (const d of DEFAULT_CATEGORY_ITEMS) {
+        catMap.set(d.slug, { ...d });
+      }
+      // 2. Apply any saved customization or edits
+      for (const item of parsed) {
+        if (!item || typeof item.slug !== "string" || item.slug === "chat" || item.slug === "app-download") continue;
+        const slug = String(item.slug);
+        const fallback = defaultCategories.find((d) => d.slug === slug);
+        const rawIcon = String(item.iconName || item.icon || "");
+        const iconName = (rawIcon && rawIcon !== "Users" && CATEGORY_ICONS[rawIcon])
+          ? rawIcon
+          : (fallback && CATEGORY_ICONS[fallback.iconName || "Users"] ? (fallback.iconName || "Users") : (rawIcon || "Users"));
+        const rawTint = String(item.tint || "");
+        const tint = (rawTint && rawTint !== "from-emerald-500/15 to-emerald-700/10")
+          ? rawTint
+          : (fallback?.tint || "from-emerald-500/15 to-emerald-700/10");
+        const description = String(item.description || fallback?.description || "");
+        const divisionId = String(item.divisionId || fallback?.divisionId || "shopping");
+        const formType = String(item.formType || fallback?.formType || "general");
+        const customIconUrl = item.customIconUrl || fallback?.customIconUrl;
 
-          return {
-            slug,
-            bn: String(item.bn || item.slug),
-            en: String(item.en || item.slug),
-            iconName,
-            tint,
-            description,
-            visible: item.visible !== false,
-            sort_order: typeof item.sort_order === "number" ? item.sort_order : idx + 1,
-          };
+        catMap.set(slug, {
+          slug,
+          divisionId,
+          bn: String(item.bn || fallback?.bn || item.slug),
+          en: String(item.en || fallback?.en || item.slug),
+          iconName,
+          tint,
+          description,
+          formType,
+          customIconUrl,
+          visible: item.visible !== false,
+          sort_order: typeof item.sort_order === "number" ? item.sort_order : (fallback?.sort_order || 999),
         });
+      }
+      return Array.from(catMap.values()).sort((a, b) => a.sort_order - b.sort_order);
     }
   } catch {
     // ignore
@@ -455,7 +730,7 @@ function parseCategoryConfig(raw: string | null | undefined): CategoryConfigItem
 }
 
 function toResolvedCategory(item: CategoryConfigItem): Category {
-  const fallback = DEFAULT_CATEGORY_FALLBACKS[item.slug];
+  const fallback = defaultCategories.find((d) => d.slug === item.slug);
   const iconKey = (item.iconName && item.iconName !== "Users" && CATEGORY_ICONS[item.iconName])
     ? item.iconName
     : (fallback?.iconName && CATEGORY_ICONS[fallback.iconName] ? fallback.iconName : (item.iconName || "Users"));
@@ -467,12 +742,15 @@ function toResolvedCategory(item: CategoryConfigItem): Category {
 
   return {
     slug: item.slug,
+    divisionId: item.divisionId || fallback?.divisionId || "about",
     bn: item.bn,
     en: item.en,
     icon: IconComp,
     iconName: iconKey,
     tint,
     description,
+    formType: (item.formType || fallback?.formType || "general") as Category["formType"],
+    customIconUrl: item.customIconUrl || fallback?.customIconUrl,
     visible: item.visible,
     sort_order: item.sort_order,
   };
@@ -648,6 +926,7 @@ export function useCategories() {
     allCategories,
     rawItems: items,
     getCategoryBySlug,
+    getCategoriesByDivisionId: (divId: string) => visibleCategories.filter((c) => c.divisionId === divId),
     saveCategories,
     updateCategory,
     addCategory,

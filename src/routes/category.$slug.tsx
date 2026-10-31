@@ -36,6 +36,7 @@ export interface Listing {
   bloodGroup?: string;
   lastDonation?: string;
   totalDonations?: number;
+  body?: string;
 }
 
 export const Route = createFileRoute("/category/$slug")({
@@ -99,6 +100,7 @@ function CategoryPage() {
         address: s.address ?? undefined,
         designation: s.designation ?? undefined,
         photo: s.image_url ?? undefined,
+        body: s.body ?? undefined,
       }));
   }, [submissions.items, donors.items, cat]);
 
@@ -211,8 +213,12 @@ function CategoryPage() {
       </div>
 
       <div className="mb-4 flex w-full min-w-0 items-center gap-3 overflow-hidden rounded-2xl bg-gradient-card p-3.5 shadow-card sm:p-4">
-        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${cat.tint} text-primary-deep sm:h-12 sm:w-12`}>
-          <cat.icon className="h-6 w-6" />
+        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${cat.tint} text-primary-deep sm:h-12 sm:w-12 overflow-hidden`}>
+          {cat.customIconUrl ? (
+            <img src={cat.customIconUrl} alt={cat.bn} className="h-full w-full object-cover rounded-xl" />
+          ) : (
+            <cat.icon className="h-6 w-6" />
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <h1 className="truncate font-display text-lg font-bold text-primary-deep">{cat.bn}</h1>
@@ -340,6 +346,14 @@ function PersonCard({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const details = useMemo(() => {
+    if (!l.body) return [];
+    return l.body
+      .split("\n")
+      .map((line) => line.replace(/^[•\s*-]+/, "").trim())
+      .filter(Boolean);
+  }, [l.body]);
+
   return (
     <div className="group w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-border/60 bg-gradient-card p-3.5 shadow-card transition hover:shadow-elevated sm:p-4">
       <div className="flex w-full min-w-0 items-center justify-between gap-2.5 sm:gap-3">
@@ -381,6 +395,36 @@ function PersonCard({
           </a>
         )}
       </div>
+
+      {details.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5 border-t border-border/40 pt-2.5">
+          {details.map((item, idx) => {
+            const colonIdx = item.indexOf(":");
+            if (colonIdx !== -1) {
+              const k = item.slice(0, colonIdx).trim();
+              const v = item.slice(colonIdx + 1).trim();
+              return (
+                <span
+                  key={idx}
+                  className="inline-flex max-w-full items-center gap-1 rounded-lg bg-primary/5 px-2.5 py-1 text-[11px] text-primary-deep ring-1 ring-primary/10"
+                >
+                  <span className="font-semibold text-muted-foreground">{k}:</span>
+                  <span className="font-bold text-foreground">{v}</span>
+                </span>
+              );
+            }
+            return (
+              <span
+                key={idx}
+                className="inline-flex max-w-full items-center rounded-lg bg-muted/70 px-2.5 py-1 text-[11px] text-foreground/80"
+              >
+                {item}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
       {isAdmin && (
         <div className="mt-2.5 flex items-center justify-end gap-2 border-t border-border/50 pt-2">
           <button

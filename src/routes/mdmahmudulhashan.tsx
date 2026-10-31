@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import {
   Loader2,
   Users as UsersIcon,
@@ -51,17 +51,26 @@ import {
 import { toast } from "sonner";
 import { auth, SUPER_ADMIN_EMAIL } from "@/lib/firebase";
 import { sendBrowserNotification } from "@/lib/notifications";
-import { CATEGORY_ICONS, CATEGORY_TINTS } from "@/data/categories";
+import { CATEGORY_ICONS, CATEGORY_TINTS, DIVISIONS } from "@/data/categories";
+import {
+  syncCategoriesToFirestore,
+  auditCategoriesFromFirestore,
+  type CategoryMigrationResult,
+  type CategoryAuditReport,
+} from "@/lib/categories-migration";
 import {
   useLogo,
   useCategories,
+  useDivisions,
   useDonationConfig,
   useStaffProfiles,
   useAppPackages,
   useSiteMetaConfig,
   useServicesConfig,
   type CategoryConfigItem,
+  type DivisionConfigItem,
   type DonationConfig,
+  type DonationNumberItem,
   type SiteMetaConfig,
   type StaffProfileEntry,
   type ServiceItem,
@@ -71,6 +80,7 @@ import { downloadAppPackageBinary } from "@/lib/pwa";
 import { useAuth } from "@/lib/auth";
 import {
   useCloudDonations,
+  useCloudExpenses,
   useCloudSubmissions,
   useCloudDonors,
   useCloudDonorEvents,
@@ -89,10 +99,16 @@ import {
   type ChatThreadRow,
   type SubmissionRow,
   type DonationRow,
+  type DonationCategory,
+  DONATION_CATEGORY_LABELS,
   type DonorRow,
   type DonorEventRow,
   type EmergencyReqRow,
+  type ExpenseRow,
+  type ExpenseCategory,
+  EXPENSE_CATEGORY_LABELS,
 } from "@/lib/cloud";
+import { FinancialReports } from "@/components/FinancialReports";
 import {
   listUsers,
   createUser,
@@ -462,6 +478,7 @@ type Tab =
   | "services"
   | "info"
   | "donation"
+  | "expenses"
   | "donors"
   | "events"
   | "emergency"
@@ -501,6 +518,7 @@ function Dashboard({
   const { getStaffProfile } = useStaffProfiles();
   const subs = useCloudSubmissions();
   const dons = useCloudDonations();
+  const expensesHook = useCloudExpenses();
   const donors = useCloudDonors();
   const events = useCloudDonorEvents();
   const emerg = useEmergencyRequests();
@@ -786,7 +804,16 @@ function Dashboard({
             onClick={() => setTab("donation")}
             badge={pendingDons.length}
           >
-            অনুদান
+            💰 অনুদান ও ফান্ড ড্যাশবোর্ড
+          </TabBtn>
+        )}
+        {isMainAdmin && (
+          <TabBtn
+            active={tab === "expenses"}
+            onClick={() => setTab("expenses")}
+            badge={expensesHook.items.length}
+          >
+            🤝 মানবিক ব্যয় পরিচালনা
           </TabBtn>
         )}
         {(isMainAdmin || hasPermission("create_edit_content") || hasPermission("publish_content")) && (
@@ -907,7 +934,13 @@ function Dashboard({
           <SubmissionsAdminPanel subs={subs} />
         )}
 
-        {tab === "donation" && isMainAdmin && <DonationsAdminPanel dons={dons} />}
+        {tab === "donation" && isMainAdmin && (
+          <DonationsAdminPanel dons={dons} expensesHook={expensesHook} logoUrl={logo} />
+        )}
+
+        {tab === "expenses" && isMainAdmin && (
+          <ExpensesAdminPanel expensesHook={expensesHook} />
+        )}
 
         {tab === "donors" && (isMainAdmin || hasPermission("create_edit_content") || hasPermission("publish_content")) && (
           <DonorsAdminPanel donors={donors} />
@@ -1698,6 +1731,33 @@ function AppPackagesAdminPanel() {
 // ============================================================================
 // Super Admin: Full Category Manager (ক্যাটাগরি পরিবর্তন, নতুন যোগ, লুকানো/দেখানো, ক্রম)
 // ============================================================================
+const FORM_TYPE_OPTIONS = [
+  { value: "shopping", label: "মার্কেট ও শপিং" },
+  { value: "food", label: "খাবার ও রেস্তোরাঁ" },
+  { value: "doctor", label: "ডাক্তার ও বিশেষজ্ঞ" },
+  { value: "hospital", label: "হাসপাতাল ও ক্লিনিক" },
+  { value: "medical", label: "মেডিকেল ও ডায়াগনস্টিক" },
+  { value: "education", label: "শিক্ষা ও একাডেমি" },
+  { value: "job", label: "চাকরি ও নিয়োগ" },
+  { value: "realestate", label: "রিয়েল এস্টেট ও বাসাভাড়া" },
+  { value: "transport", label: "পরিবহন ও যানবাহন" },
+  { value: "tourism", label: "ভ্রমণ ও পর্যটন" },
+  { value: "agriculture", label: "কৃষি ও খামার" },
+  { value: "govt", label: "সরকারি ও জরুরি সেবা" },
+  { value: "religious_social", label: "ধর্মীয় ও সামাজিক" },
+  { value: "events", label: "ইভেন্ট ও বিনোদন" },
+  { value: "home_services", label: "বাসাবাড়ির সেবা" },
+  { value: "tech_digital", label: "প্রযুক্তি ও ডিজিটাল" },
+  { value: "sports_entertainment", label: "খেলাধুলা ও সংস্কৃতি" },
+  { value: "news_community", label: "সংবাদ ও মিডিয়া" },
+  { value: "women_child", label: "নারী ও শিশু কর্ণার" },
+  { value: "environment_welfare", label: "পরিবেশ ও কল্যাণ" },
+  { value: "professionals", label: "পেশাজীবী ও কারিগরি" },
+  { value: "other_services", label: "অন্যান্য সেবা" },
+  { value: "blood", label: "রক্তদান ও ডোনার" },
+  { value: "general", label: "সাধারণ তথ্য" },
+];
+
 function CategoriesEditor() {
   const {
     rawItems,
@@ -1708,27 +1768,51 @@ function CategoriesEditor() {
     resetCategories,
   } = useCategories();
   const [search, setSearch] = useState("");
+  const [divisionFilter, setDivisionFilter] = useState("all");
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<Partial<CategoryConfigItem>>({});
   const [showAdd, setShowAdd] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  // Sync & Audit states
+  const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState("");
+  const [migrationResult, setMigrationResult] = useState<CategoryMigrationResult | null>(null);
+  const [auditReport, setAuditReport] = useState<CategoryAuditReport | null>(null);
+  const [auditing, setAuditing] = useState(false);
+  const [showAuditModal, setShowAuditModal] = useState(false);
+
   const [newCat, setNewCat] = useState({
     slug: "",
+    divisionId: "division-2-shopping-market",
     bn: "",
     en: "",
     iconName: "Users",
     tint: CATEGORY_TINTS[0].value,
     description: "",
+    formType: "shopping",
     visible: true,
   });
 
-  const filtered = rawItems.filter((c) => {
-    const q = (search || "").trim().toLowerCase();
-    if (!q) return true;
-    return `${c?.bn || ""} ${c?.en || ""} ${c?.slug || ""} ${c?.description || ""}`
-      .toLowerCase()
-      .includes(q);
-  });
+  const divisionMap = useMemo(() => {
+    const map = new Map<string, string>();
+    DIVISIONS.forEach((d) => map.set(d.id, d.bn));
+    return map;
+  }, []);
+
+  const filtered = useMemo(() => {
+    return rawItems.filter((c) => {
+      if (divisionFilter !== "all" && c.divisionId !== divisionFilter) {
+        return false;
+      }
+      const q = (search || "").trim().toLowerCase();
+      if (!q) return true;
+      const divName = (c.divisionId ? divisionMap.get(c.divisionId) : "") || "";
+      return `${c?.bn || ""} ${c?.en || ""} ${c?.slug || ""} ${c?.description || ""} ${divName}`
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [rawItems, divisionFilter, search, divisionMap]);
 
   function startEdit(c: CategoryConfigItem) {
     setEditingSlug(c.slug);
@@ -1740,9 +1824,9 @@ function CategoriesEditor() {
     try {
       await updateCategory(slug, editDraft);
       setEditingSlug(null);
-      toast.success("ক্যাটাগরি আপডেট হয়েছে");
+      toast.success("ক্যাটাগরি সফলভাবে আপডেট হয়েছে");
     } catch (e) {
-      toast.error((e as Error).message || "আপডেট ব্যর্থ");
+      toast.error((e as Error).message || "আপডেট ব্যর্থ হয়েছে");
     } finally {
       setBusy(false);
     }
@@ -1756,21 +1840,25 @@ function CategoriesEditor() {
     try {
       await addCategory({
         slug: newCat.slug.trim(),
+        divisionId: newCat.divisionId,
         bn: newCat.bn.trim(),
         en: newCat.en.trim() || newCat.slug.trim(),
         iconName: newCat.iconName,
         tint: newCat.tint,
         description: newCat.description.trim() || newCat.bn.trim(),
+        formType: newCat.formType,
         visible: newCat.visible,
       });
-      toast.success("নতুন ক্যাটাগরি যোগ হয়েছে");
+      toast.success("নতুন ক্যাটাগরি তৈরি হয়েছে");
       setNewCat({
         slug: "",
+        divisionId: "division-2-shopping-market",
         bn: "",
         en: "",
         iconName: "Users",
         tint: CATEGORY_TINTS[0].value,
         description: "",
+        formType: "shopping",
         visible: true,
       });
       setShowAdd(false);
@@ -1782,6 +1870,9 @@ function CategoriesEditor() {
   }
 
   async function handleReset() {
+    if (!confirm("আপনি কি নিশ্চিত যে সকল ক্যাটাগরি ডিফল্ট ১৮১টি মাস্টার ক্যাটাগরিতে রিসেট করবেন?")) {
+      return;
+    }
     setBusy(true);
     try {
       await resetCategories();
@@ -1793,16 +1884,137 @@ function CategoriesEditor() {
     }
   }
 
+  async function handleSyncFirestore() {
+    setSyncing(true);
+    setSyncProgress("Firestore সিঙ্ক শুরু হচ্ছে...");
+    try {
+      const res = await syncCategoriesToFirestore((msg) => {
+        setSyncProgress(msg);
+      });
+      setMigrationResult(res);
+      if (res.status === "failed") {
+        toast.error("ক্যাটাগরি সিঙ্ক সম্পূর্ণ হতে পারেনি");
+      } else {
+        toast.success(`১৮১টি ক্যাটাগরি ও ২২টি বিভাগ সফলভাবে Firestore-এ সিঙ্ক হয়েছে! (${res.verifiedInFirestoreCount}টি নিশ্চিত)`);
+      }
+      // Trigger audit report automatically
+      const report = await auditCategoriesFromFirestore();
+      setAuditReport(report);
+    } catch (err: any) {
+      toast.error(err?.message || "সিঙ্ক ব্যর্থ হয়েছে");
+    } finally {
+      setSyncing(false);
+      setSyncProgress("");
+    }
+  }
+
+  async function handleRunAudit() {
+    setAuditing(true);
+    try {
+      const report = await auditCategoriesFromFirestore();
+      setAuditReport(report);
+      setShowAuditModal(true);
+      toast.success(`অডিট সম্পন্ন: প্রত্যাশিত ১৮১, ফায়ারবেসে প্রাপ্ত ${report.totalFirestore} টি`);
+    } catch (err: any) {
+      toast.error(err?.message || "অডিট ব্যর্থ হয়েছে");
+    } finally {
+      setAuditing(false);
+    }
+  }
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      {/* 1. Firestore Cloud Sync & 22-Division Audit Card */}
+      <div className="overflow-hidden rounded-3xl border border-primary/25 bg-gradient-to-br from-primary/5 via-card to-gold/5 p-4 sm:p-5 shadow-card">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/15 text-primary">
+                <Database className="h-4 w-4" />
+              </span>
+              <h2 className="font-display text-base font-bold text-primary-deep">
+                ফায়ারবেস ক্লাউড ১৮১টি ক্যাটাগরি ও ২২টি বিভাগ সিঙ্ক
+              </h2>
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              মাস্টার স্পেসিফিকেশনের ১৮১টি ক্যাটাগরি ও ২২টি বিভাগ সরাসরি Firebase Firestore-এ স্থায়ীভাবে সিঙ্ক ও অডিট করুন।
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={syncing || busy}
+              onClick={handleSyncFirestore}
+              className="flex items-center gap-1.5 rounded-xl bg-gradient-hero px-4 py-2 text-xs font-bold text-primary-foreground shadow-card transition active:scale-95 disabled:opacity-50"
+            >
+              {syncing ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>সিঙ্ক হচ্ছে...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span>ক্লাউড ফায়ারবেসে সিঙ্ক করুন</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              disabled={auditing || syncing}
+              onClick={handleRunAudit}
+              className="flex items-center gap-1.5 rounded-xl border border-primary/25 bg-card px-3.5 py-2 text-xs font-bold text-primary transition hover:bg-primary/5 disabled:opacity-50"
+            >
+              {auditing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+              )}
+              <span>২২-বিভাগ অডিট রিপোর্ট</span>
+            </button>
+          </div>
+        </div>
+
+        {syncProgress && (
+          <div className="mt-3 rounded-xl bg-primary/10 px-3 py-2 text-xs font-semibold text-primary-deep animate-pulse">
+            {syncProgress}
+          </div>
+        )}
+
+        {migrationResult && (
+          <div className="mt-3 rounded-2xl border border-emerald-500/30 bg-emerald-50/50 p-3 text-xs dark:bg-emerald-950/20">
+            <p className="font-bold text-emerald-800 dark:text-emerald-300">
+              সর্বশেষ ক্লাউড সিঙ্ক ফলাফল:
+            </p>
+            <div className="mt-1.5 flex flex-wrap gap-2 text-[11px]">
+              <span className="rounded-lg bg-emerald-500/15 px-2 py-0.5 font-semibold text-emerald-800">
+                নতুন যুক্ত: {migrationResult.addedCount}
+              </span>
+              <span className="rounded-lg bg-blue-500/15 px-2 py-0.5 font-semibold text-blue-800">
+                আপডেট: {migrationResult.updatedCount}
+              </span>
+              <span className="rounded-lg bg-muted px-2 py-0.5 font-semibold text-muted-foreground">
+                পূর্বে প্রস্তুত: {migrationResult.alreadyCorrectCount}
+              </span>
+              <span className="rounded-lg bg-primary/15 px-2 py-0.5 font-bold text-primary-deep">
+                মোট নিশ্চিত ভেরিফায়েড: {migrationResult.verifiedInFirestoreCount}
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 2. Category Control Header */}
       <div className="rounded-2xl bg-card p-4 shadow-card">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <p className="flex items-center gap-2 font-display text-sm font-bold text-primary-deep">
-              <LayoutGrid className="h-4 w-4 text-primary" /> সকল ক্যাটাগরি পরিচালনা ({rawItems.length} টি)
+              <LayoutGrid className="h-4 w-4 text-primary" /> সকল ক্যাটাগরি তালিকা ({rawItems.length} টি)
             </p>
             <p className="text-xs text-muted-foreground">
-              সুপার এডমিন হিসেবে যেকোনো ক্যাটাগরির নাম, বিবরণ, আইকন, রঙ ও অবস্থান পরিবর্তন করুন
+              যে কোনো ক্যাটাগরি এডিট, নতুন যোগ, বিভাগ পরিবর্তন ও ক্রম পুনর্বিন্যাস করুন
             </p>
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -1819,39 +2031,70 @@ function CategoriesEditor() {
               title="ডিফল্ট রিসেট"
               className="flex items-center gap-1 rounded-full bg-muted px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
             >
-              <RotateCcw className="h-3.5 w-3.5" /> ডিফল্ট
+              <RotateCcw className="h-3.5 w-3.5" /> ডিফল্ট ১৮১
             </button>
           </div>
         </div>
 
+        {/* Add Category Form */}
         {showAdd && (
           <div className="mt-4 space-y-2.5 rounded-2xl border border-primary/30 bg-primary/5 p-3.5">
             <p className="font-display text-xs font-bold text-primary-deep">
               নতুন ক্যাটাগরি তৈরি করুন
             </p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div>
+                <label className="text-[11px] font-semibold text-muted-foreground">বিভাগ নির্ধারণ *</label>
+                <select
+                  value={newCat.divisionId}
+                  onChange={(e) => setNewCat({ ...newCat, divisionId: e.target.value })}
+                  className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs font-medium"
+                >
+                  {DIVISIONS.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.bn}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-semibold text-muted-foreground">ফর্ম ও ফিল্ড টাইপ</label>
+                <select
+                  value={newCat.formType}
+                  onChange={(e) => setNewCat({ ...newCat, formType: e.target.value })}
+                  className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs font-medium"
+                >
+                  {FORM_TYPE_OPTIONS.map((f) => (
+                    <option key={f.value} value={f.value}>
+                      {f.label} ({f.value})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <input
                 value={newCat.bn}
                 onChange={(e) => setNewCat({ ...newCat, bn: e.target.value })}
-                placeholder="বাংলা নাম * (যেমন: আইনজীবী)"
+                placeholder="বাংলা নাম * (যেমন: কম্পিউটার সার্ভিসিং)"
                 className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
               />
               <input
                 value={newCat.slug}
                 onChange={(e) => setNewCat({ ...newCat, slug: e.target.value })}
-                placeholder="ইংরেজি স্লাগ * (যেমন: lawyer)"
+                placeholder="ইংরেজি স্লাগ * (যেমন: computer-servicing)"
                 className="rounded-xl border border-border bg-background px-3 py-2 font-mono text-sm"
               />
               <input
                 value={newCat.en}
                 onChange={(e) => setNewCat({ ...newCat, en: e.target.value })}
-                placeholder="ইংরেজি নাম (যেমন: Lawyers)"
+                placeholder="ইংরেজি নাম (যেমন: Computer Servicing)"
                 className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
               />
               <input
                 value={newCat.description}
                 onChange={(e) => setNewCat({ ...newCat, description: e.target.value })}
-                placeholder="সংক্ষিপ্ত বিবরণ (যেমন: জেলা জজ কোর্টের আইনজীবী)"
+                placeholder="সংক্ষিপ্ত বিবরণ"
                 className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
               />
               <select
@@ -1897,32 +2140,103 @@ function CategoriesEditor() {
           </div>
         )}
 
-        <div className="relative mt-3">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="ক্যাটাগরি খুঁজুন..."
-            className="w-full rounded-xl border border-border bg-background py-2 pl-9 pr-3 text-sm"
-          />
+        {/* Filters: Search & Division Filter */}
+        <div className="mt-3.5 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div className="relative sm:col-span-2">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="ক্যাটাগরি বা বিভাগের নাম খুঁজুন..."
+              className="w-full rounded-xl border border-border bg-background py-2 pl-9 pr-3 text-sm"
+            />
+          </div>
+
+          <div>
+            <select
+              value={divisionFilter}
+              onChange={(e) => setDivisionFilter(e.target.value)}
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
+            >
+              <option value="all">সকল বিভাগ ({rawItems.length} টি ক্যাটাগরি)</option>
+              {DIVISIONS.map((d) => {
+                const count = rawItems.filter((c) => c.divisionId === d.id).length;
+                return (
+                  <option key={d.id} value={d.id}>
+                    {d.bn} ({count} টি)
+                  </option>
+                );
+              })}
+            </select>
+          </div>
         </div>
       </div>
 
+      {/* 3. Category Items List */}
       <div className="space-y-2">
+        <p className="text-xs font-bold text-muted-foreground px-1">
+          প্রদর্শিত ক্যাটাগরি: {filtered.length} টি
+        </p>
+
         {filtered.map((c, idx) => {
           const IconComp = CATEGORY_ICONS[c.iconName] || CATEGORY_ICONS.Users;
           const isEditing = editingSlug === c.slug;
+          const divName = c.divisionId ? divisionMap.get(c.divisionId) : undefined;
 
           if (isEditing) {
             return (
               <div
                 key={c.slug}
-                className="space-y-2.5 rounded-2xl border border-primary/40 bg-card p-4 shadow-elevated"
+                className="space-y-3 rounded-2xl border border-primary/40 bg-card p-4 shadow-elevated"
               >
-                <p className="text-xs font-bold text-primary-deep">
-                  ক্যাটাগরি সম্পাদনা: {c.slug}
-                </p>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-primary-deep">
+                    ক্যাটাগরি সম্পাদনা: {c.slug}
+                  </p>
+                  <span className="rounded bg-primary/10 px-2 py-0.5 font-mono text-[11px] font-bold text-primary">
+                    {c.slug}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted-foreground">
+                      বিভাগ নির্ধারণ
+                    </label>
+                    <select
+                      value={editDraft.divisionId ?? c.divisionId ?? "division-2-shopping-market"}
+                      onChange={(e) =>
+                        setEditDraft({ ...editDraft, divisionId: e.target.value })
+                      }
+                      className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
+                    >
+                      {DIVISIONS.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.bn}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted-foreground">
+                      ফর্ম ফিল্ড টাইপ
+                    </label>
+                    <select
+                      value={editDraft.formType ?? c.formType ?? "general"}
+                      onChange={(e) =>
+                        setEditDraft({ ...editDraft, formType: e.target.value })
+                      }
+                      className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
+                    >
+                      {FORM_TYPE_OPTIONS.map((f) => (
+                        <option key={f.value} value={f.value}>
+                          {f.label} ({f.value})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
                   <div>
                     <label className="text-[11px] font-semibold text-muted-foreground">
                       বাংলা নাম
@@ -1933,6 +2247,7 @@ function CategoriesEditor() {
                       className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold"
                     />
                   </div>
+
                   <div>
                     <label className="text-[11px] font-semibold text-muted-foreground">
                       ইংরেজি নাম
@@ -1943,6 +2258,7 @@ function CategoriesEditor() {
                       className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
                     />
                   </div>
+
                   <div className="sm:col-span-2">
                     <label className="text-[11px] font-semibold text-muted-foreground">
                       বিবরণ (সাবটাইটেল)
@@ -1955,6 +2271,7 @@ function CategoriesEditor() {
                       className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
                     />
                   </div>
+
                   <div>
                     <label className="text-[11px] font-semibold text-muted-foreground">
                       আইকন
@@ -1973,6 +2290,7 @@ function CategoriesEditor() {
                       ))}
                     </select>
                   </div>
+
                   <div>
                     <label className="text-[11px] font-semibold text-muted-foreground">
                       রঙ থিম
@@ -1990,6 +2308,7 @@ function CategoriesEditor() {
                     </select>
                   </div>
                 </div>
+
                 <label className="flex items-center gap-2 text-xs font-semibold">
                   <input
                     type="checkbox"
@@ -2000,6 +2319,7 @@ function CategoriesEditor() {
                   />
                   হোম পেজ ও মেনুতে দৃশ্যমান রাখুন
                 </label>
+
                 <div className="flex gap-2">
                   <button
                     type="button"
@@ -2024,7 +2344,7 @@ function CategoriesEditor() {
           return (
             <div
               key={c.slug}
-              className={`flex items-center justify-between gap-3 rounded-2xl bg-card p-3.5 shadow-card transition ${
+              className={`flex flex-col gap-2 rounded-2xl bg-card p-3.5 shadow-card transition sm:flex-row sm:items-center sm:justify-between ${
                 c.visible === false ? "opacity-55" : ""
               }`}
             >
@@ -2040,6 +2360,16 @@ function CategoriesEditor() {
                     <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
                       {c.slug}
                     </span>
+                    {divName && (
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary-deep">
+                        {divName}
+                      </span>
+                    )}
+                    {c.formType && (
+                      <span className="rounded-md bg-secondary/20 px-1.5 py-0.5 font-mono text-[10px] text-secondary-foreground">
+                        {c.formType}
+                      </span>
+                    )}
                     {c.visible === false && (
                       <span className="rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-bold text-rose-700">
                         লুকানো
@@ -2050,7 +2380,7 @@ function CategoriesEditor() {
                 </div>
               </div>
 
-              <div className="flex shrink-0 items-center gap-1">
+              <div className="flex shrink-0 items-center gap-1 self-end sm:self-center">
                 <button
                   type="button"
                   onClick={() => void moveCategory(c.slug, "up")}
@@ -2092,9 +2422,11 @@ function CategoriesEditor() {
                 <button
                   type="button"
                   onClick={() => {
-                    void deleteCategory(c.slug).then(() =>
-                      toast.success("ক্যাটাগরি মুছে ফেলা হয়েছে")
-                    );
+                    if (confirm(`আপনি কি "${c.bn}" ক্যাটাগরি মুছে ফেলতে চান?`)) {
+                      void deleteCategory(c.slug).then(() =>
+                        toast.success("ক্যাটাগরি মুছে ফেলা হয়েছে")
+                      );
+                    }
                   }}
                   title="মুছুন"
                   className="rounded-full bg-destructive/10 p-1.5 text-destructive hover:bg-destructive/20"
@@ -2106,6 +2438,84 @@ function CategoriesEditor() {
           );
         })}
       </div>
+
+      {/* 4. Full 22-Division Audit Modal */}
+      {showAuditModal && auditReport && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-5"
+          onClick={() => setShowAuditModal(false)}
+        >
+          <div
+            className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-3xl bg-card p-4 sm:p-6 shadow-elevated"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div>
+                <h3 className="font-display text-base font-bold text-primary-deep">
+                  ২২টি বিভাগের ক্যাটাগরি অডিট রিপোর্ট
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  মোট প্রত্যাশিত: {auditReport.totalExpected} টি • ফায়ারবেস ক্লাউডে প্রাপ্ত: {auditReport.totalFirestore} টি
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAuditModal(false)}
+                className="rounded-full bg-muted p-1 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto py-3 space-y-2.5">
+              {auditReport.divisionSummary.map((d) => (
+                <div
+                  key={d.divisionId}
+                  className="rounded-2xl border border-border/80 bg-muted/30 p-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="font-bold text-xs text-foreground">{d.divisionName}</p>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                        d.actualCount >= d.expectedCount
+                          ? "bg-emerald-500/15 text-emerald-800"
+                          : "bg-amber-500/15 text-amber-800"
+                      }`}
+                    >
+                      {d.actualCount} / {d.expectedCount} টি সক্রিয়
+                    </span>
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {d.categories.map((c) => (
+                      <span
+                        key={c.slug}
+                        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] ${
+                          c.existsInFirestore
+                            ? "bg-emerald-50 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800"
+                            : "bg-rose-50 text-rose-800 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800"
+                        }`}
+                      >
+                        {c.bn}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-end border-t border-border pt-3">
+              <button
+                type="button"
+                onClick={() => setShowAuditModal(false)}
+                className="rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground"
+              >
+                বন্ধ করুন
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3328,43 +3738,113 @@ function DonationNumbersManagerCard() {
         />
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-3 max-h-[32rem] overflow-y-auto pr-1">
         {draft.numbers.map((item, idx) => (
           <div
             key={item.id}
-            className="grid grid-cols-1 gap-2 rounded-xl border border-border bg-muted/30 p-3 sm:grid-cols-3"
+            className="space-y-2 rounded-2xl border border-border bg-muted/20 p-3 text-xs"
           >
-            <div>
-              <label className="text-[10px] font-semibold text-muted-foreground">
-                মাধ্যম ও ধরন
-              </label>
-              <input
-                value={item.label}
-                onChange={(e) => {
-                  const next = [...draft.numbers];
-                  next[idx] = { ...item, label: e.target.value };
-                  setDraft({ ...draft, numbers: next });
-                }}
-                placeholder="যেমন: bKash (Personal)"
-                className="mt-0.5 w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs font-semibold"
-              />
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <div>
+                <label className="text-[10px] font-semibold text-muted-foreground">
+                  লেবেল ও মাধ্যম
+                </label>
+                <input
+                  value={item.label}
+                  onChange={(e) => {
+                    const next = [...draft.numbers];
+                    next[idx] = { ...item, label: e.target.value };
+                    setDraft({ ...draft, numbers: next });
+                  }}
+                  placeholder="যেমন: bKash (Personal)"
+                  className="mt-0.5 w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs font-semibold"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold text-muted-foreground">
+                  একাউন্ট / ফোন নম্বর
+                </label>
+                <input
+                  value={item.number}
+                  onChange={(e) => {
+                    const next = [...draft.numbers];
+                    next[idx] = { ...item, number: e.target.value };
+                    setDraft({ ...draft, numbers: next });
+                  }}
+                  placeholder="01850999178"
+                  className="mt-0.5 w-full rounded-lg border border-border bg-background px-2.5 py-1.5 font-mono text-xs font-bold"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold text-muted-foreground">
+                  ধরন
+                </label>
+                <select
+                  value={item.type}
+                  onChange={(e) => {
+                    const next = [...draft.numbers];
+                    next[idx] = {
+                      ...item,
+                      type: e.target.value as DonationNumberItem["type"],
+                    };
+                    setDraft({ ...draft, numbers: next });
+                  }}
+                  className="mt-0.5 w-full rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
+                >
+                  <option value="personal">পার্সোনাল (Personal)</option>
+                  <option value="merchant">মার্চেন্ট (Merchant)</option>
+                  <option value="bank">ব্যাংক একাউন্ট (Bank)</option>
+                  <option value="gateway">কার্ড / গেটওয়ে (Gateway)</option>
+                </select>
+              </div>
             </div>
-            <div>
-              <label className="text-[10px] font-semibold text-muted-foreground">
-                মোবাইল নাম্বার
-              </label>
-              <input
-                value={item.number}
-                onChange={(e) => {
-                  const next = [...draft.numbers];
-                  next[idx] = { ...item, number: e.target.value };
-                  setDraft({ ...draft, numbers: next });
-                }}
-                placeholder="01850999178"
-                className="mt-0.5 w-full rounded-lg border border-border bg-background px-2.5 py-1.5 font-mono text-xs font-bold"
-              />
-            </div>
-            <div className="flex items-end pb-1">
+
+            {item.type === "bank" && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-border/50">
+                <input
+                  value={item.bankName ?? ""}
+                  onChange={(e) => {
+                    const next = [...draft.numbers];
+                    next[idx] = { ...item, bankName: e.target.value };
+                    setDraft({ ...draft, numbers: next });
+                  }}
+                  placeholder="ব্যাংক (যেমন: Islami Bank PLC)"
+                  className="rounded-lg border border-border bg-background px-2.5 py-1 text-xs"
+                />
+                <input
+                  value={item.accountName ?? ""}
+                  onChange={(e) => {
+                    const next = [...draft.numbers];
+                    next[idx] = { ...item, accountName: e.target.value };
+                    setDraft({ ...draft, numbers: next });
+                  }}
+                  placeholder="একাউন্ট টাইটেল (যেমন: Smart Noakhali Welfare)"
+                  className="rounded-lg border border-border bg-background px-2.5 py-1 text-xs"
+                />
+                <input
+                  value={item.branchName ?? ""}
+                  onChange={(e) => {
+                    const next = [...draft.numbers];
+                    next[idx] = { ...item, branchName: e.target.value };
+                    setDraft({ ...draft, numbers: next });
+                  }}
+                  placeholder="শাখা (যেমন: Maijdee Court Branch)"
+                  className="rounded-lg border border-border bg-background px-2.5 py-1 text-xs"
+                />
+                <input
+                  value={item.routingNumber ?? ""}
+                  onChange={(e) => {
+                    const next = [...draft.numbers];
+                    next[idx] = { ...item, routingNumber: e.target.value };
+                    setDraft({ ...draft, numbers: next });
+                  }}
+                  placeholder="রাউটিং নম্বর (যেমন: 125551234)"
+                  className="rounded-lg border border-border bg-background px-2.5 py-1 text-xs font-mono"
+                />
+              </div>
+            )}
+
+            <div className="flex items-center justify-between pt-1">
               <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold">
                 <input
                   type="checkbox"
@@ -3377,6 +3857,21 @@ function DonationNumbersManagerCard() {
                 />
                 অনুদান পেজে প্রদর্শন করুন
               </label>
+
+              {item.type === "gateway" && (
+                <label className="flex cursor-pointer items-center gap-1.5 text-[11px] font-semibold text-blue-600">
+                  <input
+                    type="checkbox"
+                    checked={item.isGatewayConfigured}
+                    onChange={(e) => {
+                      const next = [...draft.numbers];
+                      next[idx] = { ...item, isGatewayConfigured: e.target.checked };
+                      setDraft({ ...draft, numbers: next });
+                    }}
+                  />
+                  অনলাইন গেটওয়ে কানেক্টেড
+                </label>
+              )}
             </div>
           </div>
         ))}
@@ -3395,17 +3890,35 @@ function DonationNumbersManagerCard() {
   );
 }
 
-function DonationsAdminPanel({ dons }: { dons: ReturnType<typeof useCloudDonations> }) {
+function DonationsAdminPanel({
+  dons,
+  expensesHook,
+  logoUrl,
+}: {
+  dons: ReturnType<typeof useCloudDonations>;
+  expensesHook: ReturnType<typeof useCloudExpenses>;
+  logoUrl?: string;
+}) {
   const [editing, setEditing] = useState<DonationRow | null>(null);
   const [busy, setBusy] = useState(false);
   const [approvingAll, setApprovingAll] = useState(false);
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
+  const [methodFilter, setMethodFilter] = useState<string>("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
+  const [previewSlipUrl, setPreviewSlipUrl] = useState<string | null>(null);
+  const [rejectItem, setRejectItem] = useState<DonationRow | null>(null);
+  const [rejectionReason, setRejectionReason] = useState("");
 
   const pendingItems = dons.items.filter((d) => d.status === "pending");
+  const pendingBankItems = pendingItems.filter((d) => d.method === "bank");
+  const approvedItems = dons.items.filter((d) => d.status === "approved");
+  const totalVerifiedAmount = approvedItems.reduce((acc, d) => acc + (Number(d.amount) || 0), 0);
 
   const filtered = dons.items.filter((d) => {
     if (statusFilter !== "all" && d.status !== statusFilter) return false;
+    if (methodFilter !== "all" && d.method !== methodFilter) return false;
+    if (categoryFilter !== "all" && d.category !== categoryFilter) return false;
     const q = (search || "").trim().toLowerCase();
     if (q) {
       const hay = `${d.sender_name ?? ""} ${d.sender_phone ?? ""} ${d.trx_id ?? ""} ${d.method ?? ""} ${d.note ?? ""}`.toLowerCase();
@@ -3429,6 +3942,23 @@ function DonationsAdminPanel({ dons }: { dons: ReturnType<typeof useCloudDonatio
     }
   }
 
+  async function handleConfirmReject() {
+    if (!rejectItem) return;
+    setBusy(true);
+    try {
+      await dons.setStatus(rejectItem.id, "rejected", {
+        rejection_reason: rejectionReason.trim() || "তথ্য অসংগতি বা ভুল ট্রানজেকশন আইডি",
+      });
+      toast.success("অনুদানটি বাতিল করা হয়েছে");
+      setRejectItem(null);
+      setRejectionReason("");
+    } catch (e) {
+      toast.error((e as Error).message || "বাতিল ব্যর্থ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveEdit() {
     if (!editing) return;
     setBusy(true);
@@ -3447,13 +3977,53 @@ function DonationsAdminPanel({ dons }: { dons: ReturnType<typeof useCloudDonatio
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      <FinancialReports
+        donations={dons.items}
+        expenses={expensesHook.items}
+        logoUrl={logoUrl}
+      />
+
       <DonationNumbersManagerCard />
+
+      {/* Verification Queue Summary Badges */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded-2xl border border-border bg-card p-3 shadow-xs">
+          <span className="text-[11px] text-muted-foreground block">মোট অনুমোদিত অনুদান</span>
+          <span className="font-display text-base font-bold text-emerald-600 sm:text-lg">
+            ৳{totalVerifiedAmount.toLocaleString("bn-BD")}
+          </span>
+          <span className="text-[10px] text-muted-foreground block">
+            {approvedItems.length} টি ভেরিফাইড
+          </span>
+        </div>
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20 p-3 shadow-xs">
+          <span className="text-[11px] text-amber-700 dark:text-amber-300 block">মোট অপেক্ষমাণ অনুদান</span>
+          <span className="font-display text-base font-bold text-amber-600 sm:text-lg">
+            {pendingItems.length} টি
+          </span>
+          <span className="text-[10px] text-muted-foreground block">যাচাই প্রয়োজন</span>
+        </div>
+        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-50/50 dark:bg-emerald-950/20 p-3 shadow-xs">
+          <span className="text-[11px] text-emerald-700 dark:text-emerald-300 block">অপেক্ষমাণ ব্যাংক ট্রান্সফার</span>
+          <span className="font-display text-base font-bold text-emerald-600 sm:text-lg">
+            {pendingBankItems.length} টি
+          </span>
+          <span className="text-[10px] text-muted-foreground block">স্লিপ যাচাই</span>
+        </div>
+        <div className="rounded-2xl border border-rose-500/30 bg-rose-50/50 dark:bg-rose-950/20 p-3 shadow-xs">
+          <span className="text-[11px] text-rose-700 dark:text-rose-300 block">বাতিলকৃত লেনদেন</span>
+          <span className="font-display text-base font-bold text-rose-600 sm:text-lg">
+            {dons.items.filter((x) => x.status === "rejected").length} টি
+          </span>
+          <span className="text-[10px] text-muted-foreground block">অকার্যকর TrxID</span>
+        </div>
+      </div>
 
       <div className="space-y-2.5 rounded-2xl bg-card p-4 shadow-card">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="font-display text-sm font-bold text-primary-deep">
-            সকল অনুদান তালিকা ({filtered.length} টি)
+            অনুদানের লেনদেন যাচাই ও ফিল্টার ({filtered.length} টি)
           </p>
           {pendingItems.length > 0 && (
             <button
@@ -3471,7 +4041,8 @@ function DonationsAdminPanel({ dons }: { dons: ReturnType<typeof useCloudDonatio
             </button>
           )}
         </div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as any)}
@@ -3479,13 +4050,37 @@ function DonationsAdminPanel({ dons }: { dons: ReturnType<typeof useCloudDonatio
           >
             <option value="all">সব অবস্থা ({dons.items.length})</option>
             <option value="pending">অপেক্ষমাণ ({pendingItems.length})</option>
-            <option value="approved">
-              অনুমোদিত ({dons.items.filter((x) => x.status === "approved").length})
-            </option>
-            <option value="rejected">
-              বাতিল ({dons.items.filter((x) => x.status === "rejected").length})
-            </option>
+            <option value="approved">অনুমোদিত ({approvedItems.length})</option>
+            <option value="rejected">বাতিল ({dons.items.filter((x) => x.status === "rejected").length})</option>
           </select>
+
+          <select
+            value={methodFilter}
+            onChange={(e) => setMethodFilter(e.target.value)}
+            className="rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
+          >
+            <option value="all">সব পেমেন্ট মাধ্যম</option>
+            <option value="bkash">bKash বিকাশ</option>
+            <option value="nagad">Nagad নগদ</option>
+            <option value="rocket">Rocket রকেট</option>
+            <option value="upay">Upay উপায়</option>
+            <option value="bank">Bank Transfer ব্যাংক</option>
+            <option value="gateway">Gateway কার্ড</option>
+          </select>
+
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
+          >
+            <option value="all">সকল ক্যাটাগরি</option>
+            {(Object.keys(DONATION_CATEGORY_LABELS) as DonationCategory[]).map((c) => (
+              <option key={c} value={c}>
+                {DONATION_CATEGORY_LABELS[c]}
+              </option>
+            ))}
+          </select>
+
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -3497,27 +4092,68 @@ function DonationsAdminPanel({ dons }: { dons: ReturnType<typeof useCloudDonatio
 
       <List empty="কোনো অনুদান নেই" items={filtered}>
         {(d) => (
-          <div key={d.id} className="rounded-2xl bg-card p-4 shadow-card">
+          <div key={d.id} className="rounded-2xl bg-card p-4 shadow-card border border-border space-y-2">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <p className="font-semibold">
-                  {d.sender_name} —{" "}
-                  <span className="text-primary-deep">
-                    {Number(d.amount).toLocaleString("bn-BD")} টাকা
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="font-semibold text-foreground text-sm">
+                    {d.sender_name}
+                  </p>
+                  {d.is_anonymous && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.2 text-[10px] font-bold text-primary">
+                      🔒 গোপন অনুদান (Anonymous)
+                    </span>
+                  )}
+                  <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                    {d.category_label || (d.category ? (DONATION_CATEGORY_LABELS[d.category] || d.category) : "সাধারণ অনুদান")}
                   </span>
+                </div>
+
+                <p className="font-display text-base font-bold text-primary-deep mt-0.5">
+                  ৳{Number(d.amount).toLocaleString("bn-BD")}
                 </p>
+
                 <p className="text-xs text-muted-foreground">
-                  {d.method} • {d.sender_phone} • TrxID:{" "}
-                  <span className="font-mono">{d.trx_id}</span>
+                  <span className="font-bold uppercase text-foreground">{d.method}</span> • {d.sender_phone} • TrxID:{" "}
+                  <span className="font-mono font-bold text-foreground bg-muted px-1.5 py-0.2 rounded">
+                    {d.trx_id}
+                  </span>
+                  {d.created_at && (
+                    <span className="ml-1 text-[11px]">
+                      • {new Date(d.created_at).toLocaleString("bn-BD")}
+                    </span>
+                  )}
                 </p>
+
                 {d.note && <p className="mt-1 text-xs text-muted-foreground">📝 {d.note}</p>}
+                {d.rejection_reason && (
+                  <p className="mt-1 text-xs text-rose-600 font-medium">
+                    ⚠️ বাতিলের কারণ: {d.rejection_reason}
+                  </p>
+                )}
               </div>
-              <Status status={d.status} />
+
+              <div className="flex flex-col items-end gap-1.5">
+                <Status status={d.status} />
+                {(d.deposit_slip_url || d.receipt_url) && (
+                  <button
+                    type="button"
+                    onClick={() => setPreviewSlipUrl(d.deposit_slip_url || d.receipt_url || null)}
+                    className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/10 px-2 py-1 text-[11px] font-bold text-emerald-600 hover:bg-emerald-500/20"
+                  >
+                    <FileText className="h-3 w-3" /> স্লিপ দেখুন
+                  </button>
+                )}
+              </div>
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
+
+            <div className="mt-3 flex flex-wrap items-center gap-2 pt-2 border-t border-border/50">
               <Actions
                 onApprove={() => dons.setStatus(d.id, "approved")}
-                onReject={() => dons.setStatus(d.id, "rejected")}
+                onReject={() => {
+                  setRejectItem(d);
+                  setRejectionReason("");
+                }}
                 onDelete={() => dons.remove(d.id)}
                 status={d.status}
                 inline
@@ -3534,6 +4170,99 @@ function DonationsAdminPanel({ dons }: { dons: ReturnType<typeof useCloudDonatio
         )}
       </List>
 
+      {/* Modal: View Deposit Slip */}
+      {previewSlipUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setPreviewSlipUrl(null)}
+        >
+          <div
+            className="w-full max-w-lg space-y-3 rounded-3xl bg-card p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-border pb-2">
+              <p className="font-display text-sm font-bold text-foreground">
+                ব্যাংক ডিপোজিট স্লিপ / রসিদের পূর্ণ ভিউ
+              </p>
+              <button
+                type="button"
+                onClick={() => setPreviewSlipUrl(null)}
+                className="rounded-full bg-muted p-1 text-muted-foreground hover:text-foreground"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="max-h-[70vh] overflow-auto rounded-2xl bg-muted/30 p-2">
+              <img
+                src={previewSlipUrl}
+                alt="Deposit Slip"
+                className="mx-auto max-h-[65vh] w-auto rounded-xl object-contain shadow-sm"
+              />
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setPreviewSlipUrl(null)}
+                className="rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground"
+              >
+                বন্ধ করুন
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Rejection Reason */}
+      {rejectItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setRejectItem(null)}
+        >
+          <div
+            className="w-full max-w-md space-y-3 rounded-3xl bg-card p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="font-display text-sm font-bold text-rose-600">
+              অনুদান বাতিল নিশ্চিতকরণ
+            </p>
+            <p className="text-xs text-muted-foreground">
+              প্রেরক: <span className="font-semibold text-foreground">{rejectItem.sender_name}</span> • TrxID:{" "}
+              <span className="font-mono font-bold text-foreground">{rejectItem.trx_id}</span>
+            </p>
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground block mb-1">
+                বাতিলের কারণ লিখুন:
+              </label>
+              <textarea
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                placeholder="যেমন: TrxID টি ব্যাংক বা MFS স্টেটমেন্টে পাওয়া যায়নি..."
+                rows={3}
+                className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-xs outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={handleConfirmReject}
+                className="rounded-full bg-rose-600 px-4 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-rose-700 disabled:opacity-60"
+              >
+                {busy ? "বাতিল হচ্ছে..." : "হ্যাঁ, বাতিল করুন"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setRejectItem(null)}
+                className="rounded-full bg-muted px-3.5 py-1.5 text-xs font-semibold"
+              >
+                ফিরে যান
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Donation Modal */}
       {editing && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3"
@@ -3563,13 +4292,13 @@ function DonationsAdminPanel({ dons }: { dons: ReturnType<typeof useCloudDonatio
               value={editing.amount}
               onChange={(e) => setEditing({ ...editing, amount: Number(e.target.value) })}
               placeholder="টাকার পরিমাণ"
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-bold"
             />
             <input
               value={editing.trx_id}
               onChange={(e) => setEditing({ ...editing, trx_id: e.target.value })}
               placeholder="TrxID"
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-mono uppercase"
             />
             <div className="flex gap-2">
               <button
@@ -3586,6 +4315,533 @@ function DonationsAdminPanel({ dons }: { dons: ReturnType<typeof useCloudDonatio
                 className="rounded-full bg-muted px-3 py-1.5 text-xs"
               >
                 বাতিল
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Humanitarian Relief & Expenses CRUD (Super Admin)
+// ============================================================================
+function ExpensesAdminPanel({
+  expensesHook,
+}: {
+  expensesHook: ReturnType<typeof useCloudExpenses>;
+}) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState<ExpenseRow | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [search, setSearch] = useState("");
+
+  // Add state
+  const [newTitle, setNewTitle] = useState("");
+  const [newCategory, setNewCategory] = useState<ExpenseCategory>("emergency_relief");
+  const [newAmount, setNewAmount] = useState<number | "">("");
+  const [newDate, setNewDate] = useState(new Date().toISOString().slice(0, 10));
+  const [newLocation, setNewLocation] = useState("");
+  const [newResponsible, setNewResponsible] = useState("");
+  const [newDescription, setNewDescription] = useState("");
+  const [newReceiptUrl, setNewReceiptUrl] = useState("");
+
+  const totalExpense = useMemo(
+    () => expensesHook.items.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0),
+    [expensesHook.items]
+  );
+
+  const filtered = useMemo(() => {
+    return expensesHook.items.filter((item) => {
+      if (categoryFilter !== "all" && item.category !== categoryFilter) return false;
+      if (search.trim()) {
+        const q = search.trim().toLowerCase();
+        const hay = `${item.title} ${item.location ?? ""} ${item.responsible_person ?? ""} ${item.description ?? ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [expensesHook.items, categoryFilter, search]);
+
+  async function handleAdd(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newTitle.trim()) return toast.error("ব্যয়ের শিরোনাম লিখুন");
+    if (!newAmount || Number(newAmount) <= 0) return toast.error("সঠিক টাকার পরিমাণ দিন");
+    setBusy(true);
+    const res = await expensesHook.add({
+      title: newTitle.trim(),
+      category: newCategory,
+      amount: Number(newAmount),
+      expense_date: newDate,
+      location: newLocation.trim() || undefined,
+      responsible_person: newResponsible.trim() || undefined,
+      description: newDescription.trim() || undefined,
+      receipt_url: newReceiptUrl.trim() || undefined,
+    });
+    setBusy(false);
+    if (!res.ok) {
+      toast.error(res.error || "ব্যয়ের তথ্য যোগ করা ব্যর্থ হয়েছে");
+      return;
+    }
+    toast.success("নতুন মানবিক ব্যয়ের হিসাব সফলভাবে যুক্ত হয়েছে!");
+    setNewTitle("");
+    setNewAmount("");
+    setNewLocation("");
+    setNewResponsible("");
+    setNewDescription("");
+    setNewReceiptUrl("");
+    setShowAdd(false);
+  }
+
+  async function handleSaveEdit() {
+    if (!editing) return;
+    if (!editing.title.trim()) return toast.error("শিরোনাম লিখুন");
+    if (!editing.amount || Number(editing.amount) <= 0) return toast.error("সঠিক টাকার পরিমাণ দিন");
+    setBusy(true);
+    const res = await expensesHook.update(editing.id, {
+      title: editing.title.trim(),
+      category: editing.category,
+      amount: Number(editing.amount),
+      expense_date: editing.expense_date,
+      location: editing.location,
+      responsible_person: editing.responsible_person,
+      description: editing.description,
+      receipt_url: editing.receipt_url,
+    });
+    setBusy(false);
+    if (!res.ok) {
+      toast.error(res.error?.message || "আপডেট ব্যর্থ হয়েছে");
+      return;
+    }
+    toast.success("ব্যয়ের হিসাব সফলভাবে আপডেট হয়েছে!");
+    setEditing(null);
+  }
+
+  async function handleDelete(item: ExpenseRow) {
+    if (!window.confirm(`আপনি কি নিশ্চিত যে "${item.title}" ব্যয়ের হিসাবটি মুছে ফেলতে চান?`)) return;
+    const res = await expensesHook.remove(item.id);
+    if (res.error) {
+      toast.error(res.error.message || "মুছে ফেলা ব্যর্থ হয়েছে");
+      return;
+    }
+    toast.success("ব্যয়ের হিসাব মুছে ফেলা হয়েছে");
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Overview Stat Cards */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 p-4">
+          <p className="text-xs font-semibold text-rose-700">সর্বমোট মানবিক ব্যয়</p>
+          <p className="mt-1 font-display text-2xl font-black text-rose-900">
+            {totalExpense.toLocaleString("bn-BD")} ৳
+          </p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">অনুমোদিত সকল ত্রাণ ও সহায়তা</p>
+        </div>
+        <div className="rounded-2xl border border-primary/20 bg-primary/10 p-4">
+          <p className="text-xs font-semibold text-primary-deep">মোট ব্যয়ের এন্ট্রি</p>
+          <p className="mt-1 font-display text-2xl font-black text-primary-deep">
+            {expensesHook.items.length.toLocaleString("bn-BD")} টি
+          </p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">ডকুমেন্টেড খরচের হিসাব</p>
+        </div>
+        <div className="flex items-center justify-end rounded-2xl border border-border bg-card p-4">
+          <button
+            type="button"
+            onClick={() => setShowAdd(!showAdd)}
+            className="flex items-center gap-1.5 rounded-full bg-gradient-hero px-4 py-2.5 text-xs font-bold text-white shadow-card hover:opacity-95"
+          >
+            <Plus className="h-4 w-4" /> নতুন মানবিক ব্যয় যোগ করুন
+          </button>
+        </div>
+      </div>
+
+      {/* Add Form */}
+      {showAdd && (
+        <form
+          onSubmit={handleAdd}
+          className="space-y-3 rounded-2xl border-2 border-primary/30 bg-card p-4 shadow-elevated"
+        >
+          <div className="flex items-center justify-between border-b border-border pb-2">
+            <p className="font-display text-sm font-bold text-primary-deep">
+              ➕ নতুন মানবিক ত্রাণ / ব্যয়ের তথ্য যোগ
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowAdd(false)}
+              className="rounded-full bg-muted p-1 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="text-xs font-semibold text-foreground">ব্যয়ের শিরোনাম / উদ্দেশ্য *</label>
+              <input
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                placeholder="যেমন: নোয়াখালী বন্যায় খাদ্যসামগ্রী বিতরণ"
+                required
+                className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-foreground">ব্যয়ের খাত / ক্যাটাগরি *</label>
+              <select
+                value={newCategory}
+                onChange={(e) => setNewCategory(e.target.value as ExpenseCategory)}
+                className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              >
+                {(Object.keys(EXPENSE_CATEGORY_LABELS) as ExpenseCategory[]).map((cat) => (
+                  <option key={cat} value={cat}>
+                    {EXPENSE_CATEGORY_LABELS[cat]}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-foreground">টাকার পরিমাণ (৳) *</label>
+              <input
+                type="number"
+                value={newAmount}
+                onChange={(e) => setNewAmount(e.target.value === "" ? "" : Number(e.target.value))}
+                placeholder="যেমন: 25000"
+                required
+                min={1}
+                className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 font-mono text-sm font-bold"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-foreground">ব্যয়ের তারিখ *</label>
+              <input
+                type="date"
+                value={newDate}
+                onChange={(e) => setNewDate(e.target.value)}
+                required
+                className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-foreground">স্থান / এলাকা</label>
+              <input
+                value={newLocation}
+                onChange={(e) => setNewLocation(e.target.value)}
+                placeholder="যেমন: মাইজদী, সদর, নোয়াখালী"
+                className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-foreground">দায়িত্বপ্রাপ্ত ব্যক্তি / টিম</label>
+              <input
+                value={newResponsible}
+                onChange={(e) => setNewResponsible(e.target.value)}
+                placeholder="যেমন: মোঃ মাহমুদুল হাসান"
+                className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-foreground">বিস্তারিত বিবরণ</label>
+            <textarea
+              value={newDescription}
+              onChange={(e) => setNewDescription(e.target.value)}
+              placeholder="উপকারভোগীদের সংখ্যা, কেনাকাটার বিবরণ বা প্রাসঙ্গিক তথ্য..."
+              rows={2}
+              className="mt-1 w-full rounded-xl border border-border bg-background p-2.5 text-xs"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-foreground">ভাউচার / রসিদ / কাজের ছবি</label>
+            <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center">
+              <input
+                value={newReceiptUrl}
+                onChange={(e) => setNewReceiptUrl(e.target.value)}
+                placeholder="ছবির লিংক বা সরাসরি আপলোড করুন"
+                className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-xs"
+              />
+              <UniversalImageUploader
+                category="general"
+                value={newReceiptUrl}
+                onChange={(url: string | null) => {
+                  setNewReceiptUrl(url || "");
+                  if (url) toast.success("রসিদের ছবি আপলোড সম্পন্ন");
+                }}
+                variant="inline"
+                label="রসিদ ছবি আপলোড"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setShowAdd(false)}
+              className="rounded-full bg-muted px-4 py-1.5 text-xs font-semibold"
+            >
+              বাতিল
+            </button>
+            <button
+              type="submit"
+              disabled={busy}
+              className="flex items-center gap-1 rounded-full bg-primary px-5 py-1.5 text-xs font-bold text-primary-foreground disabled:opacity-50"
+            >
+              <Save className="h-3.5 w-3.5" /> সংরক্ষণ করুন
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Filter and Search Bar */}
+      <div className="flex flex-col gap-2 rounded-2xl bg-card p-3 shadow-card sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="rounded-xl border border-border bg-background px-3 py-1.5 text-xs font-semibold"
+          >
+            <option value="all">সকল খাতের ব্যয় ({expensesHook.items.length})</option>
+            {(Object.keys(EXPENSE_CATEGORY_LABELS) as ExpenseCategory[]).map((cat) => (
+              <option key={cat} value={cat}>
+                {EXPENSE_CATEGORY_LABELS[cat]}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="relative w-full sm:w-64">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="ব্যয় বা স্থান খুঁজুন..."
+            className="w-full rounded-xl border border-border bg-background py-1.5 pl-8 pr-3 text-xs"
+          />
+        </div>
+      </div>
+
+      {/* List */}
+      {filtered.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center text-xs text-muted-foreground">
+          {search ? "কোনো ব্যয়ের হিসাব পাওয়া যায়নি" : "কোনো ব্যয়ের এন্ট্রি নেই। উপরের বাটন দিয়ে যোগ করুন।"}
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {filtered.map((item) => (
+            <div
+              key={item.id}
+              className="flex flex-wrap items-start justify-between gap-3 rounded-2xl bg-card p-4 shadow-card"
+            >
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="font-display text-sm font-bold text-foreground">{item.title}</p>
+                  <span className="rounded-full bg-rose-500/15 px-2.5 py-0.5 text-[10px] font-bold text-rose-700">
+                    {item.category_label || EXPENSE_CATEGORY_LABELS[item.category] || "ব্যয়"}
+                  </span>
+                  <span className="font-mono text-sm font-black text-rose-600">
+                    -{Number(item.amount).toLocaleString("bn-BD")} ৳
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                  <span>📅 {item.expense_date}</span>
+                  {item.location && <span>📍 {item.location}</span>}
+                  {item.responsible_person && <span>👤 দায়িত্বে: {item.responsible_person}</span>}
+                </div>
+
+                {item.description && (
+                  <p className="text-xs text-muted-foreground">{item.description}</p>
+                )}
+
+                {item.receipt_url && (
+                  <div className="pt-1">
+                    <a
+                      href={item.receipt_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
+                    >
+                      📎 ভাউচার / রসিদ দেখুন ↗
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setEditing({ ...item })}
+                  className="flex items-center gap-1 rounded-full bg-blue-500/10 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-500/20"
+                >
+                  <Edit3 className="h-3 w-3" /> এডিট
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDelete(item)}
+                  className="rounded-full bg-destructive/10 p-1.5 text-destructive hover:bg-destructive/20"
+                  title="মুছে ফেলুন"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Edit Modal */}
+      {editing && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3"
+          onClick={() => setEditing(null)}
+        >
+          <div
+            className="w-full max-w-md space-y-3 rounded-2xl bg-card p-4 shadow-elevated"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-border pb-2">
+              <p className="font-display text-sm font-bold text-primary-deep">
+                ✏️ মানবিক ব্যয়ের হিসাব সম্পাদনা
+              </p>
+              <button
+                type="button"
+                onClick={() => setEditing(null)}
+                className="rounded-full bg-muted p-1 text-muted-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5">
+              <div>
+                <label className="text-xs font-semibold text-foreground">শিরোনাম</label>
+                <input
+                  value={editing.title}
+                  onChange={(e) => setEditing({ ...editing, title: e.target.value })}
+                  className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-1.5 text-xs"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs font-semibold text-foreground">খাত</label>
+                  <select
+                    value={editing.category}
+                    onChange={(e) =>
+                      setEditing({
+                        ...editing,
+                        category: e.target.value as ExpenseCategory,
+                      })
+                    }
+                    className="mt-0.5 w-full rounded-xl border border-border bg-background px-2.5 py-1.5 text-xs"
+                  >
+                    {(Object.keys(EXPENSE_CATEGORY_LABELS) as ExpenseCategory[]).map((cat) => (
+                      <option key={cat} value={cat}>
+                        {EXPENSE_CATEGORY_LABELS[cat]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-foreground">পরিমাণ (৳)</label>
+                  <input
+                    type="number"
+                    value={editing.amount}
+                    onChange={(e) =>
+                      setEditing({ ...editing, amount: Number(e.target.value) || 0 })
+                    }
+                    className="mt-0.5 w-full rounded-xl border border-border bg-background px-2.5 py-1.5 font-mono text-xs font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs font-semibold text-foreground">তারিখ</label>
+                  <input
+                    type="date"
+                    value={editing.expense_date}
+                    onChange={(e) => setEditing({ ...editing, expense_date: e.target.value })}
+                    className="mt-0.5 w-full rounded-xl border border-border bg-background px-2.5 py-1.5 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground">স্থান</label>
+                  <input
+                    value={editing.location ?? ""}
+                    onChange={(e) => setEditing({ ...editing, location: e.target.value })}
+                    className="mt-0.5 w-full rounded-xl border border-border bg-background px-2.5 py-1.5 text-xs"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-foreground">দায়িত্বপ্রাপ্ত ব্যক্তি</label>
+                <input
+                  value={editing.responsible_person ?? ""}
+                  onChange={(e) => setEditing({ ...editing, responsible_person: e.target.value })}
+                  className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-1.5 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-foreground">বিবরণ</label>
+                <textarea
+                  value={editing.description ?? ""}
+                  onChange={(e) => setEditing({ ...editing, description: e.target.value })}
+                  rows={2}
+                  className="mt-0.5 w-full rounded-xl border border-border bg-background p-2 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-foreground">ভাউচার / রসিদের ছবি URL</label>
+                <div className="mt-0.5 flex flex-col gap-1.5 sm:flex-row sm:items-center">
+                  <input
+                    value={editing.receipt_url ?? ""}
+                    onChange={(e) => setEditing({ ...editing, receipt_url: e.target.value })}
+                    placeholder="https://..."
+                    className="flex-1 rounded-xl border border-border bg-background px-3 py-1.5 text-xs"
+                  />
+                  <UniversalImageUploader
+                    category="general"
+                    value={editing.receipt_url ?? ""}
+                    onChange={(url: string | null) => {
+                      setEditing({ ...editing, receipt_url: url || "" });
+                      if (url) toast.success("রসিদ আপলোড সম্পন্ন");
+                    }}
+                    variant="inline"
+                    label="আপলোড"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+              <button
+                type="button"
+                onClick={() => setEditing(null)}
+                className="rounded-full bg-muted px-4 py-1.5 text-xs font-semibold"
+              >
+                বাতিল
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={handleSaveEdit}
+                className="flex items-center gap-1 rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground disabled:opacity-50"
+              >
+                <Save className="h-3.5 w-3.5" /> সংরক্ষণ
               </button>
             </div>
           </div>
