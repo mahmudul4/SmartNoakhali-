@@ -8,7 +8,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { categories as masterCategories, DIVISIONS as masterDivisions, type Category } from "@/data/categories";
-import { upsertSettingDoc, CATEGORIES_CONFIG_ID, DIVISIONS_CONFIG_ID, LOCAL_CATEGORIES_KEY, LOCAL_DIVISIONS_KEY } from "@/lib/store";
+import { upsertSettingDoc, CATEGORIES_CONFIG_ID, DIVISIONS_CONFIG_ID, LOCAL_CATEGORIES_KEY, LOCAL_DIVISIONS_KEY, sanitizeFirestorePayload } from "@/lib/store";
 
 export interface CategoryMigrationResult {
   totalMaster: number;
@@ -87,20 +87,24 @@ export async function syncCategoriesToFirestore(
 
       if (!existing) {
         // Document does not exist: create it
-        currentBatch.set(targetDocRef, {
+        const newDocData: Record<string, any> = {
           slug: c.slug,
           divisionId: c.divisionId,
           bn: c.bn,
           en: c.en,
           iconName: c.iconName || "Users",
           tint: c.tint,
-          description: c.description,
+          description: c.description || c.bn,
           formType: c.formType || "general",
           visible: true,
           sort_order: c.sort_order || i + 1,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
-        });
+        };
+        if (c.customIconUrl) {
+          newDocData.customIconUrl = c.customIconUrl;
+        }
+        currentBatch.set(targetDocRef, sanitizeFirestorePayload(newDocData));
         opCount++;
         result.addedCount++;
         result.logs.push({
@@ -131,8 +135,11 @@ export async function syncCategoriesToFirestore(
           // Preserve customIconUrl, custom description if already present
           if (!existing.iconName) patch.iconName = c.iconName || "Users";
           if (!existing.tint) patch.tint = c.tint;
+          if (c.customIconUrl && !existing.customIconUrl) {
+            patch.customIconUrl = c.customIconUrl;
+          }
 
-          currentBatch.update(targetDocRef, patch);
+          currentBatch.update(targetDocRef, sanitizeFirestorePayload(patch));
           opCount++;
           result.updatedCount++;
           result.logs.push({

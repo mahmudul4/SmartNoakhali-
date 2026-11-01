@@ -52,6 +52,33 @@ export const LOCAL_APP_PACKAGES_KEY = "sn_app_packages_v1";
 export const LOCAL_SITE_META_KEY = "sn_site_meta_v1";
 export const LOCAL_SERVICES_KEY = "sn_services_config_v1";
 
+/**
+ * Strips any undefined fields recursively so Firestore setDoc/updateDoc never fails.
+ * Preserves FieldValues (serverTimestamp, arrayUnion, etc.), Dates, Arrays, and primitive types.
+ */
+export function sanitizeFirestorePayload<T extends Record<string, any>>(obj: T): Record<string, any> {
+  if (!obj || typeof obj !== "object") return {};
+  const cleaned: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === undefined) {
+      continue;
+    }
+    if (
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      !(value instanceof Date) &&
+      typeof (value as any).toMillis !== "function" &&
+      (value.constructor?.name === "Object" || !value.constructor)
+    ) {
+      cleaned[key] = sanitizeFirestorePayload(value);
+    } else {
+      cleaned[key] = value;
+    }
+  }
+  return cleaned;
+}
+
 export async function upsertSettingDoc(
   settingId: string,
   payloadValue: string,
@@ -508,17 +535,22 @@ export interface DivisionConfigItem {
   customIconUrl?: string;
 }
 
-export const DEFAULT_DIVISION_ITEMS: DivisionConfigItem[] = DIVISIONS.map((d, idx) => ({
-  id: d.id,
-  bn: d.bn,
-  en: d.en,
-  iconName: d.iconName,
-  tint: d.tint,
-  description: d.description,
-  visible: true,
-  sort_order: d.sort_order || idx + 1,
-  customIconUrl: d.customIconUrl,
-}));
+export const DEFAULT_DIVISION_ITEMS: DivisionConfigItem[] = DIVISIONS.map((d, idx) => {
+  const item: DivisionConfigItem = {
+    id: d.id,
+    bn: d.bn,
+    en: d.en,
+    iconName: d.iconName,
+    tint: d.tint,
+    description: d.description,
+    visible: true,
+    sort_order: d.sort_order || idx + 1,
+  };
+  if (d.customIconUrl) {
+    item.customIconUrl = d.customIconUrl;
+  }
+  return item;
+});
 
 function parseDivisionConfig(raw: string | null | undefined): DivisionConfigItem[] | null {
   if (!raw) return null;
@@ -536,7 +568,8 @@ function parseDivisionConfig(raw: string | null | undefined): DivisionConfigItem
         const id = String(item.id);
         const fallback = DIVISIONS.find((d) => d.id === id);
         const iconName = item.iconName && CATEGORY_ICONS[item.iconName] ? item.iconName : fallback?.iconName || "PhoneCall";
-        divMap.set(id, {
+        const iconUrl = item.customIconUrl || fallback?.customIconUrl;
+        const entry: DivisionConfigItem = {
           id,
           bn: String(item.bn || fallback?.bn || item.id),
           en: String(item.en || fallback?.en || item.id),
@@ -545,8 +578,11 @@ function parseDivisionConfig(raw: string | null | undefined): DivisionConfigItem
           description: String(item.description || fallback?.description || ""),
           visible: item.visible !== false,
           sort_order: typeof item.sort_order === "number" ? item.sort_order : (fallback?.sort_order || 99),
-          customIconUrl: item.customIconUrl || fallback?.customIconUrl,
-        });
+        };
+        if (iconUrl) {
+          entry.customIconUrl = iconUrl;
+        }
+        divMap.set(id, entry);
       }
       return Array.from(divMap.values()).sort((a, b) => a.sort_order - b.sort_order);
     }
@@ -711,26 +747,31 @@ export async function checkCategoryReferences(slug: string): Promise<{
 
 const DEFAULT_CATEGORY_ITEMS: CategoryConfigItem[] = defaultCategories
   .filter((c) => c.slug !== "chat" && c.slug !== "app-download")
-  .map((c, idx) => ({
-    id: c.slug,
-    name: c.bn,
-    slug: c.slug,
-    departmentId: c.divisionId,
-    divisionId: c.divisionId,
-    bn: c.bn,
-    en: c.en,
-    icon: c.iconName || "Users",
-    iconName: c.iconName || "Users",
-    tint: c.tint,
-    description: c.description,
-    formType: c.formType || "general",
-    customIconUrl: c.customIconUrl,
-    displayOrder: c.sort_order || idx + 1,
-    sort_order: c.sort_order || idx + 1,
-    isActive: true,
-    visible: true,
-    isDeleted: false,
-  }));
+  .map((c, idx) => {
+    const item: CategoryConfigItem = {
+      id: c.slug,
+      name: c.bn,
+      slug: c.slug,
+      departmentId: c.divisionId,
+      divisionId: c.divisionId,
+      bn: c.bn,
+      en: c.en,
+      icon: c.iconName || "Users",
+      iconName: c.iconName || "Users",
+      tint: c.tint,
+      description: c.description,
+      formType: c.formType || "general",
+      displayOrder: c.sort_order || idx + 1,
+      sort_order: c.sort_order || idx + 1,
+      isActive: true,
+      visible: true,
+      isDeleted: false,
+    };
+    if (c.customIconUrl) {
+      item.customIconUrl = c.customIconUrl;
+    }
+    return item;
+  });
 
 function parseCategoryConfig(raw: string | null | undefined): CategoryConfigItem[] | null {
   if (!raw) return null;
@@ -787,10 +828,11 @@ function parseCategoryConfig(raw: string | null | undefined): CategoryConfigItem
         const description = String(item.description ?? fallback?.description ?? "");
         const divisionId = String(item.divisionId || item.departmentId || fallback?.divisionId || "division-2-shopping-market");
         const formType = String(item.formType || fallback?.formType || "general");
-        const customIconUrl = item.customIconUrl || fallback?.customIconUrl;
+        const rawCustomIcon = item.customIconUrl || fallback?.customIconUrl;
+        const customIconUrl = typeof rawCustomIcon === "string" && rawCustomIcon.trim() ? rawCustomIcon.trim() : undefined;
         const sortOrder = typeof item.sort_order === "number" ? item.sort_order : (typeof item.displayOrder === "number" ? item.displayOrder : (fallback?.sort_order || 999));
 
-        catMap.set(slug, {
+        const catItem: CategoryConfigItem = {
           id: slug,
           name: String(item.bn || fallback?.bn || item.slug),
           slug,
@@ -803,14 +845,18 @@ function parseCategoryConfig(raw: string | null | undefined): CategoryConfigItem
           tint,
           description,
           formType,
-          customIconUrl,
           displayOrder: sortOrder,
           sort_order: sortOrder,
           isActive: item.isActive !== false && item.visible !== false,
           visible: item.visible !== false && item.isActive !== false,
           isDeleted: false,
           updatedAt: item.updatedAt,
-        });
+        };
+        if (customIconUrl) {
+          catItem.customIconUrl = customIconUrl;
+        }
+
+        catMap.set(slug, catItem);
       }
 
       return Array.from(catMap.values())
@@ -912,7 +958,10 @@ export function useCategories() {
               const sortOrder = typeof data.sort_order === "number" ? data.sort_order : (typeof data.displayOrder === "number" ? data.displayOrder : (fallback?.sort_order || 999));
               const divId = String(data.divisionId || data.departmentId || fallback?.divisionId || "division-2-shopping-market");
 
-              firestoreMap.set(slug, {
+              const rawCustomIcon = data.customIconUrl || fallback?.customIconUrl;
+              const customIconUrl = typeof rawCustomIcon === "string" && rawCustomIcon.trim() ? rawCustomIcon.trim() : undefined;
+
+              const firestoreCat: CategoryConfigItem = {
                 id: slug,
                 slug,
                 name: String(data.bn || data.name || fallback?.bn || slug),
@@ -925,14 +974,17 @@ export function useCategories() {
                 tint: data.tint || fallback?.tint || "from-emerald-500/15 to-emerald-700/10",
                 description: String(data.description ?? fallback?.description ?? ""),
                 formType: String(data.formType || fallback?.formType || "general"),
-                customIconUrl: data.customIconUrl || fallback?.customIconUrl,
                 displayOrder: sortOrder,
                 sort_order: sortOrder,
                 isActive: data.isActive !== false && data.visible !== false,
                 visible: data.visible !== false && data.isActive !== false,
                 isDeleted: false,
                 updatedAt: data.updatedAt,
-              });
+              };
+              if (customIconUrl) {
+                firestoreCat.customIconUrl = customIconUrl;
+              }
+              firestoreMap.set(slug, firestoreCat);
             }
           });
 
@@ -1044,17 +1096,49 @@ export function useCategories() {
     async (slug: string, patch: Partial<CategoryConfigItem>) => {
       // 1. Direct write to Firestore /categories/{slug} with merge
       const docRef = doc(db, "categories", slug);
+      
       const updatePayload: Record<string, any> = {
-        ...patch,
         updatedAt: serverTimestamp(),
         updatedBy: auth.currentUser?.email || "admin",
       };
-      if (patch.bn) updatePayload.name = patch.bn;
-      if (patch.divisionId) updatePayload.departmentId = patch.divisionId;
-      if (patch.sort_order !== undefined) updatePayload.displayOrder = patch.sort_order;
-      if (patch.visible !== undefined) updatePayload.isActive = patch.visible;
 
-      await setDoc(docRef, updatePayload, { merge: true });
+      if (patch.bn !== undefined) {
+        updatePayload.bn = String(patch.bn);
+        updatePayload.name = String(patch.bn);
+      }
+      if (patch.en !== undefined) updatePayload.en = String(patch.en);
+      if (patch.divisionId !== undefined) {
+        updatePayload.divisionId = String(patch.divisionId);
+        updatePayload.departmentId = String(patch.divisionId);
+      }
+      if (patch.iconName !== undefined) {
+        updatePayload.iconName = String(patch.iconName);
+        updatePayload.icon = String(patch.iconName);
+      }
+      if (patch.tint !== undefined) updatePayload.tint = String(patch.tint);
+      if (patch.description !== undefined) updatePayload.description = String(patch.description);
+      if (patch.formType !== undefined) updatePayload.formType = String(patch.formType);
+      if (patch.sort_order !== undefined) {
+        const orderNum = Number(patch.sort_order);
+        updatePayload.sort_order = isNaN(orderNum) ? 1 : orderNum;
+        updatePayload.displayOrder = isNaN(orderNum) ? 1 : orderNum;
+      }
+      if (patch.visible !== undefined) {
+        updatePayload.visible = Boolean(patch.visible);
+        updatePayload.isActive = Boolean(patch.visible);
+      }
+
+      // Safe handling of customIconUrl:
+      // - If undefined: DO NOT include in payload (omitted so existing value in Firestore is preserved)
+      // - If non-empty string: trim and store
+      // - If empty string "": user explicitly cleared it, store empty string
+      if (patch.customIconUrl !== undefined) {
+        const trimmed = typeof patch.customIconUrl === "string" ? patch.customIconUrl.trim() : "";
+        updatePayload.customIconUrl = trimmed;
+      }
+
+      const safePayload = sanitizeFirestorePayload(updatePayload);
+      await setDoc(docRef, safePayload, { merge: true });
 
       // Verification: read back
       const verifiedSnap = await getDoc(docRef);
@@ -1063,14 +1147,51 @@ export function useCategories() {
       }
 
       // 2. Update local state and mirror settings doc
-      const next = items.map((c) => (c.slug === slug ? { ...c, ...patch } : c));
+      const next = items.map((c) => {
+        if (c.slug !== slug) return c;
+        const updated: CategoryConfigItem = { ...c };
+        if (patch.bn !== undefined) {
+          updated.bn = patch.bn;
+          updated.name = patch.bn;
+        }
+        if (patch.en !== undefined) updated.en = patch.en;
+        if (patch.divisionId !== undefined) {
+          updated.divisionId = patch.divisionId;
+          updated.departmentId = patch.divisionId;
+        }
+        if (patch.iconName !== undefined) {
+          updated.iconName = patch.iconName;
+          updated.icon = patch.iconName;
+        }
+        if (patch.tint !== undefined) updated.tint = patch.tint;
+        if (patch.description !== undefined) updated.description = patch.description;
+        if (patch.formType !== undefined) updated.formType = patch.formType;
+        if (patch.sort_order !== undefined) {
+          const num = Number(patch.sort_order);
+          updated.sort_order = isNaN(num) ? 1 : num;
+          updated.displayOrder = isNaN(num) ? 1 : num;
+        }
+        if (patch.visible !== undefined) {
+          updated.visible = Boolean(patch.visible);
+          updated.isActive = Boolean(patch.visible);
+        }
+        if (patch.customIconUrl !== undefined) {
+          const trimmed = typeof patch.customIconUrl === "string" ? patch.customIconUrl.trim() : "";
+          if (trimmed) {
+            updated.customIconUrl = trimmed;
+          } else {
+            delete updated.customIconUrl;
+          }
+        }
+        return updated;
+      });
       await saveCategories(next);
     },
     [items, saveCategories]
   );
 
   const addCategory = useCallback(
-    async (newCat: Omit<CategoryConfigItem, "sort_order"> & { sort_order?: number }) => {
+    async (newCat: Omit<CategoryConfigItem, "sort_order"> & { sort_order?: number; customIconUrl?: string }) => {
       const rawSlug = typeof newCat?.slug === "string" ? newCat.slug : "";
       const cleanSlug = rawSlug
         .trim()
@@ -1082,29 +1203,42 @@ export function useCategories() {
       }
 
       const sortOrder = typeof newCat.sort_order === "number" ? newCat.sort_order : items.length + 1;
+      const cleanIconUrl = typeof newCat.customIconUrl === "string" && newCat.customIconUrl.trim().length > 0
+        ? newCat.customIconUrl.trim()
+        : undefined;
+
       const itemToInsert: CategoryConfigItem = {
-        ...newCat,
         id: cleanSlug,
         slug: cleanSlug,
         name: newCat.bn,
+        bn: newCat.bn,
+        en: newCat.en || cleanSlug,
         departmentId: newCat.divisionId || "division-2-shopping-market",
         divisionId: newCat.divisionId || "division-2-shopping-market",
+        iconName: newCat.iconName || "Users",
+        icon: newCat.iconName || "Users",
+        tint: newCat.tint || "from-emerald-500/15 to-emerald-700/10",
+        description: newCat.description || newCat.bn,
+        formType: newCat.formType || "general",
         displayOrder: sortOrder,
         sort_order: sortOrder,
         isActive: newCat.visible !== false,
         visible: newCat.visible !== false,
         isDeleted: false,
+        ...(cleanIconUrl ? { customIconUrl: cleanIconUrl } : {}),
       };
 
       // 1. Direct write to Firestore /categories/{cleanSlug}
       const docRef = doc(db, "categories", cleanSlug);
-      await setDoc(docRef, {
+      const insertPayload = sanitizeFirestorePayload({
         ...itemToInsert,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         createdBy: auth.currentUser?.email || "admin",
         updatedBy: auth.currentUser?.email || "admin",
       });
+
+      await setDoc(docRef, insertPayload);
 
       // Verification: Read back to confirm Firestore persistence
       const snap = await getDoc(docRef);
@@ -1135,20 +1269,18 @@ export function useCategories() {
       // 2. Direct write tombstone to Firestore /categories/{slug}
       // This ensures that all devices and listeners know authoritatively that this slug is deleted
       const docRef = doc(db, "categories", slug);
-      await setDoc(
-        docRef,
-        {
-          id: slug,
-          slug: slug,
-          isDeleted: true,
-          visible: false,
-          isActive: false,
-          deletedAt: new Date().toISOString(),
-          updatedAt: serverTimestamp(),
-          updatedBy: auth.currentUser?.email || "admin",
-        },
-        { merge: true }
-      );
+      const deletePayload = sanitizeFirestorePayload({
+        id: slug,
+        slug: slug,
+        isDeleted: true,
+        visible: false,
+        isActive: false,
+        deletedAt: new Date().toISOString(),
+        updatedAt: serverTimestamp(),
+        updatedBy: auth.currentUser?.email || "admin",
+      });
+
+      await setDoc(docRef, deletePayload, { merge: true });
 
       // Verify write to Firestore
       const verifySnap = await getDoc(docRef);

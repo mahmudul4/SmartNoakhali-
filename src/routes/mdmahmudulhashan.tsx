@@ -1801,6 +1801,7 @@ function CategoriesEditor() {
     formType: "shopping",
     sort_order: 100,
     visible: true,
+    customIconUrl: "",
   });
 
   const divisionMap = useMemo(() => {
@@ -1825,13 +1826,23 @@ function CategoriesEditor() {
 
   function startEdit(c: CategoryConfigItem) {
     setEditingSlug(c.slug);
-    setEditDraft({ ...c });
+    const draft: Partial<CategoryConfigItem> = { ...c };
+    if (draft.customIconUrl === undefined) {
+      delete draft.customIconUrl;
+    }
+    setEditDraft(draft);
   }
 
   async function saveEdit(slug: string) {
     setBusy(true);
     try {
-      await updateCategory(slug, editDraft);
+      const draftToSend: Partial<CategoryConfigItem> = { ...editDraft };
+      if (typeof draftToSend.customIconUrl === "string") {
+        draftToSend.customIconUrl = draftToSend.customIconUrl.trim();
+      } else if (draftToSend.customIconUrl === undefined) {
+        delete draftToSend.customIconUrl;
+      }
+      await updateCategory(slug, draftToSend);
       setEditingSlug(null);
       toast.success("ক্যাটাগরি সফলভাবে ফায়ারবেস ডেটাবেসে আপডেট ও সংরক্ষিত হয়েছে");
     } catch (e) {
@@ -1885,6 +1896,7 @@ function CategoriesEditor() {
     }
     setBusy(true);
     try {
+      const cleanCustomIcon = newCat.customIconUrl.trim();
       await addCategory({
         slug: newCat.slug.trim(),
         divisionId: newCat.divisionId,
@@ -1896,6 +1908,7 @@ function CategoriesEditor() {
         formType: newCat.formType,
         sort_order: Number(newCat.sort_order) || rawItems.length + 1,
         visible: newCat.visible,
+        ...(cleanCustomIcon ? { customIconUrl: cleanCustomIcon } : {}),
       });
       toast.success("নতুন ক্যাটাগরি সফলভাবে তৈরি ও ফায়ারবেসে সংরক্ষিত হয়েছে!");
       setNewCat({
@@ -1909,6 +1922,7 @@ function CategoriesEditor() {
         formType: "shopping",
         sort_order: rawItems.length + 2,
         visible: true,
+        customIconUrl: "",
       });
       setShowAdd(false);
     } catch (e) {
@@ -2175,6 +2189,12 @@ function CategoriesEditor() {
                   </option>
                 ))}
               </select>
+              <input
+                value={newCat.customIconUrl}
+                onChange={(e) => setNewCat({ ...newCat, customIconUrl: e.target.value })}
+                placeholder="কাস্টম আইকন URL (ঐচ্ছিক, https://...)"
+                className="rounded-xl border border-border bg-background px-3 py-2 text-xs sm:col-span-2"
+              />
             </div>
             <div className="flex gap-2">
               <button
