@@ -861,6 +861,19 @@ export function useCategories() {
   });
 
   useEffect(() => {
+    // Persistent deleted slugs set to prevent resurrection across snapshots
+    const deletedSlugsSet = new Set<string>();
+
+    try {
+      const raw = localStorage.getItem(LOCAL_CATEGORIES_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && Array.isArray(parsed.deletedSlugs)) {
+          parsed.deletedSlugs.forEach((s: string) => deletedSlugsSet.add(String(s)));
+        }
+      }
+    } catch {}
+
     // 1. Pull from Server Content API immediately on mount
     fetch(`/api/content?collection=settings&id=${CATEGORIES_CONFIG_ID}`)
       .then((r) => r.json())
@@ -883,12 +896,12 @@ export function useCategories() {
       (snapshot) => {
         if (!snapshot.empty) {
           const firestoreMap = new Map<string, CategoryConfigItem>();
-          const deletedSet = new Set<string>();
+          const deletedSet = new Set<string>(deletedSlugsSet);
 
           snapshot.forEach((docSnap) => {
             const data = docSnap.data();
             const slug = docSnap.id;
-            if (data.isDeleted === true) {
+            if (data.isDeleted === true || deletedSlugsSet.has(slug)) {
               deletedSet.add(slug);
             } else {
               const fallback = defaultCategories.find((d) => d.slug === slug);
@@ -926,12 +939,12 @@ export function useCategories() {
           // Merge with DEFAULT_CATEGORY_ITEMS only for categories not in firestoreMap and not deleted
           if (firestoreMap.size > 0) {
             for (const def of DEFAULT_CATEGORY_ITEMS) {
-              if (!firestoreMap.has(def.slug) && !deletedSet.has(def.slug)) {
+              if (!firestoreMap.has(def.slug) && !deletedSet.has(def.slug) && !deletedSlugsSet.has(def.slug)) {
                 firestoreMap.set(def.slug, { ...def });
               }
             }
             const mergedList = Array.from(firestoreMap.values())
-              .filter((c) => !deletedSet.has(c.slug) && c.isDeleted !== true)
+              .filter((c) => !deletedSet.has(c.slug) && !deletedSlugsSet.has(c.slug) && c.isDeleted !== true)
               .sort((a, b) => a.sort_order - b.sort_order);
 
             setItems(mergedList);
@@ -958,11 +971,21 @@ export function useCategories() {
       doc(db, "settings", CATEGORIES_CONFIG_ID),
       (docSnap) => {
         if (docSnap.exists()) {
-          const parsed = parseCategoryConfig(docSnap.data()?.logo_url);
-          if (parsed && parsed.length > 0) {
-            setItems(parsed);
+          const rawPayload = docSnap.data()?.logo_url;
+          if (rawPayload) {
             try {
-              localStorage.setItem(LOCAL_CATEGORIES_KEY, JSON.stringify(parsed));
+              const parsedRaw = JSON.parse(rawPayload);
+              if (parsedRaw && typeof parsedRaw === "object" && Array.isArray(parsedRaw.deletedSlugs)) {
+                parsedRaw.deletedSlugs.forEach((s: string) => deletedSlugsSet.add(String(s)));
+              }
+            } catch {}
+          }
+          const parsed = parseCategoryConfig(rawPayload);
+          if (parsed && parsed.length > 0) {
+            const sanitized = parsed.filter((c) => !deletedSlugsSet.has(c.slug));
+            setItems(sanitized);
+            try {
+              localStorage.setItem(LOCAL_CATEGORIES_KEY, JSON.stringify(sanitized));
             } catch {}
           }
         }
@@ -976,7 +999,7 @@ export function useCategories() {
     };
   }, []);
 
-  const saveCategories = useCallback(async (nextList: CategoryConfigItem[], deletedSlug?: string) => {
+  const saveCategories = useCallback(async (nextList: CategoryConfigItem[], deletedSlug?: string, restoredSlug?: string) => {
     let existingDeleted: string[] = [];
     try {
       const raw = localStorage.getItem(LOCAL_CATEGORIES_KEY);
@@ -988,7 +1011,10 @@ export function useCategories() {
       }
     } catch {}
 
-    const allDeleted = Array.from(new Set([...existingDeleted, ...(deletedSlug ? [deletedSlug] : [])]));
+    let allDeleted = Array.from(new Set([...existingDeleted, ...(deletedSlug ? [deletedSlug] : [])]));
+    if (restoredSlug) {
+      allDeleted = allDeleted.filter((s) => s !== restoredSlug);
+    }
 
     const normalized = nextList
       .filter((c) => c.slug !== "chat" && c.slug !== "app-download" && c.isDeleted !== true && !allDeleted.includes(c.slug))
@@ -1017,27 +1043,23 @@ export function useCategories() {
   const updateCategory = useCallback(
     async (slug: string, patch: Partial<CategoryConfigItem>) => {
       // 1. Direct write to Firestore /categories/{slug} with merge
-      try {
-        const docRef = doc(db, "categories", slug);
-        const updatePayload: Record<string, any> = {
-          ...patch,
-          updatedAt: serverTimestamp(),
-          updatedBy: auth.currentUser?.email || "admin",
-        };
-        if (patch.bn) updatePayload.name = patch.bn;
-        if (patch.divisionId) updatePayload.departmentId = patch.divisionId;
-        if (patch.sort_order !== undefined) updatePayload.displayOrder = patch.sort_order;
-        if (patch.visible !== undefined) updatePayload.isActive = patch.visible;
+      const docRef = doc(db, "categories", slug);
+      const updatePayload: Record<string, any> = {
+        ...patch,
+        updatedAt: serverTimestamp(),
+        updatedBy: auth.currentUser?.email || "admin",
+      };
+      if (patch.bn) updatePayload.name = patch.bn;
+      if (patch.divisionId) updatePayload.departmentId = patch.divisionId;
+      if (patch.sort_order !== undefined) updatePayload.displayOrder = patch.sort_order;
+      if (patch.visible !== undefined) updatePayload.isActive = patch.visible;
 
-        await setDoc(docRef, updatePayload, { merge: true });
+      await setDoc(docRef, updatePayload, { merge: true });
 
-        // Verification: read back
-        const verifiedSnap = await getDoc(docRef);
-        if (!verifiedSnap.exists()) {
-          console.warn(`Firestore category write verification warning for ${slug}`);
-        }
-      } catch (fsErr) {
-        console.error("Firestore /categories update error:", fsErr);
+      // Verification: read back
+      const verifiedSnap = await getDoc(docRef);
+      if (!verifiedSnap.exists()) {
+        throw new Error("ফায়ারবেস ডেটাবেসে ক্যাটাগরি আপডেট নিশ্চিত করা যায়নি।");
       }
 
       // 2. Update local state and mirror settings doc
@@ -1090,9 +1112,9 @@ export function useCategories() {
         throw new Error("ফায়ারবেস ডেটাবেসে ক্যাটাগরি সংরক্ষণ নিশ্চিত করা যায়নি");
       }
 
-      // 2. Update local state and mirror settings doc
-      const next: CategoryConfigItem[] = [...items, itemToInsert];
-      await saveCategories(next);
+      // 2. Update local state and mirror settings doc, restoring cleanSlug if previously deleted
+      const next: CategoryConfigItem[] = [...items.filter((c) => c.slug !== cleanSlug), itemToInsert];
+      await saveCategories(next, undefined, cleanSlug);
       return itemToInsert;
     },
     [items, saveCategories]
@@ -1110,36 +1132,31 @@ export function useCategories() {
         );
       }
 
-      if (hasRefs || options?.softDeleteOnly) {
-        // Soft Delete in Firestore /categories/{slug}
-        try {
-          const docRef = doc(db, "categories", slug);
-          await setDoc(
-            docRef,
-            {
-              isDeleted: true,
-              visible: false,
-              isActive: false,
-              deletedAt: new Date().toISOString(),
-              updatedAt: serverTimestamp(),
-              updatedBy: auth.currentUser?.email || "admin",
-            },
-            { merge: true }
-          );
-        } catch (err) {
-          console.error("Firestore soft-delete error:", err);
-        }
-      } else {
-        // Hard Delete from Firestore /categories/{slug}
-        try {
-          const docRef = doc(db, "categories", slug);
-          await deleteDoc(docRef);
-        } catch (err) {
-          console.error("Firestore deleteDoc error:", err);
-        }
+      // 2. Direct write tombstone to Firestore /categories/{slug}
+      // This ensures that all devices and listeners know authoritatively that this slug is deleted
+      const docRef = doc(db, "categories", slug);
+      await setDoc(
+        docRef,
+        {
+          id: slug,
+          slug: slug,
+          isDeleted: true,
+          visible: false,
+          isActive: false,
+          deletedAt: new Date().toISOString(),
+          updatedAt: serverTimestamp(),
+          updatedBy: auth.currentUser?.email || "admin",
+        },
+        { merge: true }
+      );
+
+      // Verify write to Firestore
+      const verifySnap = await getDoc(docRef);
+      if (!verifySnap.exists() || verifySnap.data()?.isDeleted !== true) {
+        throw new Error("ফায়ারবেস ডেটাবেসে ক্যাটাগরি ডিলিট স্ট্যাটাস নিশ্চিত করা যায়নি।");
       }
 
-      // 2. Remove from active state and persist deletedSlugs
+      // 3. Remove from active state and persist deletedSlugs to settings
       const next = items.filter((c) => c.slug !== slug);
       await saveCategories(next, slug);
     },
