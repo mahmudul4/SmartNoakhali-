@@ -9,10 +9,16 @@ import {
   Smartphone,
   Layers,
   Sparkles,
+  MapPin,
+  Building2,
+  Briefcase,
+  AlertTriangle,
+  Search,
 } from "lucide-react";
 import { useCategories, useDivisions } from "@/lib/store";
 import { BannerPopup } from "@/components/BannerPopup";
 import { MobileSearch } from "@/components/SiteHeader";
+import { SmartSearchModal } from "@/components/SmartSearchDialog";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -30,6 +36,7 @@ export const Route = createFileRoute("/")({
 
 function Index() {
   const [query, setQuery] = useState("");
+  const [smartSearchOpen, setSmartSearchOpen] = useState(false);
   const [selectedDivisionId, setSelectedDivisionId] = useState<string>("all");
   const { categories } = useCategories();
   const { divisions } = useDivisions();
@@ -101,6 +108,7 @@ function Index() {
         <MobileSearch
           value={query}
           onChange={setQuery}
+          onOpenDialog={() => setSmartSearchOpen(true)}
           placeholder="ডাক্তার, পুলিশ, আইনজীবী বা সেবা খুঁজুন..."
         />
       </div>
@@ -110,6 +118,61 @@ function Index() {
         <QuickLink to="/emergency-request" label="জরুরী রক্ত" tone="red" />
         <QuickLink to="/blood-donor" label="রক্তদাতা" tone="rose" />
         <QuickLink to="/donation" label="অনুদান তহবিল" tone="emerald" />
+      </div>
+
+      {/* 4 District Civic Service Hubs */}
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <Link
+          to="/map"
+          className="group flex items-center gap-2.5 rounded-2xl border border-border/80 bg-card p-2.5 shadow-sm transition hover:border-primary/40 hover:bg-muted/40 active:scale-95"
+        >
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <MapPin className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <p className="font-display text-xs font-bold text-foreground truncate">নোয়াখালী ম্যাপ</p>
+            <p className="text-[10px] text-muted-foreground truncate">৯ উপজেলা ও দূরত্ব</p>
+          </div>
+        </Link>
+
+        <Link
+          to="/directory"
+          className="group flex items-center gap-2.5 rounded-2xl border border-border/80 bg-card p-2.5 shadow-sm transition hover:border-primary/40 hover:bg-muted/40 active:scale-95"
+        >
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600">
+            <Building2 className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <p className="font-display text-xs font-bold text-foreground truncate">ডিরেক্টরি</p>
+            <p className="text-[10px] text-muted-foreground truncate">প্রতিষ্ঠান ও ব্যবসা</p>
+          </div>
+        </Link>
+
+        <Link
+          to="/career"
+          className="group flex items-center gap-2.5 rounded-2xl border border-border/80 bg-card p-2.5 shadow-sm transition hover:border-primary/40 hover:bg-muted/40 active:scale-95"
+        >
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600">
+            <Briefcase className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <p className="font-display text-xs font-bold text-foreground truncate">শিক্ষা ও ক্যারিয়ার</p>
+            <p className="text-[10px] text-muted-foreground truncate">চাকরি ও প্রতিষ্ঠান</p>
+          </div>
+        </Link>
+
+        <Link
+          to="/complaint-tracking"
+          className="group flex items-center gap-2.5 rounded-2xl border border-border/80 bg-card p-2.5 shadow-sm transition hover:border-primary/40 hover:bg-muted/40 active:scale-95"
+        >
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600">
+            <AlertTriangle className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <p className="font-display text-xs font-bold text-foreground truncate">অভিযোগ ট্র্যাকিং</p>
+            <p className="text-[10px] text-muted-foreground truncate">লাইভ অগ্রগতি</p>
+          </div>
+        </Link>
       </div>
 
       {/* 22 Major Divisions Horizontal Swipe & Scroll Section */}
@@ -359,6 +422,11 @@ function Index() {
         </p>
       </div>
 
+      <SmartSearchModal
+        isOpen={smartSearchOpen}
+        onClose={() => setSmartSearchOpen(false)}
+        initialQuery={query}
+      />
       <BannerPopup />
     </div>
   );

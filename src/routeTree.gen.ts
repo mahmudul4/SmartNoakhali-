@@ -24,6 +24,34 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as CategorySlugRouteImport } from './routes/category.$slug'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as DirectoryRouteImport } from './routes/directory'
+import { Route as CareerRouteImport } from './routes/career'
+import { Route as MapRouteImport } from './routes/map'
+import { Route as ComplaintTrackingRouteImport } from './routes/complaint-tracking'
+
+const DirectoryRoute = DirectoryRouteImport.update({
+  id: '/directory',
+  path: '/directory',
+  getParentRoute: () => rootRouteImport,
+} as any)
+
+const CareerRoute = CareerRouteImport.update({
+  id: '/career',
+  path: '/career',
+  getParentRoute: () => rootRouteImport,
+} as any)
+
+const MapRoute = MapRouteImport.update({
+  id: '/map',
+  path: '/map',
+  getParentRoute: () => rootRouteImport,
+} as any)
+
+const ComplaintTrackingRoute = ComplaintTrackingRouteImport.update({
+  id: '/complaint-tracking',
+  path: '/complaint-tracking',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
@@ -327,6 +355,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/directory': {
+      id: '/directory'
+      path: '/directory'
+      fullPath: '/directory'
+      preLoaderRoute: typeof DirectoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/career': {
+      id: '/career'
+      path: '/career'
+      fullPath: '/career'
+      preLoaderRoute: typeof CareerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/map': {
+      id: '/map'
+      path: '/map'
+      fullPath: '/map'
+      preLoaderRoute: typeof MapRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/complaint-tracking': {
+      id: '/complaint-tracking'
+      path: '/complaint-tracking'
+      fullPath: '/complaint-tracking'
+      preLoaderRoute: typeof ComplaintTrackingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -346,6 +402,10 @@ const rootRouteChildren: RootRouteChildren = {
   CategorySlugRoute: CategorySlugRoute,
   ProfileRoute: ProfileRoute,
   AdminRoute: AdminRoute,
+  DirectoryRoute: DirectoryRoute,
+  CareerRoute: CareerRoute,
+  MapRoute: MapRoute,
+  ComplaintTrackingRoute: ComplaintTrackingRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

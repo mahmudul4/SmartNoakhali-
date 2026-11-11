@@ -235,5 +235,46 @@ service cloud.firestore {
       allow get, list: if true;
       allow create, update, delete: if isValidId(logId);
     }
+
+    // =========================================================
+    // 19. /institutions/{institutionId} (District Business & Directory)
+    // =========================================================
+    match /institutions/{institutionId} {
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(institutionId);
+    }
+
+    // =========================================================
+    // 20. /job_circulars/{circularId} (Education & Career Circulars)
+    // =========================================================
+    match /job_circulars/{circularId} {
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(circularId);
+    }
+
+    // =========================================================
+    // 21. /complaint_tracking/{complaintId} (Citizen Complaints)
+    // =========================================================
+    match /complaint_tracking/{complaintId} {
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(complaintId);
+    }
+
+    // =========================================================
+    // 22. /user_favorites/{favId} (User Bookmarked Favorites)
+    // =========================================================
+    match /user_favorites/{favId} {
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(favId);
+    }
+
+    // =========================================================
+    // 23. /user_notifications/{notifId} (User In-App Notifications)
+    // =========================================================
+    match /user_notifications/{notifId} {
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(notifId);
+    }
   }
 }
+

@@ -134,6 +134,16 @@ import { SecurityPanel } from "@/components/security/SecurityPanel";
 import { RolePermissionsManager } from "@/components/RolePermissionsManager";
 import { WebsiteBrandingManager } from "@/components/WebsiteBrandingManager";
 import { TaskManager } from "@/components/TaskManager";
+import {
+  InstitutionsAdminPanel,
+  JobsAdminPanel,
+  ComplaintsAdminPanel,
+} from "@/components/DistrictAdminPanels";
+import {
+  useInstitutions,
+  useJobCirculars,
+  useComplaints,
+} from "@/lib/district-platform";
 import { useRolePermissions } from "@/lib/permissions";
 import {
   getLoginLockoutRemainingSeconds,
@@ -487,6 +497,9 @@ type Tab =
   | "apps"
   | "users"
   | "access"
+  | "institutions"
+  | "jobs"
+  | "complaints"
   | "settings"
   | "security";
 
@@ -535,6 +548,18 @@ function Dashboard({
     (l) => l.action_type === "delete" && !l.restored
   ).length;
   const { logo } = useLogo();
+  const institutionsHook = useInstitutions();
+  const jobsHook = useJobCirculars();
+  const complaintsHook = useComplaints();
+  const pendingInstitutionsCount = institutionsHook.institutions.filter(
+    (i: any) => i.status === "pending"
+  ).length;
+  const pendingJobsCount = jobsHook.jobCirculars.filter(
+    (c: any) => c.status === "pending"
+  ).length;
+  const pendingComplaintsCount = complaintsHook.complaints.filter(
+    (c: any) => c.status === "submitted" || c.status === "under_review"
+  ).length;
   const [tab, setTab] = useState<Tab>("overview");
   const [totalUsersCount, setTotalUsersCount] = useState<number>(0);
   const [refreshingDashboard, setRefreshingDashboard] = useState(false);
@@ -878,6 +903,33 @@ function Dashboard({
             অ্যাকসেস ও রিকোয়েস্ট
           </TabBtn>
         )}
+        {(isMainAdmin || hasPermission("moderate_submissions") || hasPermission("create_edit_content")) && (
+          <TabBtn
+            active={tab === "institutions"}
+            onClick={() => setTab("institutions")}
+            badge={pendingInstitutionsCount > 0 ? pendingInstitutionsCount : undefined}
+          >
+            🏢 প্রতিষ্ঠান ও ব্যবসা
+          </TabBtn>
+        )}
+        {(isMainAdmin || hasPermission("moderate_submissions") || hasPermission("create_edit_content")) && (
+          <TabBtn
+            active={tab === "jobs"}
+            onClick={() => setTab("jobs")}
+            badge={pendingJobsCount > 0 ? pendingJobsCount : undefined}
+          >
+            🎓 শিক্ষা ও ক্যারিয়ার
+          </TabBtn>
+        )}
+        {(isMainAdmin || hasPermission("moderate_submissions")) && (
+          <TabBtn
+            active={tab === "complaints"}
+            onClick={() => setTab("complaints")}
+            badge={pendingComplaintsCount > 0 ? pendingComplaintsCount : undefined}
+          >
+            📢 নাগরিক অভিযোগ
+          </TabBtn>
+        )}
         {(isMainAdmin || hasPermission("manage_settings")) && (
           <TabBtn active={tab === "settings"} onClick={() => setTab("settings")}>
             সেটিংস
@@ -965,6 +1017,18 @@ function Dashboard({
         {tab === "users" && (isMainAdmin || hasPermission("manage_users")) && <UsersEditor />}
 
         {tab === "access" && isMainAdmin && <AccessEditor />}
+
+        {tab === "institutions" && (isMainAdmin || hasPermission("moderate_submissions") || hasPermission("create_edit_content")) && (
+          <InstitutionsAdminPanel />
+        )}
+
+        {tab === "jobs" && (isMainAdmin || hasPermission("moderate_submissions") || hasPermission("create_edit_content")) && (
+          <JobsAdminPanel />
+        )}
+
+        {tab === "complaints" && (isMainAdmin || hasPermission("moderate_submissions")) && (
+          <ComplaintsAdminPanel />
+        )}
 
         {tab === "settings" && (isMainAdmin || hasPermission("manage_settings")) && (
           <SettingsAdminPanel />
