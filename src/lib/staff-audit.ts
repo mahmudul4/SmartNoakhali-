@@ -1,5 +1,17 @@
 import { useEffect, useState, useCallback } from "react";
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  setDoc,
+  updateDoc,
+  serverTimestamp,
+} from "firebase/firestore";
 import {
   auth,
   db,
@@ -352,6 +364,35 @@ export async function syncStaffAuditLogs(): Promise<StaffActivityLogEntry[]> {
   return current;
 }
 
+const SENSITIVE_KEY_PATTERN =
+  /pass|password|passwordhash|secret|token|apikey|api_key|smtppass|otp|pin|privatekey|credential|auth_code/i;
+
+export function redactSensitiveFields<T = unknown>(input: T, depth = 0): T {
+  if (depth > 6 || input === null || input === undefined) return input;
+  if (typeof input === "string") {
+    if (input.startsWith("data:") && input.length > 400) {
+      return "[DATA_URI_REDACTED]" as unknown as T;
+    }
+    return input;
+  }
+  if (Array.isArray(input)) {
+    return input.slice(0, 50).map((item) => redactSensitiveFields(item, depth + 1)) as unknown as T;
+  }
+  if (typeof input === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+      if (typeof v === "function" || v === undefined) continue;
+      if (SENSITIVE_KEY_PATTERN.test(k)) {
+        out[k] = "[REDACTED]";
+      } else {
+        out[k] = redactSensitiveFields(v, depth + 1);
+      }
+    }
+    return out as unknown as T;
+  }
+  return input;
+}
+
 export async function recordStaffActivity(params: {
   action_type: AuditActionType;
   action_label: string;
@@ -364,7 +405,7 @@ export async function recordStaffActivity(params: {
   collection_name?: StaffActivityLogEntry["collection_name"];
 }): Promise<StaffActivityLogEntry> {
   const actor = resolveCurrentStaffActor();
-  const cleanSnapshot = params.deleted_snapshot
+  const rawFiltered = params.deleted_snapshot
     ? Object.fromEntries(
         Object.entries(params.deleted_snapshot).filter(
           ([k, v]) =>
@@ -375,6 +416,9 @@ export async function recordStaffActivity(params: {
             typeof v !== "function"
         )
       )
+    : null;
+  const cleanSnapshot = rawFiltered
+    ? (redactSensitiveFields(rawFiltered) as Record<string, unknown>)
     : null;
 
   const entry: StaffActivityLogEntry = {
@@ -602,6 +646,273 @@ export function useStaffAuditLogs() {
       window.removeEventListener("sn-staff-audit-updated", onLocalUpdate);
     };
   }, [refresh]);
+
+  return { logs, loading, refresh };
+}
+
+// ============================================================================
+// Immutable Super Admin Audit History (/admin_audit_logs)
+// ============================================================================
+export type SuperAuditAction =
+  | "create"
+  | "edit"
+  | "delete"
+  | "trash"
+  | "restore"
+  | "approve"
+  | "reject"
+  | "role_change"
+  | "config_update"
+  | "media_update"
+  | "notification_send"
+  | "backup_export";
+
+export interface SuperAdminAuditLog {
+  id: string;
+  actor_uid: string;
+  actor_email: string;
+  actor_name: string;
+  actor_role: string;
+  action: SuperAuditAction;
+  module: string;
+  target_id: string;
+  target_label: string;
+  summary: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+}
+
+const LOCAL_SUPER_AUDIT_KEY = "sn_super_admin_audit_logs_v1";
+const MAX_SUPER_AUDIT = 300;
+
+function readLocalSuperAudit(): SuperAdminAuditLog[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_SUPER_AUDIT_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+function writeLocalSuperAudit(list: SuperAdminAuditLog[]) {
+  try {
+    const sorted = [...list]
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, MAX_SUPER_AUDIT);
+    localStorage.setItem(LOCAL_SUPER_AUDIT_KEY, JSON.stringify(sorted));
+  } catch {
+    // ignore
+  }
+}
+
+export async function recordSuperAdminAudit(params: {
+  action: SuperAuditAction;
+  module: string;
+  target_id: string;
+  target_label: string;
+  summary: string;
+  metadata?: Record<string, unknown>;
+}): Promise<SuperAdminAuditLog> {
+  const actor = resolveCurrentStaffActor();
+  const id = `saud_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const nowIso = new Date().toISOString();
+  const safeMetadata = params.metadata
+    ? (redactSensitiveFields(params.metadata) as Record<string, unknown>)
+    : undefined;
+
+  const entry: SuperAdminAuditLog = {
+    id,
+    actor_uid: sanitizeString(actor.actor_id, 128, "super_admin"),
+    actor_email: sanitizeString(actor.actor_email, 254, SUPER_ADMIN_EMAIL),
+    actor_name: sanitizeString(actor.actor_name, 120, "Super Admin"),
+    actor_role: sanitizeString(actor.actor_role, 40, "super_admin"),
+    action: params.action,
+    module: sanitizeString(params.module, 60, "system"),
+    target_id: sanitizeString(String(params.target_id || "system"), 128, "system"),
+    target_label: sanitizeString(String(params.target_label || "System"), 200, "System"),
+    summary: sanitizeString(String(params.summary || ""), 500, ""),
+    ...(safeMetadata ? { metadata: safeMetadata } : {}),
+    created_at: nowIso,
+  };
+
+  // Cache locally (append-only)
+  const local = readLocalSuperAudit();
+  writeLocalSuperAudit([entry, ...local.filter((x) => x.id !== entry.id)]);
+
+  try {
+    window.dispatchEvent(new CustomEvent("sn-super-audit-updated"));
+  } catch {
+    // ignore
+  }
+
+  // Persist to immutable server endpoint
+  void fetch("/api/audit/super-record", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ entry }),
+  }).catch(() => {});
+
+  // Persist to Firestore immutable collection /admin_audit_logs/{logId}
+  if (auth.currentUser?.emailVerified && isSuperAdminEmail(auth.currentUser.email)) {
+    try {
+      const metadataStr = safeMetadata ? sanitizeString(JSON.stringify(safeMetadata), 4000, "{}") : "";
+      await setDoc(doc(db, "admin_audit_logs", id), {
+        actor_uid: entry.actor_uid,
+        actor_email: entry.actor_email,
+        actor_name: entry.actor_name,
+        actor_role: entry.actor_role,
+        action: entry.action,
+        module: entry.module,
+        target_id: entry.target_id,
+        target_label: entry.target_label,
+        summary: entry.summary,
+        metadata_json: metadataStr,
+        created_at: nowIso,
+        createdAt: serverTimestamp(),
+      });
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  return entry;
+}
+
+export function useSuperAdminAuditLogs(enabled = true) {
+  const [logs, setLogs] = useState<SuperAdminAuditLog[]>(() => readLocalSuperAudit());
+  const [loading, setLoading] = useState(true);
+
+  const mergeAndSet = useCallback((incoming: SuperAdminAuditLog[]) => {
+    const map = new Map<string, SuperAdminAuditLog>();
+    for (const item of readLocalSuperAudit()) {
+      if (item?.id) map.set(item.id, item);
+    }
+    for (const item of incoming) {
+      if (item?.id) map.set(item.id, item);
+    }
+    const merged = Array.from(map.values())
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, MAX_SUPER_AUDIT);
+    writeLocalSuperAudit(merged);
+    setLogs(merged);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const resp = await fetch("/api/audit/super-logs");
+      if (resp.ok && (resp.headers.get("content-type") || "").includes("application/json")) {
+        const data = await resp.json();
+        if (Array.isArray(data.logs)) {
+          mergeAndSet(data.logs as SuperAdminAuditLog[]);
+        }
+      }
+      if (auth.currentUser?.emailVerified && isSuperAdminEmail(auth.currentUser.email)) {
+        const snap = await getDocs(
+          query(collection(db, "admin_audit_logs"), orderBy("createdAt", "desc"), limit(150))
+        ).catch(() => null);
+        if (snap) {
+          const fsLogs: SuperAdminAuditLog[] = snap.docs.map((d) => {
+            const x = d.data();
+            let parsedMeta: Record<string, unknown> | undefined;
+            if (typeof x.metadata_json === "string" && x.metadata_json.trim()) {
+              try {
+                parsedMeta = JSON.parse(x.metadata_json);
+              } catch {
+                // ignore
+              }
+            }
+            return {
+              id: d.id,
+              actor_uid: String(x.actor_uid || ""),
+              actor_email: String(x.actor_email || ""),
+              actor_name: String(x.actor_name || "Super Admin"),
+              actor_role: String(x.actor_role || "super_admin"),
+              action: (x.action as SuperAuditAction) || "edit",
+              module: String(x.module || "system"),
+              target_id: String(x.target_id || ""),
+              target_label: String(x.target_label || ""),
+              summary: String(x.summary || ""),
+              metadata: parsedMeta,
+              created_at:
+                typeof x.created_at === "string"
+                  ? x.created_at
+                  : x.createdAt?.toDate?.()?.toISOString?.() || new Date().toISOString(),
+            };
+          });
+          mergeAndSet(fsLogs);
+        }
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [enabled, mergeAndSet]);
+
+  useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
+    void refresh();
+    const onUpdate = () => setLogs(readLocalSuperAudit());
+    window.addEventListener("sn-super-audit-updated", onUpdate);
+
+    let unsub: (() => void) | undefined;
+    if (auth.currentUser?.emailVerified && isSuperAdminEmail(auth.currentUser.email)) {
+      const q = query(
+        collection(db, "admin_audit_logs"),
+        orderBy("createdAt", "desc"),
+        limit(120)
+      );
+      unsub = onSnapshot(
+        q,
+        (snap) => {
+          const fsLogs: SuperAdminAuditLog[] = snap.docs.map((d) => {
+            const x = d.data();
+            let parsedMeta: Record<string, unknown> | undefined;
+            if (typeof x.metadata_json === "string" && x.metadata_json.trim()) {
+              try {
+                parsedMeta = JSON.parse(x.metadata_json);
+              } catch {
+                // ignore
+              }
+            }
+            return {
+              id: d.id,
+              actor_uid: String(x.actor_uid || ""),
+              actor_email: String(x.actor_email || ""),
+              actor_name: String(x.actor_name || "Super Admin"),
+              actor_role: String(x.actor_role || "super_admin"),
+              action: (x.action as SuperAuditAction) || "edit",
+              module: String(x.module || "system"),
+              target_id: String(x.target_id || ""),
+              target_label: String(x.target_label || ""),
+              summary: String(x.summary || ""),
+              metadata: parsedMeta,
+              created_at:
+                typeof x.created_at === "string"
+                  ? x.created_at
+                  : x.createdAt?.toDate?.()?.toISOString?.() || new Date().toISOString(),
+            };
+          });
+          mergeAndSet(fsLogs);
+        },
+        () => {}
+      );
+    }
+
+    return () => {
+      window.removeEventListener("sn-super-audit-updated", onUpdate);
+      if (unsub) unsub();
+    };
+  }, [enabled, refresh, mergeAndSet]);
 
   return { logs, loading, refresh };
 }

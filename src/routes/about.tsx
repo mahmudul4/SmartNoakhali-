@@ -81,7 +81,7 @@ function About() {
             </p>
           </div>
           <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
-            {activeServices.length} টি সেবা সক্রিয়
+            সক্রিয় সেবাসমূহ
           </span>
         </div>
 

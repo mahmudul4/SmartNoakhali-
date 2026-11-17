@@ -42,6 +42,10 @@ export const STAFF_PROFILES_CONFIG_ID = "staff_profiles_config";
 export const APP_PACKAGES_CONFIG_ID = "app_packages_config";
 export const SITE_META_CONFIG_ID = "site_meta_config";
 export const SERVICES_CONFIG_ID = "services_config";
+export const HERO_BANNER_CONFIG_ID = "hero_banner_config";
+export const HOMEPAGE_CONFIG_ID = "homepage_config";
+export const WEBSITE_CONTENT_CONFIG_ID = "website_content_config";
+export const MEDIA_LIBRARY_CONFIG_ID = "media_library_config";
 
 export const LOCAL_LOGO_KEY = "sn_site_logo_v3";
 export const LOCAL_DIVISIONS_KEY = "sn_divisions_config_v1";
@@ -51,6 +55,10 @@ export const LOCAL_STAFF_PROFILES_KEY = "sn_staff_profiles_v1";
 export const LOCAL_APP_PACKAGES_KEY = "sn_app_packages_v1";
 export const LOCAL_SITE_META_KEY = "sn_site_meta_v1";
 export const LOCAL_SERVICES_KEY = "sn_services_config_v1";
+export const LOCAL_HERO_BANNER_KEY = "sn_hero_banner_config_v1";
+export const LOCAL_HOMEPAGE_KEY = "sn_homepage_config_v1";
+export const LOCAL_WEBSITE_CONTENT_KEY = "sn_website_content_config_v1";
+export const LOCAL_MEDIA_LIBRARY_KEY = "sn_media_library_v1";
 
 /**
  * Strips any undefined fields recursively so Firestore setDoc/updateDoc never fails.
@@ -106,8 +114,16 @@ export async function upsertSettingDoc(
       localStorage.setItem(LOCAL_SITE_META_KEY, cleanUrl);
     } else if (settingId === SERVICES_CONFIG_ID) {
       localStorage.setItem(LOCAL_SERVICES_KEY, cleanUrl);
+    } else if (settingId === HERO_BANNER_CONFIG_ID) {
+      localStorage.setItem(LOCAL_HERO_BANNER_KEY, cleanUrl);
     } else if (settingId === DIVISIONS_CONFIG_ID) {
       localStorage.setItem(LOCAL_DIVISIONS_KEY, cleanUrl);
+    } else if (settingId === HOMEPAGE_CONFIG_ID) {
+      localStorage.setItem(LOCAL_HOMEPAGE_KEY, cleanUrl);
+    } else if (settingId === WEBSITE_CONTENT_CONFIG_ID) {
+      localStorage.setItem(LOCAL_WEBSITE_CONTENT_KEY, cleanUrl);
+    } else if (settingId === MEDIA_LIBRARY_CONFIG_ID) {
+      localStorage.setItem(LOCAL_MEDIA_LIBRARY_KEY, cleanUrl);
     }
   } catch {
     // ignore
@@ -533,6 +549,8 @@ export interface DivisionConfigItem {
   visible: boolean;
   sort_order: number;
   customIconUrl?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
 }
 
 export const DEFAULT_DIVISION_ITEMS: DivisionConfigItem[] = DIVISIONS.map((d, idx) => {
@@ -545,6 +563,7 @@ export const DEFAULT_DIVISION_ITEMS: DivisionConfigItem[] = DIVISIONS.map((d, id
     description: d.description,
     visible: true,
     sort_order: d.sort_order || idx + 1,
+    isDeleted: false,
   };
   if (d.customIconUrl) {
     item.customIconUrl = d.customIconUrl;
@@ -552,39 +571,81 @@ export const DEFAULT_DIVISION_ITEMS: DivisionConfigItem[] = DIVISIONS.map((d, id
   return item;
 });
 
-function parseDivisionConfig(raw: string | null | undefined): DivisionConfigItem[] | null {
+interface ParsedDivisionWrapper {
+  items: DivisionConfigItem[];
+  deletedDivisionIds: string[];
+  trashedDivisions: DivisionConfigItem[];
+}
+
+function parseDivisionConfigWrapper(raw: string | null | undefined): ParsedDivisionWrapper | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      const divMap = new Map<string, DivisionConfigItem>();
-      // 1. Seed with all 22 default divisions
-      for (const d of DEFAULT_DIVISION_ITEMS) {
-        divMap.set(d.id, { ...d });
+    let rawList: any[] = [];
+    const deletedIds = new Set<string>();
+    const trashedMap = new Map<string, DivisionConfigItem>();
+
+    if (Array.isArray(parsed)) {
+      rawList = parsed;
+    } else if (parsed && typeof parsed === "object" && Array.isArray(parsed.items)) {
+      rawList = parsed.items;
+      if (Array.isArray(parsed.deletedDivisionIds)) {
+        parsed.deletedDivisionIds.forEach((id: string) => deletedIds.add(String(id)));
       }
-      // 2. Apply any custom edits or overrides
-      for (const item of parsed) {
+      if (Array.isArray(parsed.trashedDivisions)) {
+        for (const t of parsed.trashedDivisions) {
+          if (t && typeof t.id === "string") {
+            trashedMap.set(t.id, { ...t, isDeleted: true });
+            deletedIds.add(t.id);
+          }
+        }
+      }
+    }
+
+    if (rawList.length > 0 || deletedIds.size > 0) {
+      const divMap = new Map<string, DivisionConfigItem>();
+      // 1. Seed defaults unless explicitly deleted
+      for (const d of DEFAULT_DIVISION_ITEMS) {
+        if (!deletedIds.has(d.id)) {
+          divMap.set(d.id, { ...d });
+        }
+      }
+      // 2. Apply customizations or custom divisions
+      for (const item of rawList) {
         if (!item || typeof item.id !== "string") continue;
-        const id = String(item.id);
+        const id = String(item.id).trim();
+        if (!id) continue;
         const fallback = DIVISIONS.find((d) => d.id === id);
         const iconName = item.iconName && CATEGORY_ICONS[item.iconName] ? item.iconName : fallback?.iconName || "PhoneCall";
         const iconUrl = item.customIconUrl || fallback?.customIconUrl;
         const entry: DivisionConfigItem = {
           id,
-          bn: String(item.bn || fallback?.bn || item.id),
-          en: String(item.en || fallback?.en || item.id),
+          bn: String(item.bn || fallback?.bn || id),
+          en: String(item.en || fallback?.en || id),
           iconName,
           tint: String(item.tint || fallback?.tint || "from-emerald-500/20 to-teal-700/10"),
           description: String(item.description || fallback?.description || ""),
           visible: item.visible !== false,
           sort_order: typeof item.sort_order === "number" ? item.sort_order : (fallback?.sort_order || 99),
+          isDeleted: item.isDeleted === true || deletedIds.has(id),
+          deletedAt: item.deletedAt,
         };
         if (iconUrl) {
           entry.customIconUrl = iconUrl;
         }
-        divMap.set(id, entry);
+        if (entry.isDeleted) {
+          deletedIds.add(id);
+          trashedMap.set(id, entry);
+          divMap.delete(id);
+        } else {
+          divMap.set(id, entry);
+        }
       }
-      return Array.from(divMap.values()).sort((a, b) => a.sort_order - b.sort_order);
+      return {
+        items: Array.from(divMap.values()).sort((a, b) => a.sort_order - b.sort_order),
+        deletedDivisionIds: Array.from(deletedIds),
+        trashedDivisions: Array.from(trashedMap.values()),
+      };
     }
   } catch {
     // ignore
@@ -611,12 +672,22 @@ function toResolvedDivision(item: DivisionConfigItem): Division {
 }
 
 export function useDivisions() {
-  const [items, setItems] = useState<DivisionConfigItem[]>(() => {
+  const [state, setState] = useState<ParsedDivisionWrapper>(() => {
     try {
       const cached = localStorage.getItem(LOCAL_DIVISIONS_KEY);
-      return parseDivisionConfig(cached) ?? DEFAULT_DIVISION_ITEMS;
+      return (
+        parseDivisionConfigWrapper(cached) ?? {
+          items: DEFAULT_DIVISION_ITEMS,
+          deletedDivisionIds: [],
+          trashedDivisions: [],
+        }
+      );
     } catch {
-      return DEFAULT_DIVISION_ITEMS;
+      return {
+        items: DEFAULT_DIVISION_ITEMS,
+        deletedDivisionIds: [],
+        trashedDivisions: [],
+      };
     }
   });
 
@@ -625,11 +696,14 @@ export function useDivisions() {
       .then((r) => r.json())
       .then((d) => {
         if (d?.item?.logo_url) {
-          const parsed = parseDivisionConfig(d.item.logo_url);
+          const parsed = parseDivisionConfigWrapper(d.item.logo_url);
           if (parsed) {
-            setItems(parsed);
+            setState(parsed);
             try {
-              localStorage.setItem(LOCAL_DIVISIONS_KEY, JSON.stringify(parsed));
+              localStorage.setItem(
+                LOCAL_DIVISIONS_KEY,
+                JSON.stringify({ ...parsed, updatedAt: new Date().toISOString() })
+              );
             } catch {}
           }
         }
@@ -640,11 +714,14 @@ export function useDivisions() {
       doc(db, "settings", DIVISIONS_CONFIG_ID),
       (docSnap) => {
         if (docSnap.exists()) {
-          const parsed = parseDivisionConfig(docSnap.data()?.logo_url);
+          const parsed = parseDivisionConfigWrapper(docSnap.data()?.logo_url);
           if (parsed) {
-            setItems(parsed);
+            setState(parsed);
             try {
-              localStorage.setItem(LOCAL_DIVISIONS_KEY, JSON.stringify(parsed));
+              localStorage.setItem(
+                LOCAL_DIVISIONS_KEY,
+                JSON.stringify({ ...parsed, updatedAt: new Date().toISOString() })
+              );
             } catch {}
           }
         }
@@ -654,24 +731,188 @@ export function useDivisions() {
     return () => unsubDirect();
   }, []);
 
-  const saveDivisionsConfig = useCallback(async (next: DivisionConfigItem[]) => {
-    const serialized = JSON.stringify(next);
+  const persistDivisionsState = useCallback(async (nextState: ParsedDivisionWrapper) => {
+    const normalizedItems = [...nextState.items]
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((d, idx) => ({ ...d, sort_order: idx + 1, isDeleted: false }));
+    const payload = {
+      items: normalizedItems,
+      deletedDivisionIds: Array.from(new Set(nextState.deletedDivisionIds)),
+      trashedDivisions: nextState.trashedDivisions,
+      updatedAt: new Date().toISOString(),
+    };
+    const serialized = JSON.stringify(payload);
     try {
       localStorage.setItem(LOCAL_DIVISIONS_KEY, serialized);
     } catch {}
-    setItems(next);
+    setState({
+      items: normalizedItems,
+      deletedDivisionIds: payload.deletedDivisionIds,
+      trashedDivisions: payload.trashedDivisions,
+    });
     await upsertSettingDoc(DIVISIONS_CONFIG_ID, serialized);
   }, []);
 
-  const updateDivision = useCallback(
-    async (id: string, patch: Partial<DivisionConfigItem>) => {
-      const next = items.map((d) => (d.id === id ? { ...d, ...patch } : d));
-      await saveDivisionsConfig(next);
+  const saveDivisionsConfig = useCallback(
+    async (next: DivisionConfigItem[]) => {
+      await persistDivisionsState({
+        items: next,
+        deletedDivisionIds: state.deletedDivisionIds,
+        trashedDivisions: state.trashedDivisions,
+      });
     },
-    [items, saveDivisionsConfig]
+    [persistDivisionsState, state.deletedDivisionIds, state.trashedDivisions]
   );
 
-  const resolvedDivisions = useMemo(() => items.map(toResolvedDivision), [items]);
+  const addDivision = useCallback(
+    async (newDiv: Omit<DivisionConfigItem, "sort_order"> & { sort_order?: number }) => {
+      const cleanId = String(newDiv.id || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, "_");
+      if (!cleanId) throw new Error("সঠিক বিভাগ ID (ইংরেজি অক্ষর) দিন");
+      if (state.items.some((d) => d.id.toLowerCase() === cleanId)) {
+        throw new Error("এই ID-র বিভাগ ইতিমধ্যে বিদ্যমান রয়েছে");
+      }
+      const sortOrder = typeof newDiv.sort_order === "number" ? newDiv.sort_order : state.items.length + 1;
+      const entry: DivisionConfigItem = {
+        id: cleanId,
+        bn: String(newDiv.bn || cleanId).trim(),
+        en: String(newDiv.en || cleanId).trim(),
+        iconName: newDiv.iconName || "Layers",
+        tint: newDiv.tint || "from-emerald-500/20 to-teal-700/10",
+        description: String(newDiv.description || "").trim(),
+        visible: newDiv.visible !== false,
+        sort_order: sortOrder,
+        isDeleted: false,
+        ...(newDiv.customIconUrl?.trim() ? { customIconUrl: newDiv.customIconUrl.trim() } : {}),
+      };
+
+      await setDoc(
+        doc(db, "departments", cleanId),
+        sanitizeFirestorePayload({
+          ...entry,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        })
+      );
+
+      await persistDivisionsState({
+        items: [...state.items, entry],
+        deletedDivisionIds: state.deletedDivisionIds.filter((id) => id !== cleanId),
+        trashedDivisions: state.trashedDivisions.filter((t) => t.id !== cleanId),
+      });
+      return entry;
+    },
+    [persistDivisionsState, state]
+  );
+
+  const updateDivision = useCallback(
+    async (id: string, patch: Partial<DivisionConfigItem>) => {
+      const next = state.items.map((d) => (d.id === id ? { ...d, ...patch } : d));
+      const target = next.find((d) => d.id === id);
+      if (target) {
+        await setDoc(
+          doc(db, "departments", id),
+          sanitizeFirestorePayload({
+            ...target,
+            updatedAt: serverTimestamp(),
+          }),
+          { merge: true }
+        ).catch(() => {});
+      }
+      await persistDivisionsState({
+        items: next,
+        deletedDivisionIds: state.deletedDivisionIds,
+        trashedDivisions: state.trashedDivisions,
+      });
+    },
+    [persistDivisionsState, state]
+  );
+
+  const deleteDivision = useCallback(
+    async (id: string, options?: { softDeleteOnly?: boolean; hardDelete?: boolean }) => {
+      const target = state.items.find((d) => d.id === id);
+      if (!target) return;
+      const isHard = Boolean(options?.hardDelete && !options?.softDeleteOnly);
+      if (isHard) {
+        await deleteDoc(doc(db, "departments", id)).catch(() => {});
+      } else {
+        await setDoc(
+          doc(db, "departments", id),
+          sanitizeFirestorePayload({
+            id,
+            isDeleted: true,
+            visible: false,
+            deletedAt: new Date().toISOString(),
+            updatedAt: serverTimestamp(),
+          }),
+          { merge: true }
+        ).catch(() => {});
+      }
+
+      const trashedEntry: DivisionConfigItem = {
+        ...target,
+        isDeleted: true,
+        visible: false,
+        deletedAt: new Date().toISOString(),
+      };
+
+      await persistDivisionsState({
+        items: state.items.filter((d) => d.id !== id),
+        deletedDivisionIds: Array.from(new Set([...state.deletedDivisionIds, id])),
+        trashedDivisions: isHard
+          ? state.trashedDivisions.filter((t) => t.id !== id)
+          : [...state.trashedDivisions.filter((t) => t.id !== id), trashedEntry],
+      });
+    },
+    [persistDivisionsState, state]
+  );
+
+  const restoreDivision = useCallback(
+    async (id: string) => {
+      const trashed = state.trashedDivisions.find((t) => t.id === id);
+      const fallback = DEFAULT_DIVISION_ITEMS.find((d) => d.id === id);
+      const restored: DivisionConfigItem | undefined = trashed
+        ? { ...trashed, isDeleted: false, visible: true, deletedAt: undefined }
+        : fallback
+          ? { ...fallback, isDeleted: false, visible: true }
+          : undefined;
+      if (!restored) throw new Error("পুনরুদ্ধারের জন্য বিভাগ খুঁজে পাওয়া যায়নি");
+
+      await setDoc(
+        doc(db, "departments", id),
+        sanitizeFirestorePayload({
+          ...restored,
+          updatedAt: serverTimestamp(),
+        }),
+        { merge: true }
+      ).catch(() => {});
+
+      await persistDivisionsState({
+        items: [...state.items.filter((d) => d.id !== id), restored],
+        deletedDivisionIds: state.deletedDivisionIds.filter((x) => x !== id),
+        trashedDivisions: state.trashedDivisions.filter((t) => t.id !== id),
+      });
+    },
+    [persistDivisionsState, state]
+  );
+
+  const reorderDivisions = useCallback(
+    async (id: string, direction: "up" | "down") => {
+      const sorted = [...state.items].sort((a, b) => a.sort_order - b.sort_order);
+      const idx = sorted.findIndex((d) => d.id === id);
+      if (idx === -1) return;
+      const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= sorted.length) return;
+      const [moved] = sorted.splice(idx, 1);
+      sorted.splice(targetIdx, 0, moved);
+      await saveDivisionsConfig(sorted);
+    },
+    [saveDivisionsConfig, state.items]
+  );
+
+  const resolvedDivisions = useMemo(() => state.items.map(toResolvedDivision), [state.items]);
   const visibleDivisions = useMemo(
     () => resolvedDivisions.filter((d) => d.visible !== false).sort((a, b) => a.sort_order - b.sort_order),
     [resolvedDivisions]
@@ -680,9 +921,14 @@ export function useDivisions() {
   return {
     divisions: visibleDivisions,
     allDivisions: resolvedDivisions,
-    rawDivisions: items,
+    rawDivisions: state.items,
+    trashedDivisions: state.trashedDivisions,
     saveDivisionsConfig,
+    addDivision,
     updateDivision,
+    deleteDivision,
+    restoreDivision,
+    reorderDivisions,
     getDivisionById: (id: string) => resolvedDivisions.find((d) => d.id === id),
   };
 }
@@ -701,6 +947,7 @@ export interface CategoryConfigItem {
   description: string;
   formType?: string;
   customIconUrl?: string;
+  customRoute?: string;
   displayOrder?: number;
   sort_order: number;
   isActive?: boolean;
@@ -773,73 +1020,141 @@ const DEFAULT_CATEGORY_ITEMS: CategoryConfigItem[] = defaultCategories
     return item;
   });
 
-function parseCategoryConfig(raw: string | null | undefined): CategoryConfigItem[] | null {
+export function normalizeCategorySlug(raw: string): string {
+  return String(raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "-");
+}
+
+function canonicalMatchKey(raw: string): string {
+  return normalizeCategorySlug(raw).replace(/_/g, "-");
+}
+
+export interface DuplicateCategoryDiagnostics {
+  aliasDocIds: Array<{ docId: string; canonicalSlug: string; bn: string; divisionId: string }>;
+  sameDivisionDuplicates: Array<{ divisionId: string; bn: string; slugs: string[] }>;
+  crossDivisionSharedNames: Array<{ bn: string; entries: Array<{ slug: string; divisionId: string }> }>;
+  unassignedOrInvalidDivision: Array<{ slug: string; bn: string; divisionId: string }>;
+}
+
+const VALID_DIVISION_ID_SET = new Set(DIVISIONS.map((d) => d.id));
+
+function resolveSafeDivisionId(rawDivId: unknown, fallbackDivId?: string): string {
+  const clean = typeof rawDivId === "string" ? rawDivId.trim() : "";
+  if (clean && clean !== "division-2-shopping-market") {
+    return clean;
+  }
+  if (fallbackDivId && fallbackDivId !== "division-2-shopping-market") {
+    return fallbackDivId;
+  }
+  return "other_services";
+}
+
+interface ParsedCategoryWrapper {
+  items: CategoryConfigItem[];
+  deletedSlugs: string[];
+  trashedItems: CategoryConfigItem[];
+}
+
+function parseCategoryConfigWrapper(raw: string | null | undefined): ParsedCategoryWrapper | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
     let itemsList: any[] = [];
     const deletedSlugs = new Set<string>();
+    const trashedMap = new Map<string, CategoryConfigItem>();
 
     if (Array.isArray(parsed)) {
       itemsList = parsed;
     } else if (parsed && typeof parsed === "object" && Array.isArray(parsed.items)) {
       itemsList = parsed.items;
       if (Array.isArray(parsed.deletedSlugs)) {
-        parsed.deletedSlugs.forEach((s: string) => deletedSlugs.add(String(s)));
+        parsed.deletedSlugs.forEach((s: string) => deletedSlugs.add(normalizeCategorySlug(s)));
+      }
+      if (Array.isArray(parsed.trashedItems)) {
+        for (const t of parsed.trashedItems) {
+          if (t && typeof t.slug === "string") {
+            const cSlug = normalizeCategorySlug(t.slug);
+            trashedMap.set(cSlug, { ...t, slug: cSlug, id: cSlug, isDeleted: true });
+            deletedSlugs.add(cSlug);
+          }
+        }
       }
     }
 
-    if (itemsList.length > 0) {
+    if (itemsList.length > 0 || deletedSlugs.size > 0) {
       const catMap = new Map<string, CategoryConfigItem>();
 
-      // 1. Gather all explicit deletions
+      // 1. Gather explicit deletions
       for (const item of itemsList) {
         if (!item || typeof item.slug !== "string") continue;
         if (item.isDeleted === true) {
-          deletedSlugs.add(String(item.slug));
+          deletedSlugs.add(normalizeCategorySlug(item.slug));
         }
       }
 
-      // 2. Seed with master default categories ONLY if NOT marked deleted
+      // 2. Seed master defaults unless explicitly deleted
       for (const d of DEFAULT_CATEGORY_ITEMS) {
         if (!deletedSlugs.has(d.slug)) {
           catMap.set(d.slug, { ...d });
         }
       }
 
-      // 3. Apply customizations or add custom categories
+      // 3. Apply customizations or custom categories
       for (const item of itemsList) {
-        if (!item || typeof item.slug !== "string" || item.slug === "chat" || item.slug === "app-download") continue;
-        const slug = String(item.slug);
-        if (item.isDeleted === true || deletedSlugs.has(slug)) {
-          catMap.delete(slug);
-          continue;
-        }
+        if (!item || typeof item.slug !== "string") continue;
+        const slug = normalizeCategorySlug(item.slug);
+        if (!slug || slug === "chat" || slug === "app-download") continue;
 
-        const fallback = defaultCategories.find((d) => d.slug === slug);
+        const fallback = defaultCategories.find(
+          (d) => d.slug === slug || canonicalMatchKey(d.slug) === canonicalMatchKey(slug)
+        );
+        const targetSlug = fallback ? fallback.slug : slug;
+
         const rawIcon = String(item.iconName || item.icon || "");
-        const iconName = (rawIcon && rawIcon !== "Users" && CATEGORY_ICONS[rawIcon])
-          ? rawIcon
-          : (fallback && CATEGORY_ICONS[fallback.iconName || "Users"] ? (fallback.iconName || "Users") : (rawIcon || "Users"));
+        const iconName =
+          rawIcon && rawIcon !== "Users" && CATEGORY_ICONS[rawIcon]
+            ? rawIcon
+            : fallback && CATEGORY_ICONS[fallback.iconName || "Users"]
+              ? fallback.iconName || "Users"
+              : rawIcon || "Users";
         const rawTint = String(item.tint || "");
-        const tint = (rawTint && rawTint !== "from-emerald-500/15 to-emerald-700/10")
-          ? rawTint
-          : (fallback?.tint || "from-emerald-500/15 to-emerald-700/10");
+        const tint =
+          rawTint && rawTint !== "from-emerald-500/15 to-emerald-700/10"
+            ? rawTint
+            : fallback?.tint || "from-emerald-500/15 to-emerald-700/10";
         const description = String(item.description ?? fallback?.description ?? "");
-        const divisionId = String(item.divisionId || item.departmentId || fallback?.divisionId || "division-2-shopping-market");
+        const divisionId = resolveSafeDivisionId(
+          item.divisionId || item.departmentId,
+          fallback?.divisionId
+        );
         const formType = String(item.formType || fallback?.formType || "general");
         const rawCustomIcon = item.customIconUrl || fallback?.customIconUrl;
-        const customIconUrl = typeof rawCustomIcon === "string" && rawCustomIcon.trim() ? rawCustomIcon.trim() : undefined;
-        const sortOrder = typeof item.sort_order === "number" ? item.sort_order : (typeof item.displayOrder === "number" ? item.displayOrder : (fallback?.sort_order || 999));
+        const customIconUrl =
+          typeof rawCustomIcon === "string" && rawCustomIcon.trim()
+            ? rawCustomIcon.trim()
+            : undefined;
+        const rawCustomRoute = item.customRoute;
+        const customRoute =
+          typeof rawCustomRoute === "string" && rawCustomRoute.trim()
+            ? rawCustomRoute.trim()
+            : undefined;
+        const sortOrder =
+          typeof item.sort_order === "number"
+            ? item.sort_order
+            : typeof item.displayOrder === "number"
+              ? item.displayOrder
+              : fallback?.sort_order || 999;
 
         const catItem: CategoryConfigItem = {
-          id: slug,
-          name: String(item.bn || fallback?.bn || item.slug),
-          slug,
+          id: targetSlug,
+          name: String(item.bn || fallback?.bn || targetSlug),
+          slug: targetSlug,
           divisionId,
           departmentId: divisionId,
-          bn: String(item.bn || fallback?.bn || item.slug),
-          en: String(item.en || fallback?.en || item.slug),
+          bn: String(item.bn || fallback?.bn || targetSlug),
+          en: String(item.en || fallback?.en || targetSlug),
           icon: iconName,
           iconName,
           tint,
@@ -849,19 +1164,33 @@ function parseCategoryConfig(raw: string | null | undefined): CategoryConfigItem
           sort_order: sortOrder,
           isActive: item.isActive !== false && item.visible !== false,
           visible: item.visible !== false && item.isActive !== false,
-          isDeleted: false,
+          isDeleted: item.isDeleted === true || deletedSlugs.has(targetSlug),
+          deletedAt: item.deletedAt,
           updatedAt: item.updatedAt,
         };
         if (customIconUrl) {
           catItem.customIconUrl = customIconUrl;
         }
+        if (customRoute) {
+          catItem.customRoute = customRoute;
+        }
 
-        catMap.set(slug, catItem);
+        if (catItem.isDeleted) {
+          deletedSlugs.add(targetSlug);
+          trashedMap.set(targetSlug, catItem);
+          catMap.delete(targetSlug);
+        } else {
+          catMap.set(targetSlug, catItem);
+        }
       }
 
-      return Array.from(catMap.values())
-        .filter((c) => !deletedSlugs.has(c.slug) && c.isDeleted !== true)
-        .sort((a, b) => a.sort_order - b.sort_order);
+      return {
+        items: Array.from(catMap.values())
+          .filter((c) => !deletedSlugs.has(c.slug) && c.isDeleted !== true)
+          .sort((a, b) => a.sort_order - b.sort_order),
+        deletedSlugs: Array.from(deletedSlugs),
+        trashedItems: Array.from(trashedMap.values()),
+      };
     }
   } catch {
     // ignore
@@ -871,18 +1200,22 @@ function parseCategoryConfig(raw: string | null | undefined): CategoryConfigItem
 
 function toResolvedCategory(item: CategoryConfigItem): Category {
   const fallback = defaultCategories.find((d) => d.slug === item.slug);
-  const iconKey = (item.iconName && item.iconName !== "Users" && CATEGORY_ICONS[item.iconName])
-    ? item.iconName
-    : (fallback?.iconName && CATEGORY_ICONS[fallback.iconName] ? fallback.iconName : (item.iconName || "Users"));
+  const iconKey =
+    item.iconName && item.iconName !== "Users" && CATEGORY_ICONS[item.iconName]
+      ? item.iconName
+      : fallback?.iconName && CATEGORY_ICONS[fallback.iconName]
+        ? fallback.iconName
+        : item.iconName || "Users";
   const IconComp = CATEGORY_ICONS[iconKey] || CATEGORY_ICONS.Users;
-  const tint = (item.tint && item.tint !== "from-emerald-500/15 to-emerald-700/10")
-    ? item.tint
-    : (fallback?.tint || item.tint || "from-emerald-500/15 to-emerald-700/10");
+  const tint =
+    item.tint && item.tint !== "from-emerald-500/15 to-emerald-700/10"
+      ? item.tint
+      : fallback?.tint || item.tint || "from-emerald-500/15 to-emerald-700/10";
   const description = item.description || fallback?.description || "";
 
   return {
     slug: item.slug,
-    divisionId: item.divisionId || fallback?.divisionId || "about",
+    divisionId: resolveSafeDivisionId(item.divisionId, fallback?.divisionId),
     bn: item.bn,
     en: item.en,
     icon: IconComp,
@@ -891,46 +1224,74 @@ function toResolvedCategory(item: CategoryConfigItem): Category {
     description,
     formType: (item.formType || fallback?.formType || "general") as Category["formType"],
     customIconUrl: item.customIconUrl || fallback?.customIconUrl,
+    customRoute: item.customRoute,
     visible: item.visible,
     sort_order: item.sort_order,
   };
 }
 
 export function useCategories() {
-  const [items, setItems] = useState<CategoryConfigItem[]>(() => {
+  const [catState, setCatState] = useState<ParsedCategoryWrapper>(() => {
     try {
       const cached = localStorage.getItem(LOCAL_CATEGORIES_KEY);
-      return parseCategoryConfig(cached) ?? DEFAULT_CATEGORY_ITEMS;
+      return (
+        parseCategoryConfigWrapper(cached) ?? {
+          items: DEFAULT_CATEGORY_ITEMS,
+          deletedSlugs: [],
+          trashedItems: [],
+        }
+      );
     } catch {
-      return DEFAULT_CATEGORY_ITEMS;
+      return {
+        items: DEFAULT_CATEGORY_ITEMS,
+        deletedSlugs: [],
+        trashedItems: [],
+      };
     }
   });
 
+  const [aliasDocIds, setAliasDocIds] = useState<
+    Array<{ docId: string; canonicalSlug: string; bn: string; divisionId: string }>
+  >([]);
+
   useEffect(() => {
-    // Persistent deleted slugs set to prevent resurrection across snapshots
     const deletedSlugsSet = new Set<string>();
+    const trashedMap = new Map<string, CategoryConfigItem>();
 
     try {
       const raw = localStorage.getItem(LOCAL_CATEGORIES_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === "object" && Array.isArray(parsed.deletedSlugs)) {
-          parsed.deletedSlugs.forEach((s: string) => deletedSlugsSet.add(String(s)));
-        }
+      const parsedLocal = parseCategoryConfigWrapper(raw);
+      if (parsedLocal) {
+        parsedLocal.deletedSlugs.forEach((s) => deletedSlugsSet.add(normalizeCategorySlug(s)));
+        parsedLocal.trashedItems.forEach((t) => trashedMap.set(t.slug, t));
       }
     } catch {}
+
+    const writeLocalWrapper = (wrapper: ParsedCategoryWrapper) => {
+      try {
+        localStorage.setItem(
+          LOCAL_CATEGORIES_KEY,
+          JSON.stringify({
+            items: wrapper.items,
+            deletedSlugs: wrapper.deletedSlugs,
+            trashedItems: wrapper.trashedItems,
+            updatedAt: new Date().toISOString(),
+          })
+        );
+      } catch {}
+    };
 
     // 1. Pull from Server Content API immediately on mount
     fetch(`/api/content?collection=settings&id=${CATEGORIES_CONFIG_ID}`)
       .then((r) => r.json())
       .then((d) => {
         if (d?.item?.logo_url) {
-          const parsed = parseCategoryConfig(d.item.logo_url);
-          if (parsed && parsed.length > 0) {
-            setItems(parsed);
-            try {
-              localStorage.setItem(LOCAL_CATEGORIES_KEY, JSON.stringify(parsed));
-            } catch {}
+          const parsed = parseCategoryConfigWrapper(d.item.logo_url);
+          if (parsed && parsed.items.length > 0) {
+            parsed.deletedSlugs.forEach((s) => deletedSlugsSet.add(s));
+            parsed.trashedItems.forEach((t) => trashedMap.set(t.slug, t));
+            setCatState(parsed);
+            writeLocalWrapper(parsed);
           }
         }
       })
@@ -943,73 +1304,112 @@ export function useCategories() {
         if (!snapshot.empty) {
           const firestoreMap = new Map<string, CategoryConfigItem>();
           const deletedSet = new Set<string>(deletedSlugsSet);
+          const nextTrashedMap = new Map<string, CategoryConfigItem>(trashedMap);
+          const detectedAliases: Array<{
+            docId: string;
+            canonicalSlug: string;
+            bn: string;
+            divisionId: string;
+          }> = [];
 
           snapshot.forEach((docSnap) => {
             const data = docSnap.data();
-            const slug = docSnap.id;
-            if (data.isDeleted === true || deletedSlugsSet.has(slug)) {
-              deletedSet.add(slug);
-            } else {
-              const fallback = defaultCategories.find((d) => d.slug === slug);
-              const rawIcon = String(data.iconName || data.icon || "");
-              const iconName = (rawIcon && rawIcon !== "Users" && CATEGORY_ICONS[rawIcon])
+            const rawDocSlug = String(data.slug || docSnap.id);
+            const normalizedSlug = normalizeCategorySlug(rawDocSlug);
+            if (!normalizedSlug || normalizedSlug === "chat" || normalizedSlug === "app-download") {
+              return;
+            }
+            const fallback = defaultCategories.find(
+              (d) => d.slug === normalizedSlug || canonicalMatchKey(d.slug) === canonicalMatchKey(normalizedSlug)
+            );
+            const canonicalSlug = fallback ? fallback.slug : normalizedSlug;
+
+            if (docSnap.id !== canonicalSlug) {
+              detectedAliases.push({
+                docId: docSnap.id,
+                canonicalSlug,
+                bn: String(data.bn || data.name || docSnap.id),
+                divisionId: String(data.divisionId || data.departmentId || ""),
+              });
+            }
+
+            const rawIcon = String(data.iconName || data.icon || "");
+            const iconName =
+              rawIcon && rawIcon !== "Users" && CATEGORY_ICONS[rawIcon]
                 ? rawIcon
-                : (fallback && CATEGORY_ICONS[fallback.iconName || "Users"] ? (fallback.iconName || "Users") : (rawIcon || "Users"));
-              const sortOrder = typeof data.sort_order === "number" ? data.sort_order : (typeof data.displayOrder === "number" ? data.displayOrder : (fallback?.sort_order || 999));
-              const divId = String(data.divisionId || data.departmentId || fallback?.divisionId || "division-2-shopping-market");
+                : fallback && CATEGORY_ICONS[fallback.iconName || "Users"]
+                  ? fallback.iconName || "Users"
+                  : rawIcon || "Users";
+            const sortOrder =
+              typeof data.sort_order === "number"
+                ? data.sort_order
+                : typeof data.displayOrder === "number"
+                  ? data.displayOrder
+                  : fallback?.sort_order || 999;
+            const divId = resolveSafeDivisionId(data.divisionId || data.departmentId, fallback?.divisionId);
+            const rawCustomIcon = data.customIconUrl || fallback?.customIconUrl;
+            const customIconUrl =
+              typeof rawCustomIcon === "string" && rawCustomIcon.trim()
+                ? rawCustomIcon.trim()
+                : undefined;
+            const customRoute =
+              typeof data.customRoute === "string" && data.customRoute.trim()
+                ? data.customRoute.trim()
+                : undefined;
 
-              const rawCustomIcon = data.customIconUrl || fallback?.customIconUrl;
-              const customIconUrl = typeof rawCustomIcon === "string" && rawCustomIcon.trim() ? rawCustomIcon.trim() : undefined;
+            const firestoreCat: CategoryConfigItem = {
+              id: canonicalSlug,
+              slug: canonicalSlug,
+              name: String(data.bn || data.name || fallback?.bn || canonicalSlug),
+              bn: String(data.bn || data.name || fallback?.bn || canonicalSlug),
+              en: String(data.en || fallback?.en || canonicalSlug),
+              divisionId: divId,
+              departmentId: divId,
+              icon: iconName,
+              iconName,
+              tint: data.tint || fallback?.tint || "from-emerald-500/15 to-emerald-700/10",
+              description: String(data.description ?? fallback?.description ?? ""),
+              formType: String(data.formType || fallback?.formType || "general"),
+              displayOrder: sortOrder,
+              sort_order: sortOrder,
+              isActive: data.isActive !== false && data.visible !== false,
+              visible: data.visible !== false && data.isActive !== false,
+              isDeleted: data.isDeleted === true || deletedSlugsSet.has(canonicalSlug),
+              deletedAt: data.deletedAt,
+              updatedAt: data.updatedAt,
+              ...(customIconUrl ? { customIconUrl } : {}),
+              ...(customRoute ? { customRoute } : {}),
+            };
 
-              const firestoreCat: CategoryConfigItem = {
-                id: slug,
-                slug,
-                name: String(data.bn || data.name || fallback?.bn || slug),
-                bn: String(data.bn || data.name || fallback?.bn || slug),
-                en: String(data.en || fallback?.en || slug),
-                divisionId: divId,
-                departmentId: divId,
-                icon: iconName,
-                iconName,
-                tint: data.tint || fallback?.tint || "from-emerald-500/15 to-emerald-700/10",
-                description: String(data.description ?? fallback?.description ?? ""),
-                formType: String(data.formType || fallback?.formType || "general"),
-                displayOrder: sortOrder,
-                sort_order: sortOrder,
-                isActive: data.isActive !== false && data.visible !== false,
-                visible: data.visible !== false && data.isActive !== false,
-                isDeleted: false,
-                updatedAt: data.updatedAt,
-              };
-              if (customIconUrl) {
-                firestoreCat.customIconUrl = customIconUrl;
-              }
-              firestoreMap.set(slug, firestoreCat);
+            if (firestoreCat.isDeleted) {
+              deletedSet.add(canonicalSlug);
+              deletedSlugsSet.add(canonicalSlug);
+              nextTrashedMap.set(canonicalSlug, firestoreCat);
+              firestoreMap.delete(canonicalSlug);
+            } else if (!firestoreMap.has(canonicalSlug) || docSnap.id === canonicalSlug) {
+              firestoreMap.set(canonicalSlug, firestoreCat);
             }
           });
 
-          // Merge with DEFAULT_CATEGORY_ITEMS only for categories not in firestoreMap and not deleted
-          if (firestoreMap.size > 0) {
+          setAliasDocIds(detectedAliases);
+
+          if (firestoreMap.size > 0 || deletedSet.size > 0) {
             for (const def of DEFAULT_CATEGORY_ITEMS) {
-              if (!firestoreMap.has(def.slug) && !deletedSet.has(def.slug) && !deletedSlugsSet.has(def.slug)) {
+              if (!firestoreMap.has(def.slug) && !deletedSet.has(def.slug)) {
                 firestoreMap.set(def.slug, { ...def });
               }
             }
             const mergedList = Array.from(firestoreMap.values())
-              .filter((c) => !deletedSet.has(c.slug) && !deletedSlugsSet.has(c.slug) && c.isDeleted !== true)
+              .filter((c) => !deletedSet.has(c.slug) && c.isDeleted !== true)
               .sort((a, b) => a.sort_order - b.sort_order);
 
-            setItems(mergedList);
-            try {
-              localStorage.setItem(
-                LOCAL_CATEGORIES_KEY,
-                JSON.stringify({
-                  items: mergedList,
-                  deletedSlugs: Array.from(deletedSet),
-                  updatedAt: new Date().toISOString(),
-                })
-              );
-            } catch {}
+            const wrapper: ParsedCategoryWrapper = {
+              items: mergedList,
+              deletedSlugs: Array.from(deletedSet),
+              trashedItems: Array.from(nextTrashedMap.values()),
+            };
+            setCatState(wrapper);
+            writeLocalWrapper(wrapper);
           }
         }
       },
@@ -1018,27 +1418,23 @@ export function useCategories() {
       }
     );
 
-    // 3. Listen directly to settings document for backwards compatibility
+    // 3. Listen directly to settings document
     const unsubDirect = onSnapshot(
       doc(db, "settings", CATEGORIES_CONFIG_ID),
       (docSnap) => {
         if (docSnap.exists()) {
           const rawPayload = docSnap.data()?.logo_url;
-          if (rawPayload) {
-            try {
-              const parsedRaw = JSON.parse(rawPayload);
-              if (parsedRaw && typeof parsedRaw === "object" && Array.isArray(parsedRaw.deletedSlugs)) {
-                parsedRaw.deletedSlugs.forEach((s: string) => deletedSlugsSet.add(String(s)));
-              }
-            } catch {}
-          }
-          const parsed = parseCategoryConfig(rawPayload);
-          if (parsed && parsed.length > 0) {
-            const sanitized = parsed.filter((c) => !deletedSlugsSet.has(c.slug));
-            setItems(sanitized);
-            try {
-              localStorage.setItem(LOCAL_CATEGORIES_KEY, JSON.stringify(sanitized));
-            } catch {}
+          const parsed = parseCategoryConfigWrapper(rawPayload);
+          if (parsed && (parsed.items.length > 0 || parsed.deletedSlugs.length > 0)) {
+            parsed.deletedSlugs.forEach((s) => deletedSlugsSet.add(s));
+            parsed.trashedItems.forEach((t) => trashedMap.set(t.slug, t));
+            const sanitized: ParsedCategoryWrapper = {
+              items: parsed.items.filter((c) => !deletedSlugsSet.has(c.slug)),
+              deletedSlugs: Array.from(deletedSlugsSet),
+              trashedItems: Array.from(trashedMap.values()),
+            };
+            setCatState(sanitized);
+            writeLocalWrapper(sanitized);
           }
         }
       },
@@ -1051,52 +1447,82 @@ export function useCategories() {
     };
   }, []);
 
-  const saveCategories = useCallback(async (nextList: CategoryConfigItem[], deletedSlug?: string, restoredSlug?: string) => {
-    let existingDeleted: string[] = [];
-    try {
-      const raw = localStorage.getItem(LOCAL_CATEGORIES_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === "object" && Array.isArray(parsed.deletedSlugs)) {
-          existingDeleted = parsed.deletedSlugs;
-        }
+  const persistCategoryWrapper = useCallback(
+    async (
+      nextList: CategoryConfigItem[],
+      options?: {
+        addDeleted?: string[];
+        removeDeleted?: string[];
+        addTrashed?: CategoryConfigItem[];
+        removeTrashedSlugs?: string[];
       }
-    } catch {}
+    ) => {
+      const deletedSet = new Set(catState.deletedSlugs);
+      (options?.addDeleted || []).forEach((s) => deletedSet.add(normalizeCategorySlug(s)));
+      (options?.removeDeleted || []).forEach((s) => deletedSet.delete(normalizeCategorySlug(s)));
 
-    let allDeleted = Array.from(new Set([...existingDeleted, ...(deletedSlug ? [deletedSlug] : [])]));
-    if (restoredSlug) {
-      allDeleted = allDeleted.filter((s) => s !== restoredSlug);
-    }
+      const trashedMap = new Map<string, CategoryConfigItem>();
+      for (const t of catState.trashedItems) {
+        trashedMap.set(t.slug, t);
+      }
+      for (const t of options?.addTrashed || []) {
+        trashedMap.set(t.slug, { ...t, isDeleted: true });
+      }
+      for (const s of options?.removeTrashedSlugs || []) {
+        trashedMap.delete(normalizeCategorySlug(s));
+      }
 
-    const normalized = nextList
-      .filter((c) => c.slug !== "chat" && c.slug !== "app-download" && c.isDeleted !== true && !allDeleted.includes(c.slug))
-      .map((c, idx) => ({
-        ...c,
-        sort_order: idx + 1,
-        displayOrder: idx + 1,
-        isActive: c.visible !== false,
-      }));
+      const normalized = nextList
+        .filter(
+          (c) =>
+            c.slug !== "chat" &&
+            c.slug !== "app-download" &&
+            c.isDeleted !== true &&
+            !deletedSet.has(c.slug)
+        )
+        .map((c, idx) => ({
+          ...c,
+          sort_order: idx + 1,
+          displayOrder: idx + 1,
+          isActive: c.visible !== false,
+        }));
 
-    const payloadToStore = {
-      items: normalized,
-      deletedSlugs: allDeleted,
-      updatedAt: new Date().toISOString(),
-    };
+      const wrapper: ParsedCategoryWrapper = {
+        items: normalized,
+        deletedSlugs: Array.from(deletedSet),
+        trashedItems: Array.from(trashedMap.values()),
+      };
 
-    const serialized = JSON.stringify(payloadToStore);
-    try {
-      localStorage.setItem(LOCAL_CATEGORIES_KEY, serialized);
-    } catch {}
+      const serialized = JSON.stringify({
+        ...wrapper,
+        updatedAt: new Date().toISOString(),
+      });
+      try {
+        localStorage.setItem(LOCAL_CATEGORIES_KEY, serialized);
+      } catch {}
 
-    setItems(normalized);
-    await upsertSettingDoc(CATEGORIES_CONFIG_ID, serialized);
-  }, []);
+      setCatState(wrapper);
+      await upsertSettingDoc(CATEGORIES_CONFIG_ID, serialized);
+    },
+    [catState.deletedSlugs, catState.trashedItems]
+  );
+
+  const saveCategories = useCallback(
+    async (nextList: CategoryConfigItem[], deletedSlug?: string, restoredSlug?: string) => {
+      await persistCategoryWrapper(nextList, {
+        addDeleted: deletedSlug ? [deletedSlug] : [],
+        removeDeleted: restoredSlug ? [restoredSlug] : [],
+        removeTrashedSlugs: restoredSlug ? [restoredSlug] : [],
+      });
+    },
+    [persistCategoryWrapper]
+  );
 
   const updateCategory = useCallback(
     async (slug: string, patch: Partial<CategoryConfigItem>) => {
-      // 1. Direct write to Firestore /categories/{slug} with merge
-      const docRef = doc(db, "categories", slug);
-      
+      const cleanSlug = normalizeCategorySlug(slug);
+      const docRef = doc(db, "categories", cleanSlug);
+
       const updatePayload: Record<string, any> = {
         updatedAt: serverTimestamp(),
         updatedBy: auth.currentUser?.email || "admin",
@@ -1108,8 +1534,9 @@ export function useCategories() {
       }
       if (patch.en !== undefined) updatePayload.en = String(patch.en);
       if (patch.divisionId !== undefined) {
-        updatePayload.divisionId = String(patch.divisionId);
-        updatePayload.departmentId = String(patch.divisionId);
+        const safeDiv = resolveSafeDivisionId(patch.divisionId);
+        updatePayload.divisionId = safeDiv;
+        updatePayload.departmentId = safeDiv;
       }
       if (patch.iconName !== undefined) {
         updatePayload.iconName = String(patch.iconName);
@@ -1118,6 +1545,9 @@ export function useCategories() {
       if (patch.tint !== undefined) updatePayload.tint = String(patch.tint);
       if (patch.description !== undefined) updatePayload.description = String(patch.description);
       if (patch.formType !== undefined) updatePayload.formType = String(patch.formType);
+      if (patch.customRoute !== undefined) {
+        updatePayload.customRoute = typeof patch.customRoute === "string" ? patch.customRoute.trim() : "";
+      }
       if (patch.sort_order !== undefined) {
         const orderNum = Number(patch.sort_order);
         updatePayload.sort_order = isNaN(orderNum) ? 1 : orderNum;
@@ -1128,10 +1558,6 @@ export function useCategories() {
         updatePayload.isActive = Boolean(patch.visible);
       }
 
-      // Safe handling of customIconUrl:
-      // - If undefined: DO NOT include in payload (omitted so existing value in Firestore is preserved)
-      // - If non-empty string: trim and store
-      // - If empty string "": user explicitly cleared it, store empty string
       if (patch.customIconUrl !== undefined) {
         const trimmed = typeof patch.customIconUrl === "string" ? patch.customIconUrl.trim() : "";
         updatePayload.customIconUrl = trimmed;
@@ -1140,15 +1566,13 @@ export function useCategories() {
       const safePayload = sanitizeFirestorePayload(updatePayload);
       await setDoc(docRef, safePayload, { merge: true });
 
-      // Verification: read back
       const verifiedSnap = await getDoc(docRef);
       if (!verifiedSnap.exists()) {
         throw new Error("ফায়ারবেস ডেটাবেসে ক্যাটাগরি আপডেট নিশ্চিত করা যায়নি।");
       }
 
-      // 2. Update local state and mirror settings doc
-      const next = items.map((c) => {
-        if (c.slug !== slug) return c;
+      const next = catState.items.map((c) => {
+        if (c.slug !== cleanSlug) return c;
         const updated: CategoryConfigItem = { ...c };
         if (patch.bn !== undefined) {
           updated.bn = patch.bn;
@@ -1156,8 +1580,9 @@ export function useCategories() {
         }
         if (patch.en !== undefined) updated.en = patch.en;
         if (patch.divisionId !== undefined) {
-          updated.divisionId = patch.divisionId;
-          updated.departmentId = patch.divisionId;
+          const safeDiv = resolveSafeDivisionId(patch.divisionId);
+          updated.divisionId = safeDiv;
+          updated.departmentId = safeDiv;
         }
         if (patch.iconName !== undefined) {
           updated.iconName = patch.iconName;
@@ -1166,6 +1591,11 @@ export function useCategories() {
         if (patch.tint !== undefined) updated.tint = patch.tint;
         if (patch.description !== undefined) updated.description = patch.description;
         if (patch.formType !== undefined) updated.formType = patch.formType;
+        if (patch.customRoute !== undefined) {
+          const trimmedRoute = typeof patch.customRoute === "string" ? patch.customRoute.trim() : "";
+          if (trimmedRoute) updated.customRoute = trimmedRoute;
+          else delete updated.customRoute;
+        }
         if (patch.sort_order !== undefined) {
           const num = Number(patch.sort_order);
           updated.sort_order = isNaN(num) ? 1 : num;
@@ -1185,27 +1615,31 @@ export function useCategories() {
         }
         return updated;
       });
-      await saveCategories(next);
+      await persistCategoryWrapper(next);
     },
-    [items, saveCategories]
+    [catState.items, persistCategoryWrapper]
   );
 
   const addCategory = useCallback(
-    async (newCat: Omit<CategoryConfigItem, "sort_order"> & { sort_order?: number; customIconUrl?: string }) => {
-      const rawSlug = typeof newCat?.slug === "string" ? newCat.slug : "";
-      const cleanSlug = rawSlug
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9_-]/g, "-");
+    async (
+      newCat: Omit<CategoryConfigItem, "sort_order"> & { sort_order?: number; customIconUrl?: string }
+    ) => {
+      const cleanSlug = normalizeCategorySlug(newCat?.slug || "");
       if (!cleanSlug) throw new Error("সঠিক ক্যাটাগরি স্লাগ (ইংরেজি অক্ষর) দিন");
-      if (items.some((c) => (c?.slug || "").toLowerCase() === cleanSlug && c.isDeleted !== true)) {
+      if (catState.items.some((c) => canonicalMatchKey(c?.slug || "") === canonicalMatchKey(cleanSlug))) {
         throw new Error("এই স্লাগের ক্যাটাগরি ইতিমধ্যে ডেটাবেসে বিদ্যমান রয়েছে");
       }
 
-      const sortOrder = typeof newCat.sort_order === "number" ? newCat.sort_order : items.length + 1;
-      const cleanIconUrl = typeof newCat.customIconUrl === "string" && newCat.customIconUrl.trim().length > 0
-        ? newCat.customIconUrl.trim()
-        : undefined;
+      const sortOrder = typeof newCat.sort_order === "number" ? newCat.sort_order : catState.items.length + 1;
+      const cleanIconUrl =
+        typeof newCat.customIconUrl === "string" && newCat.customIconUrl.trim().length > 0
+          ? newCat.customIconUrl.trim()
+          : undefined;
+      const cleanCustomRoute =
+        typeof newCat.customRoute === "string" && newCat.customRoute.trim().length > 0
+          ? newCat.customRoute.trim()
+          : undefined;
+      const safeDivisionId = resolveSafeDivisionId(newCat.divisionId);
 
       const itemToInsert: CategoryConfigItem = {
         id: cleanSlug,
@@ -1213,8 +1647,8 @@ export function useCategories() {
         name: newCat.bn,
         bn: newCat.bn,
         en: newCat.en || cleanSlug,
-        departmentId: newCat.divisionId || "division-2-shopping-market",
-        divisionId: newCat.divisionId || "division-2-shopping-market",
+        departmentId: safeDivisionId,
+        divisionId: safeDivisionId,
         iconName: newCat.iconName || "Users",
         icon: newCat.iconName || "Users",
         tint: newCat.tint || "from-emerald-500/15 to-emerald-700/10",
@@ -1226,9 +1660,9 @@ export function useCategories() {
         visible: newCat.visible !== false,
         isDeleted: false,
         ...(cleanIconUrl ? { customIconUrl: cleanIconUrl } : {}),
+        ...(cleanCustomRoute ? { customRoute: cleanCustomRoute } : {}),
       };
 
-      // 1. Direct write to Firestore /categories/{cleanSlug}
       const docRef = doc(db, "categories", cleanSlug);
       const insertPayload = sanitizeFirestorePayload({
         ...itemToInsert,
@@ -1240,38 +1674,38 @@ export function useCategories() {
 
       await setDoc(docRef, insertPayload);
 
-      // Verification: Read back to confirm Firestore persistence
       const snap = await getDoc(docRef);
       if (!snap.exists()) {
         throw new Error("ফায়ারবেস ডেটাবেসে ক্যাটাগরি সংরক্ষণ নিশ্চিত করা যায়নি");
       }
 
-      // 2. Update local state and mirror settings doc, restoring cleanSlug if previously deleted
-      const next: CategoryConfigItem[] = [...items.filter((c) => c.slug !== cleanSlug), itemToInsert];
-      await saveCategories(next, undefined, cleanSlug);
+      const next: CategoryConfigItem[] = [...catState.items.filter((c) => c.slug !== cleanSlug), itemToInsert];
+      await persistCategoryWrapper(next, {
+        removeDeleted: [cleanSlug],
+        removeTrashedSlugs: [cleanSlug],
+      });
       return itemToInsert;
     },
-    [items, saveCategories]
+    [catState.items, persistCategoryWrapper]
   );
 
   const deleteCategory = useCallback(
     async (slug: string, options?: { softDeleteOnly?: boolean; force?: boolean }) => {
-      // 1. Reference check
-      const refs = await checkCategoryReferences(slug);
+      const cleanSlug = normalizeCategorySlug(slug);
+      const refs = await checkCategoryReferences(cleanSlug);
       const hasRefs = refs.total > 0;
 
       if (hasRefs && !options?.softDeleteOnly && !options?.force) {
         throw new Error(
-          `এই ক্যাটাগরিতে ${refs.submissionsCount}টি তালিকা এবং ${refs.donationsCount}টি অনুদান রেকর্ড রয়েছে। সরাসরি মুছে ফেলা সম্ভব নয়; নিরাপদে নিষ্ক্রিয় (Archive / Soft Delete) করুন।`
+          `এই ক্যাটাগরিতে ${refs.submissionsCount}টি তালিকা এবং ${refs.donationsCount}টি অনুদান রেকর্ড রয়েছে। সরাসরি মুছে ফেলা সম্ভব নয়; নিরাপদে নিষ্ক্রিয় (Trash / Soft Delete) করুন।`
         );
       }
 
-      // 2. Direct write tombstone to Firestore /categories/{slug}
-      // This ensures that all devices and listeners know authoritatively that this slug is deleted
-      const docRef = doc(db, "categories", slug);
+      const existingItem = catState.items.find((c) => c.slug === cleanSlug);
+      const docRef = doc(db, "categories", cleanSlug);
       const deletePayload = sanitizeFirestorePayload({
-        id: slug,
-        slug: slug,
+        id: cleanSlug,
+        slug: cleanSlug,
         isDeleted: true,
         visible: false,
         isActive: false,
@@ -1282,46 +1716,262 @@ export function useCategories() {
 
       await setDoc(docRef, deletePayload, { merge: true });
 
-      // Verify write to Firestore
       const verifySnap = await getDoc(docRef);
       if (!verifySnap.exists() || verifySnap.data()?.isDeleted !== true) {
         throw new Error("ফায়ারবেস ডেটাবেসে ক্যাটাগরি ডিলিট স্ট্যাটাস নিশ্চিত করা যায়নি।");
       }
 
-      // 3. Remove from active state and persist deletedSlugs to settings
-      const next = items.filter((c) => c.slug !== slug);
-      await saveCategories(next, slug);
+      const trashedEntry: CategoryConfigItem | undefined = existingItem
+        ? {
+            ...existingItem,
+            isDeleted: true,
+            visible: false,
+            isActive: false,
+            deletedAt: new Date().toISOString(),
+          }
+        : undefined;
+
+      const next = catState.items.filter((c) => c.slug !== cleanSlug);
+      await persistCategoryWrapper(next, {
+        addDeleted: [cleanSlug],
+        addTrashed: trashedEntry ? [trashedEntry] : [],
+      });
     },
-    [items, saveCategories]
+    [catState.items, persistCategoryWrapper]
   );
+
+  const restoreCategory = useCallback(
+    async (slug: string) => {
+      const cleanSlug = normalizeCategorySlug(slug);
+      const trashed = catState.trashedItems.find((t) => t.slug === cleanSlug);
+      const masterFallback = DEFAULT_CATEGORY_ITEMS.find((d) => d.slug === cleanSlug);
+      const restoredItem: CategoryConfigItem | undefined = trashed
+        ? {
+            ...trashed,
+            isDeleted: false,
+            visible: true,
+            isActive: true,
+            deletedAt: undefined,
+          }
+        : masterFallback
+          ? { ...masterFallback, isDeleted: false, visible: true, isActive: true }
+          : undefined;
+
+      if (!restoredItem) {
+        throw new Error("পুনরুদ্ধারের জন্য ট্র্যাশে এই ক্যাটাগরি পাওয়া যায়নি");
+      }
+
+      await setDoc(
+        doc(db, "categories", cleanSlug),
+        sanitizeFirestorePayload({
+          ...restoredItem,
+          updatedAt: serverTimestamp(),
+          updatedBy: auth.currentUser?.email || "admin",
+        }),
+        { merge: true }
+      );
+
+      await persistCategoryWrapper(
+        [...catState.items.filter((c) => c.slug !== cleanSlug), restoredItem],
+        {
+          removeDeleted: [cleanSlug],
+          removeTrashedSlugs: [cleanSlug],
+        }
+      );
+      return restoredItem;
+    },
+    [catState.items, catState.trashedItems, persistCategoryWrapper]
+  );
+
+  const permanentlyDeleteCategory = useCallback(
+    async (slug: string) => {
+      const cleanSlug = normalizeCategorySlug(slug);
+      await deleteDoc(doc(db, "categories", cleanSlug)).catch(() => {});
+      await persistCategoryWrapper(
+        catState.items.filter((c) => c.slug !== cleanSlug),
+        {
+          addDeleted: [cleanSlug],
+          removeTrashedSlugs: [cleanSlug],
+        }
+      );
+    },
+    [catState.items, persistCategoryWrapper]
+  );
+
+  const bulkDeleteCategories = useCallback(
+    async (slugs: string[], options?: { softDeleteOnly?: boolean; force?: boolean }) => {
+      const cleanSlugs = Array.from(new Set(slugs.map(normalizeCategorySlug).filter(Boolean)));
+      if (cleanSlugs.length === 0) return { deleted: 0, skipped: [] as string[] };
+
+      const trashedAdditions: CategoryConfigItem[] = [];
+      const deletedList: string[] = [];
+      const skipped: string[] = [];
+
+      for (const s of cleanSlugs) {
+        try {
+          const refs = await checkCategoryReferences(s);
+          if (refs.total > 0 && !options?.softDeleteOnly && !options?.force) {
+            skipped.push(s);
+            continue;
+          }
+          const existingItem = catState.items.find((c) => c.slug === s);
+          await setDoc(
+            doc(db, "categories", s),
+            sanitizeFirestorePayload({
+              id: s,
+              slug: s,
+              isDeleted: true,
+              visible: false,
+              isActive: false,
+              deletedAt: new Date().toISOString(),
+              updatedAt: serverTimestamp(),
+              updatedBy: auth.currentUser?.email || "admin",
+            }),
+            { merge: true }
+          );
+          deletedList.push(s);
+          if (existingItem) {
+            trashedAdditions.push({
+              ...existingItem,
+              isDeleted: true,
+              visible: false,
+              isActive: false,
+              deletedAt: new Date().toISOString(),
+            });
+          }
+        } catch {
+          skipped.push(s);
+        }
+      }
+
+      if (deletedList.length > 0) {
+        await persistCategoryWrapper(
+          catState.items.filter((c) => !deletedList.includes(c.slug)),
+          {
+            addDeleted: deletedList,
+            addTrashed: trashedAdditions,
+          }
+        );
+      }
+
+      return { deleted: deletedList.length, skipped };
+    },
+    [catState.items, persistCategoryWrapper]
+  );
+
+  const cleanupDuplicateCategories = useCallback(
+    async (docIdsToRemove: string[]) => {
+      let removed = 0;
+      for (const rawId of docIdsToRemove) {
+        const trimmed = String(rawId || "").trim();
+        if (!trimmed) continue;
+        // Never delete canonical master doc IDs during alias cleanup
+        const isMasterCanonical = DEFAULT_CATEGORY_ITEMS.some((m) => m.slug === trimmed);
+        if (isMasterCanonical) continue;
+        await deleteDoc(doc(db, "categories", trimmed)).catch(() => {});
+        removed++;
+      }
+      setAliasDocIds((prev) => prev.filter((a) => !docIdsToRemove.includes(a.docId)));
+      return { removed };
+    },
+    []
+  );
+
+  const exportCategoriesBackupJson = useCallback(() => {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      platform: "Smart Noakhali",
+      activeCount: catState.items.length,
+      trashedCount: catState.trashedItems.length,
+      deletedSlugs: catState.deletedSlugs,
+      categories: catState.items,
+      trashedCategories: catState.trashedItems,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `smart-noakhali-categories-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [catState]);
 
   const moveCategory = useCallback(
     async (slug: string, direction: "up" | "down") => {
-      const idx = items.findIndex((c) => c.slug === slug);
+      const idx = catState.items.findIndex((c) => c.slug === slug);
       if (idx === -1) return;
       const targetIdx = direction === "up" ? idx - 1 : idx + 1;
-      if (targetIdx < 0 || targetIdx >= items.length) return;
-      const copy = [...items];
+      if (targetIdx < 0 || targetIdx >= catState.items.length) return;
+      const copy = [...catState.items];
       const [moved] = copy.splice(idx, 1);
       copy.splice(targetIdx, 0, moved);
-      await saveCategories(copy);
+      await persistCategoryWrapper(copy);
     },
-    [items, saveCategories]
+    [catState.items, persistCategoryWrapper]
   );
 
   const resetCategories = useCallback(async () => {
     try {
       localStorage.removeItem(LOCAL_CATEGORIES_KEY);
     } catch {}
-    await saveCategories(DEFAULT_CATEGORY_ITEMS);
-  }, [saveCategories]);
+    await persistCategoryWrapper(DEFAULT_CATEGORY_ITEMS, {
+      removeDeleted: catState.deletedSlugs,
+      removeTrashedSlugs: catState.trashedItems.map((t) => t.slug),
+    });
+  }, [catState.deletedSlugs, catState.trashedItems, persistCategoryWrapper]);
+
+  const duplicateDiagnostics: DuplicateCategoryDiagnostics = useMemo(() => {
+    const sameDivMap = new Map<string, string[]>();
+    const crossDivMap = new Map<string, Array<{ slug: string; divisionId: string }>>();
+    const unassigned: Array<{ slug: string; bn: string; divisionId: string }> = [];
+
+    for (const c of catState.items) {
+      const divId = c.divisionId || "";
+      if (!divId || !VALID_DIVISION_ID_SET.has(divId)) {
+        unassigned.push({ slug: c.slug, bn: c.bn, divisionId: divId || "empty" });
+      }
+      const normName = (c.bn || "").trim().toLowerCase();
+      if (normName) {
+        const divKey = `${divId}::${normName}`;
+        const list = sameDivMap.get(divKey) || [];
+        list.push(c.slug);
+        sameDivMap.set(divKey, list);
+
+        const crossList = crossDivMap.get(normName) || [];
+        crossList.push({ slug: c.slug, divisionId: divId });
+        crossDivMap.set(normName, crossList);
+      }
+    }
+
+    const sameDivisionDuplicates: DuplicateCategoryDiagnostics["sameDivisionDuplicates"] = [];
+    sameDivMap.forEach((slugs, key) => {
+      if (slugs.length > 1) {
+        const [divisionId, bn] = key.split("::");
+        sameDivisionDuplicates.push({ divisionId, bn, slugs });
+      }
+    });
+
+    const crossDivisionSharedNames: DuplicateCategoryDiagnostics["crossDivisionSharedNames"] = [];
+    crossDivMap.forEach((entries, bn) => {
+      const uniqueDivs = new Set(entries.map((e) => e.divisionId));
+      if (entries.length > 1 && uniqueDivs.size > 1) {
+        crossDivisionSharedNames.push({ bn, entries });
+      }
+    });
+
+    return {
+      aliasDocIds,
+      sameDivisionDuplicates,
+      crossDivisionSharedNames,
+      unassignedOrInvalidDivision: unassigned,
+    };
+  }, [aliasDocIds, catState.items]);
 
   const allCategories = useMemo(
-    () =>
-      [...items]
-        .sort((a, b) => a.sort_order - b.sort_order)
-        .map(toResolvedCategory),
-    [items]
+    () => [...catState.items].sort((a, b) => a.sort_order - b.sort_order).map(toResolvedCategory),
+    [catState.items]
   );
 
   const visibleCategories = useMemo(
@@ -1340,13 +1990,21 @@ export function useCategories() {
   return {
     categories: visibleCategories,
     allCategories,
-    rawItems: items,
+    rawItems: catState.items,
+    trashedCategories: catState.trashedItems,
+    deletedSlugs: catState.deletedSlugs,
+    duplicateDiagnostics,
     getCategoryBySlug,
     getCategoriesByDivisionId: (divId: string) => visibleCategories.filter((c) => c.divisionId === divId),
     saveCategories,
     updateCategory,
     addCategory,
     deleteCategory,
+    restoreCategory,
+    permanentlyDeleteCategory,
+    bulkDeleteCategories,
+    cleanupDuplicateCategories,
+    exportCategoriesBackupJson,
     moveCategory,
     resetCategories,
     checkCategoryReferences,
@@ -2458,5 +3116,582 @@ export function useServicesConfig() {
     deleteService,
     reorderServices,
     updatePageHeader,
+  };
+}
+
+// ============================================================================
+// 8. Dynamic Hero Banner Configuration Hook (/settings/hero_banner_config)
+// ============================================================================
+export type HeroImageFocalPosition =
+  | "center center"
+  | "center top"
+  | "center bottom"
+  | "left center"
+  | "right center";
+
+export interface HeroBannerConfig {
+  visible: boolean;
+  badgeText: string;
+  headingLine1: string;
+  headingLine2: string;
+  description: string;
+  primaryButtonText: string;
+  primaryButtonLink: string;
+  secondaryButtonText: string;
+  secondaryButtonLink: string;
+  backgroundMode: "gradient" | "solid" | "image";
+  desktopImageUrl: string;
+  mobileImageUrl: string;
+  imagePositionDesktop: HeroImageFocalPosition;
+  imagePositionMobile: HeroImageFocalPosition;
+  overlayColor: string;
+  overlayOpacity: number;
+  solidColor: string;
+  gradientFrom: string;
+  gradientVia: string;
+  gradientTo: string;
+  textColor: string;
+  subtextColor: string;
+  borderRadius: "rounded-2xl" | "rounded-[26px]" | "rounded-3xl" | "rounded-[32px]";
+  showDecorativeGlow: boolean;
+  updatedAt?: string;
+}
+
+export const DEFAULT_HERO_BANNER_CONFIG: HeroBannerConfig = {
+  visible: true,
+  badgeText: "নোয়াখালীর ডিজিটাল সিটিজেন প্ল্যাটফর্ম",
+  headingLine1: "এক ক্লিকে নোয়াখালীর",
+  headingLine2: "সকল সেবা ও যোগাযোগ",
+  description:
+    "২২টি বিভাগ • রক্তদাতা • ডাক্তার • আইনি সহায়তা • চাকরি • পরিবহন ও জরুরি হেল্পলাইন",
+  primaryButtonText: "জরুরী 999",
+  primaryButtonLink: "tel:999",
+  secondaryButtonText: "নতুন তথ্য দিন",
+  secondaryButtonLink: "/submit-info",
+  backgroundMode: "gradient",
+  desktopImageUrl: "",
+  mobileImageUrl: "",
+  imagePositionDesktop: "center center",
+  imagePositionMobile: "center center",
+  overlayColor: "#042316",
+  overlayOpacity: 55,
+  solidColor: "#093f28",
+  gradientFrom: "#073622",
+  gradientVia: "#0d4d31",
+  gradientTo: "#146842",
+  textColor: "#ffffff",
+  subtextColor: "#ecfdf5",
+  borderRadius: "rounded-[26px]",
+  showDecorativeGlow: true,
+};
+
+function parseHeroBannerConfig(raw: string | null | undefined): HeroBannerConfig | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      const merged: HeroBannerConfig = {
+        ...DEFAULT_HERO_BANNER_CONFIG,
+        ...parsed,
+        overlayOpacity:
+          typeof parsed.overlayOpacity === "number"
+            ? Math.min(90, Math.max(0, parsed.overlayOpacity))
+            : DEFAULT_HERO_BANNER_CONFIG.overlayOpacity,
+        visible: parsed.visible !== false,
+        showDecorativeGlow: parsed.showDecorativeGlow !== false,
+      };
+      return merged;
+    }
+  } catch {
+    // ignore malformed json
+  }
+  return null;
+}
+
+export function useHeroBannerConfig() {
+  const [banner, setBanner] = useState<HeroBannerConfig>(() => {
+    try {
+      const cached = localStorage.getItem(LOCAL_HERO_BANNER_KEY);
+      return parseHeroBannerConfig(cached) ?? DEFAULT_HERO_BANNER_CONFIG;
+    } catch {
+      return DEFAULT_HERO_BANNER_CONFIG;
+    }
+  });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+
+    // 1. Direct read from Firestore
+    getDoc(doc(db, "settings", HERO_BANNER_CONFIG_ID))
+      .then((snap) => {
+        if (!active) return;
+        if (snap.exists()) {
+          const parsed = parseHeroBannerConfig(snap.data()?.logo_url);
+          if (parsed) {
+            setBanner(parsed);
+            try {
+              localStorage.setItem(LOCAL_HERO_BANNER_KEY, JSON.stringify(parsed));
+            } catch {}
+          }
+        }
+        setLoading(false);
+      })
+      .catch(() => {
+        if (active) setLoading(false);
+      });
+
+    // 2. Fallback read from /api/content
+    fetch(`/api/content?collection=settings&id=${HERO_BANNER_CONFIG_ID}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!active) return;
+        if (d?.item?.logo_url) {
+          const parsed = parseHeroBannerConfig(d.item.logo_url);
+          if (parsed) {
+            setBanner(parsed);
+            try {
+              localStorage.setItem(LOCAL_HERO_BANNER_KEY, JSON.stringify(parsed));
+            } catch {}
+          }
+        }
+      })
+      .catch(() => {});
+
+    // 3. Real-time Firestore listener
+    const unsubDirect = onSnapshot(
+      doc(db, "settings", HERO_BANNER_CONFIG_ID),
+      (snap) => {
+        if (!active) return;
+        if (snap.exists()) {
+          const parsed = parseHeroBannerConfig(snap.data()?.logo_url);
+          if (parsed) {
+            setBanner(parsed);
+            try {
+              localStorage.setItem(LOCAL_HERO_BANNER_KEY, JSON.stringify(parsed));
+            } catch {}
+          }
+        }
+        setLoading(false);
+      },
+      () => {
+        if (active) setLoading(false);
+      }
+    );
+
+    return () => {
+      active = false;
+      unsubDirect();
+    };
+  }, []);
+
+  const saveHeroBannerConfig = useCallback(async (next: HeroBannerConfig) => {
+    const cleanNext: HeroBannerConfig = {
+      ...DEFAULT_HERO_BANNER_CONFIG,
+      ...next,
+      overlayOpacity: Math.min(90, Math.max(0, Number(next.overlayOpacity ?? 55))),
+      updatedAt: new Date().toISOString(),
+    };
+    const serialized = JSON.stringify(cleanNext);
+    try {
+      localStorage.setItem(LOCAL_HERO_BANNER_KEY, serialized);
+    } catch {}
+    setBanner(cleanNext);
+    await upsertSettingDoc(HERO_BANNER_CONFIG_ID, serialized, { visible: true });
+    return cleanNext;
+  }, []);
+
+  const resetHeroBannerConfig = useCallback(async () => {
+    return saveHeroBannerConfig(DEFAULT_HERO_BANNER_CONFIG);
+  }, [saveHeroBannerConfig]);
+
+  return {
+    banner,
+    loading,
+    saveHeroBannerConfig,
+    resetHeroBannerConfig,
+    defaultBanner: DEFAULT_HERO_BANNER_CONFIG,
+  };
+}
+
+// ============================================================================
+// 9. Homepage Quick Actions, Shortcuts, Announcements & Section Visibility (/settings/homepage_config)
+// ============================================================================
+export interface HomepageQuickAction {
+  id: string;
+  label: string;
+  to: string;
+  tone: "red" | "rose" | "emerald" | "blue" | "amber";
+  iconName: string;
+  visible: boolean;
+}
+
+export interface HomepageFeaturedShortcut {
+  id: string;
+  title: string;
+  subtitle: string;
+  to: string;
+  iconName: string;
+  tone: "primary" | "blue" | "emerald" | "amber" | "rose";
+  visible: boolean;
+}
+
+export interface HomepageAnnouncement {
+  visible: boolean;
+  title: string;
+  text: string;
+  link: string;
+  tone: "emerald" | "amber" | "rose" | "blue";
+}
+
+export interface HomepageConfig {
+  showHero: boolean;
+  showQuickActions: boolean;
+  showFeaturedShortcuts: boolean;
+  showEmergencyBanner: boolean;
+  showDivisions: boolean;
+  showFooterAppCallout: boolean;
+  quickActions: HomepageQuickAction[];
+  featuredShortcuts: HomepageFeaturedShortcut[];
+  announcement: HomepageAnnouncement;
+  updatedAt?: string;
+}
+
+export const DEFAULT_HOMEPAGE_CONFIG: HomepageConfig = {
+  showHero: true,
+  showQuickActions: true,
+  showFeaturedShortcuts: true,
+  showEmergencyBanner: true,
+  showDivisions: true,
+  showFooterAppCallout: true,
+  quickActions: [
+    {
+      id: "qa_emergency_blood",
+      label: "জরুরী রক্ত",
+      to: "/emergency-request",
+      tone: "red",
+      iconName: "ShieldAlert",
+      visible: true,
+    },
+    {
+      id: "qa_blood_donor",
+      label: "রক্তদাতা",
+      to: "/blood-donor",
+      tone: "rose",
+      iconName: "Droplet",
+      visible: true,
+    },
+    {
+      id: "qa_donation",
+      label: "অনুদান তহবিল",
+      to: "/donation",
+      tone: "emerald",
+      iconName: "HandCoins",
+      visible: true,
+    },
+  ],
+  featuredShortcuts: [
+    {
+      id: "fs_map",
+      title: "নোয়াখালী ম্যাপ",
+      subtitle: "৯ উপজেলা ও দূরত্ব",
+      to: "/map",
+      iconName: "MapPin",
+      tone: "primary",
+      visible: true,
+    },
+    {
+      id: "fs_directory",
+      title: "ডিরেক্টরি",
+      subtitle: "প্রতিষ্ঠান ও ব্যবসা",
+      to: "/directory",
+      iconName: "Building2",
+      tone: "blue",
+      visible: true,
+    },
+    {
+      id: "fs_career",
+      title: "শিক্ষা ও ক্যারিয়ার",
+      subtitle: "চাকরি ও প্রতিষ্ঠান",
+      to: "/career",
+      iconName: "Briefcase",
+      tone: "emerald",
+      visible: true,
+    },
+    {
+      id: "fs_complaint",
+      title: "অভিযোগ ট্র্যাকিং",
+      subtitle: "লাইভ অগ্রগতি",
+      to: "/complaint-tracking",
+      iconName: "AlertTriangle",
+      tone: "amber",
+      visible: true,
+    },
+  ],
+  announcement: {
+    visible: false,
+    title: "গুরুত্বপূর্ণ ঘোষণা",
+    text: "",
+    link: "",
+    tone: "amber",
+  },
+};
+
+function parseHomepageConfig(raw: string | null | undefined): HomepageConfig | null {
+  if (!raw) return null;
+  try {
+    const p = JSON.parse(raw);
+    if (p && typeof p === "object") {
+      return {
+        ...DEFAULT_HOMEPAGE_CONFIG,
+        ...p,
+        quickActions: Array.isArray(p.quickActions) && p.quickActions.length > 0
+          ? p.quickActions
+          : DEFAULT_HOMEPAGE_CONFIG.quickActions,
+        featuredShortcuts: Array.isArray(p.featuredShortcuts) && p.featuredShortcuts.length > 0
+          ? p.featuredShortcuts
+          : DEFAULT_HOMEPAGE_CONFIG.featuredShortcuts,
+        announcement: {
+          ...DEFAULT_HOMEPAGE_CONFIG.announcement,
+          ...(p.announcement && typeof p.announcement === "object" ? p.announcement : {}),
+        },
+      };
+    }
+  } catch {}
+  return null;
+}
+
+export function useHomepageConfig() {
+  const [homepageConfig, setHomepageConfig] = useState<HomepageConfig>(() => {
+    try {
+      return parseHomepageConfig(localStorage.getItem(LOCAL_HOMEPAGE_KEY)) ?? DEFAULT_HOMEPAGE_CONFIG;
+    } catch {
+      return DEFAULT_HOMEPAGE_CONFIG;
+    }
+  });
+
+  useEffect(() => {
+    fetch(`/api/content?collection=settings&id=${HOMEPAGE_CONFIG_ID}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.item?.logo_url) {
+          const parsed = parseHomepageConfig(d.item.logo_url);
+          if (parsed) {
+            setHomepageConfig(parsed);
+            try {
+              localStorage.setItem(LOCAL_HOMEPAGE_KEY, JSON.stringify(parsed));
+            } catch {}
+          }
+        }
+      })
+      .catch(() => {});
+
+    const unsub = onSnapshot(
+      doc(db, "settings", HOMEPAGE_CONFIG_ID),
+      (snap) => {
+        if (snap.exists()) {
+          const parsed = parseHomepageConfig(snap.data()?.logo_url);
+          if (parsed) {
+            setHomepageConfig(parsed);
+            try {
+              localStorage.setItem(LOCAL_HOMEPAGE_KEY, JSON.stringify(parsed));
+            } catch {}
+          }
+        }
+      },
+      () => {}
+    );
+    return () => unsub();
+  }, []);
+
+  const saveHomepageConfig = useCallback(async (next: HomepageConfig) => {
+    const cleanNext: HomepageConfig = {
+      ...DEFAULT_HOMEPAGE_CONFIG,
+      ...next,
+      updatedAt: new Date().toISOString(),
+    };
+    const serialized = JSON.stringify(cleanNext);
+    try {
+      localStorage.setItem(LOCAL_HOMEPAGE_KEY, serialized);
+    } catch {}
+    setHomepageConfig(cleanNext);
+    await upsertSettingDoc(HOMEPAGE_CONFIG_ID, serialized, { visible: true });
+    return cleanNext;
+  }, []);
+
+  return {
+    homepageConfig,
+    saveHomepageConfig,
+    resetHomepageConfig: () => saveHomepageConfig(DEFAULT_HOMEPAGE_CONFIG),
+  };
+}
+
+// ============================================================================
+// 10. Website Content, FAQ, Public Notices, Footer, Social & Theme Config (/settings/website_content_config)
+// ============================================================================
+export type ThemeAccentPreset = "emerald" | "teal" | "blue" | "gold";
+
+export interface FaqEntry {
+  id: string;
+  question: string;
+  answer: string;
+  visible: boolean;
+}
+
+export interface PublicNoticeEntry {
+  id: string;
+  title: string;
+  body: string;
+  date: string;
+  visible: boolean;
+}
+
+export interface WebsiteContentConfig {
+  aboutMissionGoals: string[];
+  faqItems: FaqEntry[];
+  publicNotices: PublicNoticeEntry[];
+  footerCopyright: string;
+  footerTagline: string;
+  footerLinks: Array<{ label: string; to: string }>;
+  socialLinks: {
+    facebook: string;
+    youtube: string;
+    website: string;
+    whatsapp: string;
+  };
+  seoTitle: string;
+  seoDescription: string;
+  themeAccent: ThemeAccentPreset;
+  updatedAt?: string;
+}
+
+export const DEFAULT_WEBSITE_CONTENT_CONFIG: WebsiteContentConfig = {
+  aboutMissionGoals: [
+    "নোয়াখালী জেলার প্রতিটি উপজেলা ও ইউনিয়নের সঠিক যোগাযোগ তথ্য এক ক্লিকে প্রদান।",
+    "জরুরী প্রয়োজনে ২৪ ঘণ্টা স্বেচ্ছায় রক্তদাতাদের সাথে দ্রুত সংযোগ স্থাপন।",
+    "সব ধরণের সরকারি, বেসরকারি, আইনি ও জরুরি সেবা সম্পূর্ণ বিনামূল্যে পৌঁছে দেওয়া।",
+    "এলাকাবাসীর সহজ ব্যবহার ও সার্বক্ষণিক লাইভ চ্যাট ও এআই সহায়তা নিশ্চিত করা।",
+  ],
+  faqItems: [
+    {
+      id: "faq_1",
+      question: "স্মার্ট নোয়াখালী প্ল্যাটফর্মে নতুন তথ্য বা প্রতিষ্ঠান কীভাবে যোগ করবো?",
+      answer: "হোম পেজের 'নতুন তথ্য দিন' বা মেনু থেকে 'নতুন সেবা যোগ করুন' পেজে গিয়ে ফর্ম পূরণ করে জমা দিন। অনুমোদনের পর তা ডিরেক্টরিতে প্রকাশিত হবে।",
+      visible: true,
+    },
+    {
+      id: "faq_2",
+      question: "জরুরী রক্তের প্রয়োজনে কীভাবে রক্তদাতা খুঁজবো?",
+      answer: "হোম পেজ থেকে 'রক্তদাতা' বা 'জরুরী রক্ত' বাটনে ক্লিক করে রক্তের গ্রুপ ও উপজেলা অনুযায়ী সরাসরি রক্তদাতাদের সাথে যোগাযোগ করতে পারবেন।",
+      visible: true,
+    },
+  ],
+  publicNotices: [],
+  footerCopyright: "© স্মার্ট নোয়াখালী • নোয়াখালীর ডিজিটাল সিটিজেন সেবা ডিরেক্টরি",
+  footerTagline: "Android / iOS অ্যাপ ও PWA ডাউনলোড করুন",
+  footerLinks: [
+    { label: "আমাদের সেবা", to: "/about" },
+    { label: "ডিরেক্টরি", to: "/directory" },
+    { label: "রক্তদাতা", to: "/blood-donor" },
+    { label: "অনুদান তহবিল", to: "/donation" },
+  ],
+  socialLinks: {
+    facebook: "",
+    youtube: "",
+    website: "https://smartnoakhali.com",
+    whatsapp: "",
+  },
+  seoTitle: "Smart Noakhali — নোয়াখালীর ডিজিটাল সেবা ও ডিরেক্টরি",
+  seoDescription:
+    "২২টি প্রধান বিভাগ ও নোয়াখালীর সকল জরুরি সেবা, ডাক্তার, রক্তদাতা, পুলিশ, আইনজীবী ও নাগরিক তথ্য এক ক্লিকে।",
+  themeAccent: "emerald",
+};
+
+function parseWebsiteContentConfig(raw: string | null | undefined): WebsiteContentConfig | null {
+  if (!raw) return null;
+  try {
+    const p = JSON.parse(raw);
+    if (p && typeof p === "object") {
+      return {
+        ...DEFAULT_WEBSITE_CONTENT_CONFIG,
+        ...p,
+        aboutMissionGoals: Array.isArray(p.aboutMissionGoals) && p.aboutMissionGoals.length > 0
+          ? p.aboutMissionGoals
+          : DEFAULT_WEBSITE_CONTENT_CONFIG.aboutMissionGoals,
+        faqItems: Array.isArray(p.faqItems) ? p.faqItems : DEFAULT_WEBSITE_CONTENT_CONFIG.faqItems,
+        publicNotices: Array.isArray(p.publicNotices) ? p.publicNotices : [],
+        footerLinks: Array.isArray(p.footerLinks) ? p.footerLinks : DEFAULT_WEBSITE_CONTENT_CONFIG.footerLinks,
+        socialLinks: {
+          ...DEFAULT_WEBSITE_CONTENT_CONFIG.socialLinks,
+          ...(p.socialLinks && typeof p.socialLinks === "object" ? p.socialLinks : {}),
+        },
+      };
+    }
+  } catch {}
+  return null;
+}
+
+export function useWebsiteContentConfig() {
+  const [contentConfig, setContentConfig] = useState<WebsiteContentConfig>(() => {
+    try {
+      return parseWebsiteContentConfig(localStorage.getItem(LOCAL_WEBSITE_CONTENT_KEY)) ?? DEFAULT_WEBSITE_CONTENT_CONFIG;
+    } catch {
+      return DEFAULT_WEBSITE_CONTENT_CONFIG;
+    }
+  });
+
+  useEffect(() => {
+    fetch(`/api/content?collection=settings&id=${WEBSITE_CONTENT_CONFIG_ID}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.item?.logo_url) {
+          const parsed = parseWebsiteContentConfig(d.item.logo_url);
+          if (parsed) {
+            setContentConfig(parsed);
+            try {
+              localStorage.setItem(LOCAL_WEBSITE_CONTENT_KEY, JSON.stringify(parsed));
+            } catch {}
+          }
+        }
+      })
+      .catch(() => {});
+
+    const unsub = onSnapshot(
+      doc(db, "settings", WEBSITE_CONTENT_CONFIG_ID),
+      (snap) => {
+        if (snap.exists()) {
+          const parsed = parseWebsiteContentConfig(snap.data()?.logo_url);
+          if (parsed) {
+            setContentConfig(parsed);
+            try {
+              localStorage.setItem(LOCAL_WEBSITE_CONTENT_KEY, JSON.stringify(parsed));
+            } catch {}
+          }
+        }
+      },
+      () => {}
+    );
+    return () => unsub();
+  }, []);
+
+  const saveWebsiteContentConfig = useCallback(async (next: WebsiteContentConfig) => {
+    const cleanNext: WebsiteContentConfig = {
+      ...DEFAULT_WEBSITE_CONTENT_CONFIG,
+      ...next,
+      updatedAt: new Date().toISOString(),
+    };
+    const serialized = JSON.stringify(cleanNext);
+    try {
+      localStorage.setItem(LOCAL_WEBSITE_CONTENT_KEY, serialized);
+    } catch {}
+    setContentConfig(cleanNext);
+    await upsertSettingDoc(WEBSITE_CONTENT_CONFIG_ID, serialized, { visible: true });
+    return cleanNext;
+  }, []);
+
+  return {
+    contentConfig,
+    saveWebsiteContentConfig,
+    resetWebsiteContentConfig: () => saveWebsiteContentConfig(DEFAULT_WEBSITE_CONTENT_CONFIG),
   };
 }

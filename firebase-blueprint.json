@@ -848,6 +848,133 @@
         "visible": { "type": "boolean" }
       },
       "required": ["id", "bn", "sort_order", "visible"]
+    },
+    "UserNotification": {
+      "title": "UserNotification",
+      "description": "Global broadcast or user-targeted notification managed by Main Admin.",
+      "type": "object",
+      "properties": {
+        "user_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128,
+          "description": "Target user UID (empty string for global broadcast)."
+        },
+        "is_global": {
+          "type": "boolean",
+          "description": "Whether notification is broadcast to all users and visitors."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 180,
+          "description": "Notification title in Bengali or English."
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "Notification body message."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["info", "success", "warning", "status_update"],
+          "description": "Semantic notification category."
+        },
+        "link": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Optional navigation route or external URL."
+        },
+        "read": {
+          "type": "boolean",
+          "description": "Read status flag for user-targeted notifications."
+        },
+        "created_by_uid": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "UID of Main Admin who created the notification."
+        },
+        "created_at": {
+          "type": "string",
+          "description": "ISO creation timestamp."
+        },
+        "updated_at": {
+          "type": "string",
+          "description": "ISO last update timestamp."
+        }
+      },
+      "required": ["is_global", "title", "message", "type", "read", "created_at"]
+    },
+    "NotificationReadReceipt": {
+      "title": "NotificationReadReceipt",
+      "description": "Owner-scoped read marker for global broadcast notifications.",
+      "type": "object",
+      "properties": {
+        "notif_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "user_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "read_at": { "type": "string", "minLength": 1, "maxLength": 64 }
+      },
+      "required": ["notif_id", "user_id", "read_at"]
+    },
+    "UserFavorite": {
+      "title": "UserFavorite",
+      "description": "Bookmarked institutions, jobs, or service items owned by a user.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "user_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "target_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "target_type": { "type": "string", "enum": ["institution", "job", "service"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "subtitle": { "type": "string", "maxLength": 300 },
+        "link": { "type": "string", "maxLength": 300 },
+        "created_at": { "type": "string" }
+      },
+      "required": ["user_id", "target_id", "target_type", "title", "link", "created_at"]
+    },
+    "Institution": {
+      "title": "Institution",
+      "description": "District business or public institution directory record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "category": { "type": "string" },
+        "upazila": { "type": "string" },
+        "status": { "type": "string", "enum": ["approved", "pending", "rejected"] },
+        "created_at": { "type": "string" }
+      },
+      "required": ["name", "status", "created_at"]
+    },
+    "JobCircular": {
+      "title": "JobCircular",
+      "description": "Education, scholarship, and job circular listing.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "organization": { "type": "string" },
+        "status": { "type": "string", "enum": ["approved", "pending", "rejected"] },
+        "created_at": { "type": "string" }
+      },
+      "required": ["title", "organization", "status", "created_at"]
+    },
+    "ComplaintTracking": {
+      "title": "ComplaintTracking",
+      "description": "Public grievance & complaint tracking ticket.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "tracking_number": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "category": { "type": "string" },
+        "subject": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "status": { "type": "string", "enum": ["submitted", "under_review", "in_progress", "waiting_info", "resolved", "rejected"] },
+        "user_id": { "type": "string" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["tracking_number", "subject", "description", "status", "created_at"]
     }
   },
   "firestore": {
@@ -869,7 +996,7 @@
     },
     "/settings/{settingId}": {
       "schema": "SiteSetting",
-      "description": "Global site settings such as logo configuration."
+      "description": "Global site settings including site_config, branding, role_permissions, hero_banner_config, services_config, site_meta_config."
     },
     "/admins/{adminId}": {
       "schema": "Admin",
@@ -877,15 +1004,39 @@
     },
     "/users/{userId}": {
       "schema": "User",
-      "description": "User profiles and RBAC roles isolated to owner and admin."
+      "description": "User profiles and RBAC roles isolated to owner and main admin."
     },
     "/users/{userId}/security_events/{eventId}": {
       "schema": "SecurityEvent",
       "description": "Per-user security audit log subcollection."
     },
+    "/users/{userId}/notification_reads/{notifId}": {
+      "schema": "NotificationReadReceipt",
+      "description": "Owner-scoped read markers for global broadcast notifications."
+    },
+    "/user_notifications/{notifId}": {
+      "schema": "UserNotification",
+      "description": "Global broadcast and targeted user notifications."
+    },
+    "/user_favorites/{favId}": {
+      "schema": "UserFavorite",
+      "description": "User-owned bookmarked items."
+    },
+    "/institutions/{institutionId}": {
+      "schema": "Institution",
+      "description": "Business and institutional directory entries."
+    },
+    "/job_circulars/{circularId}": {
+      "schema": "JobCircular",
+      "description": "Verified job and scholarship circulars."
+    },
+    "/complaint_tracking/{complaintId}": {
+      "schema": "ComplaintTracking",
+      "description": "Citizen complaint tickets keyed by tracking number."
+    },
     "/donations/{donationId}": {
       "schema": "Donation",
-      "description": "Community donations moderated by admin."
+      "description": "Community donations moderated by main admin."
     },
     "/submissions/{submissionId}": {
       "schema": "Submission",

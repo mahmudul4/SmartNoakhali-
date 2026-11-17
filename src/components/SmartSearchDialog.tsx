@@ -129,6 +129,14 @@ export function SmartSearchModal({ isOpen, onClose, initialQuery = "" }: SmartSe
                 ? "/submit-info"
                 : cat.slug === "about"
                 ? "/about"
+                : cat.slug === "donation"
+                ? "/donation"
+                : cat.slug === "board-result"
+                ? "/board-result"
+                : cat.slug === "blood-donor"
+                ? "/blood-donor"
+                : cat.slug === "emergency-request"
+                ? "/emergency-request"
                 : `/category/${cat.slug}`,
             iconType: "category",
           });

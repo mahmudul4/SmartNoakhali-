@@ -120,3 +120,12 @@
 12. **Denial-of-Wallet Oversized String / ID Poisoning**:
     Document ID containing spaces/slashes or string field exceeding `maxLength`.
     *Rejected by*: `isValidId()` regex + strict `.size() <= maxLength` checks on every string property.
+
+13. **Global Notification Mutation / Unprivileged Broadcast Injection (`/user_notifications/{notifId}`)**:
+    Regular user or ordinary Admin attempting to create global broadcast notifications or mutate `read_by` directly on a global notification doc.
+    *Rejected by*: `allow create, delete: if isMainAdmin()` and read state tracked per-user in `/users/{userId}/notification_reads/{notifId}`.
+
+14. **Hero Banner Tampering (`/settings/hero_banner_config`)**:
+    Ordinary Admin (`mr.bear444plus@gmail.com`) or Editor attempting to modify `hero_banner_config` or upload to Firebase Storage `/banners/hero_banner/*`.
+    *Rejected by*: `isMainAdminProtectedSetting(settingId)` + `isMainAdmin()` in `firestore.rules` and `storage.rules`.
+

@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState, useRef, useEffect } from "react";
+import { useMemo, useRef } from "react";
 import {
   Phone,
   Droplet,
@@ -7,18 +7,18 @@ import {
   ChevronLeft,
   ChevronRight,
   Smartphone,
-  Layers,
-  Sparkles,
   MapPin,
   Building2,
   Briefcase,
   AlertTriangle,
-  Search,
+  HandCoins,
+  ShieldAlert,
 } from "lucide-react";
-import { useCategories, useDivisions } from "@/lib/store";
+import { useCategories, useDivisions, useHeroBannerConfig } from "@/lib/store";
+import type { Category, Division } from "@/data/categories";
 import { BannerPopup } from "@/components/BannerPopup";
-import { MobileSearch } from "@/components/SiteHeader";
-import { SmartSearchModal } from "@/components/SmartSearchDialog";
+import { EmergencyBanner } from "@/components/EmergencyBanner";
+import { ServiceCategoryCard } from "@/components/ServiceCategoryCard";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -34,382 +34,299 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
+function HeroActionLink({
+  href,
+  className,
+  children,
+}: {
+  href: string;
+  className: string;
+  children: React.ReactNode;
+}) {
+  const cleanHref = (href || "").trim();
+  if (cleanHref.startsWith("/")) {
+    return (
+      <Link to={cleanHref as "/"} className={className}>
+        {children}
+      </Link>
+    );
+  }
+  const isExternalHttp = /^https?:\/\//i.test(cleanHref);
+  return (
+    <a
+      href={cleanHref || "#"}
+      {...(isExternalHttp ? { target: "_blank", rel: "noreferrer" } : {})}
+      className={className}
+    >
+      {children}
+    </a>
+  );
+}
+
 function Index() {
-  const [query, setQuery] = useState("");
-  const [smartSearchOpen, setSmartSearchOpen] = useState(false);
-  const [selectedDivisionId, setSelectedDivisionId] = useState<string>("all");
   const { categories } = useCategories();
   const { divisions } = useDivisions();
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const { banner } = useHeroBannerConfig();
 
-  // Horizontal scroll helpers
-  const scroll = (direction: "left" | "right") => {
-    if (scrollContainerRef.current) {
-      const scrollAmount = direction === "left" ? -240 : 240;
-      scrollContainerRef.current.scrollBy({ left: scrollAmount, behavior: "smooth" });
+  // Preserve all visible service categories across all 22 divisions
+  const filteredCategories = useMemo(() => {
+    return categories.filter(
+      (c) => c.slug !== "chat" && c.slug !== "app-download" && c.visible !== false
+    );
+  }, [categories]);
+
+  // Group all categories strictly into the 22 main divisions vertically
+  const divisionSections = useMemo(() => {
+    const visibleDivisionIds = new Set(divisions.map((d) => d.id));
+    const bucket = new Map<string, Category[]>();
+    for (const d of divisions) {
+      bucket.set(d.id, []);
     }
-  };
 
-  // Filter categories based on division and search query
-  const filtered = categories.filter((c) => {
-    if (c.slug === "chat" || c.slug === "app-download") return false;
+    const fallbackDivisionId =
+      divisions.find((d) => d.id === "other_services")?.id ??
+      divisions[divisions.length - 1]?.id;
 
-    // Search query filter
-    const searchTarget = `${c.bn} ${c.en} ${c.description} ${c.divisionId}`.toLowerCase();
-    const matchesQuery = !query.trim() || searchTarget.includes(query.toLowerCase());
+    for (const cat of filteredCategories) {
+      if (visibleDivisionIds.has(cat.divisionId)) {
+        bucket.get(cat.divisionId)?.push(cat);
+      } else if (fallbackDivisionId) {
+        bucket.get(fallbackDivisionId)?.push(cat);
+      }
+    }
 
-    // Division filter
-    const matchesDivision =
-      selectedDivisionId === "all" || c.divisionId === selectedDivisionId;
+    return divisions
+      .map((div) => ({
+        division: div,
+        items: (bucket.get(div.id) ?? []).sort(
+          (a, b) => (a.sort_order ?? 999) - (b.sort_order ?? 999)
+        ),
+      }))
+      .filter((sec) => sec.items.length > 0);
+  }, [divisions, filteredCategories]);
 
-    return matchesQuery && matchesDivision;
-  });
-
-  const activeDivision =
-    selectedDivisionId === "all"
-      ? null
-      : divisions.find((d) => d.id === selectedDivisionId);
+  const desktopHeroImg = banner.desktopImageUrl || banner.mobileImageUrl;
+  const mobileHeroImg = banner.mobileImageUrl || banner.desktopImageUrl;
+  const hasHeroImage = banner.backgroundMode === "image" && Boolean(desktopHeroImg || mobileHeroImg);
 
   return (
-    <div className="mx-auto w-full max-w-3xl overflow-x-hidden px-3.5 pb-28 pt-4 sm:px-4">
-      {/* Hero Section */}
-      <section className="relative overflow-hidden rounded-3xl bg-gradient-hero p-5 text-primary-foreground shadow-elevated">
-        <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-gold/25 blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-12 -left-8 h-36 w-36 rounded-full bg-primary-glow/30 blur-3xl pointer-events-none" />
-        <div className="relative">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-[11px] font-medium backdrop-blur">
-            <Droplet className="h-3 w-3 text-gold" /> নোয়াখালীর ডিজিটাল সিটিজেন প্ল্যাটফর্ম
-          </span>
-          <h1 className="mt-3 font-display text-2xl font-extrabold leading-tight sm:text-3xl">
-            এক ক্লিকে নোয়াখালীর<br />সকল সেবা ও যোগাযোগ
-          </h1>
-          <p className="mt-2 text-xs opacity-90 sm:text-sm">
-            ২২টি বিভাগ • রক্তদাতা • ডাক্তার • আইনি সহায়তা • চাকরি • পরিবহন ও জরুরি হেল্পলাইন
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <a
-              href="tel:999"
-              className="flex items-center gap-2 rounded-full bg-gradient-gold px-4 py-2 text-xs font-bold text-primary-deep shadow-gold active:scale-95 transition"
-            >
-              <Phone className="h-3.5 w-3.5" /> জরুরী 999
-            </a>
-            <Link
-              to="/submit-info"
-              className="flex items-center gap-2 rounded-full border border-white/30 bg-white/10 px-4 py-2 text-xs font-bold backdrop-blur active:scale-95 transition hover:bg-white/20"
-            >
-              <Send className="h-3.5 w-3.5" /> নতুন তথ্য দিন
-            </Link>
-          </div>
-        </div>
-      </section>
+    <div className="mx-auto w-full max-w-3xl overflow-x-hidden px-3.5 pb-28 pt-3 sm:px-4 sm:pt-4">
+      {/* Dynamic Premium Hero Banner (Controlled by Main Admin) */}
+      {banner.visible !== false && (
+        <section
+          className={`relative overflow-hidden border border-emerald-300/20 p-5 shadow-[0_18px_40px_-14px_rgba(7,54,34,0.45)] sm:p-7 ${
+            banner.borderRadius || "rounded-[26px]"
+          }`}
+          style={{
+            background:
+              banner.backgroundMode === "solid"
+                ? banner.solidColor
+                : `linear-gradient(135deg, ${banner.gradientFrom} 0%, ${banner.gradientVia} 50%, ${banner.gradientTo} 100%)`,
+            color: banner.textColor || "#ffffff",
+          }}
+        >
+          {/* Uploaded Desktop / Mobile Hero Image Layers + Contrast Scrim */}
+          {hasHeroImage && (
+            <>
+              {mobileHeroImg && (
+                <img
+                  src={mobileHeroImg}
+                  alt={banner.headingLine1 || "Smart Noakhali"}
+                  className="pointer-events-none absolute inset-0 h-full w-full object-cover md:hidden"
+                  style={{ objectPosition: banner.imagePositionMobile || "center center" }}
+                />
+              )}
+              {desktopHeroImg && (
+                <img
+                  src={desktopHeroImg}
+                  alt={banner.headingLine1 || "Smart Noakhali"}
+                  className="pointer-events-none absolute inset-0 hidden h-full w-full object-cover md:block"
+                  style={{ objectPosition: banner.imagePositionDesktop || "center center" }}
+                />
+              )}
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0"
+                style={{
+                  backgroundColor: banner.overlayColor || "#042316",
+                  opacity: Math.min(90, Math.max(0, banner.overlayOpacity ?? 55)) / 100,
+                }}
+              />
+            </>
+          )}
 
-      {/* Global Search Bar */}
-      <div className="mt-4">
-        <MobileSearch
-          value={query}
-          onChange={setQuery}
-          onOpenDialog={() => setSmartSearchOpen(true)}
-          placeholder="ডাক্তার, পুলিশ, আইনজীবী বা সেবা খুঁজুন..."
+          {/* Subtle depth lighting & architectural glow */}
+          {banner.showDecorativeGlow !== false && (
+            <>
+              <div className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-amber-300/20 blur-3xl" />
+              <div className="pointer-events-none absolute -bottom-14 -left-10 h-44 w-44 rounded-full bg-emerald-300/20 blur-3xl" />
+              <div className="pointer-events-none inset-x-0 top-0 absolute h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+            </>
+          )}
+
+          <div className="relative">
+            {banner.badgeText.trim() && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/12 px-3 py-1 text-[11px] font-semibold tracking-wide text-emerald-50 backdrop-blur-sm">
+                <Droplet className="h-3 w-3 text-amber-300" /> {banner.badgeText}
+              </span>
+            )}
+
+            <h1
+              className="mt-3.5 font-bangla text-[24px] font-extrabold leading-[1.24] tracking-tight drop-shadow-xs sm:text-[32px]"
+              style={{ color: banner.textColor || "#ffffff" }}
+            >
+              {banner.headingLine1}
+              {banner.headingLine2 && (
+                <>
+                  <br />
+                  {banner.headingLine2}
+                </>
+              )}
+            </h1>
+
+            {banner.description.trim() && (
+              <p
+                className="mt-2.5 max-w-xl text-[12.5px] leading-relaxed sm:text-sm"
+                style={{ color: banner.subtextColor || "#ecfdf5", opacity: 0.92 }}
+              >
+                {banner.description}
+              </p>
+            )}
+
+            {(banner.primaryButtonText.trim() || banner.secondaryButtonText.trim()) && (
+              <div className="mt-5 flex flex-wrap items-center gap-2.5">
+                {banner.primaryButtonText.trim() && (
+                  <HeroActionLink
+                    href={banner.primaryButtonLink || "tel:999"}
+                    className="inline-flex min-h-[40px] items-center gap-2 rounded-full bg-gradient-gold px-5 py-2.5 text-xs font-extrabold text-primary-deep shadow-gold transition hover:brightness-105 active:scale-95 sm:text-[13px]"
+                  >
+                    <Phone className="h-3.5 w-3.5" /> {banner.primaryButtonText}
+                  </HeroActionLink>
+                )}
+                {banner.secondaryButtonText.trim() && (
+                  <HeroActionLink
+                    href={banner.secondaryButtonLink || "/submit-info"}
+                    className="inline-flex min-h-[40px] items-center gap-2 rounded-full border border-white/30 bg-white/10 px-4.5 py-2.5 text-xs font-bold text-white backdrop-blur-sm transition hover:bg-white/20 active:scale-95 sm:text-[13px]"
+                  >
+                    <Send className="h-3.5 w-3.5" /> {banner.secondaryButtonText}
+                  </HeroActionLink>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* Three Prominent Quick-Action Pill Buttons */}
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        <QuickLink
+          to="/emergency-request"
+          label="জরুরী রক্ত"
+          tone="red"
+          icon={<ShieldAlert className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />}
+        />
+        <QuickLink
+          to="/blood-donor"
+          label="রক্তদাতা"
+          tone="rose"
+          icon={<Droplet className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />}
+        />
+        <QuickLink
+          to="/donation"
+          label="অনুদান তহবিল"
+          tone="emerald"
+          icon={<HandCoins className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />}
         />
       </div>
 
-      {/* Quick Action Buttons */}
-      <div className="mt-4 grid grid-cols-3 gap-2">
-        <QuickLink to="/emergency-request" label="জরুরী রক্ত" tone="red" />
-        <QuickLink to="/blood-donor" label="রক্তদাতা" tone="rose" />
-        <QuickLink to="/donation" label="অনুদান তহবিল" tone="emerald" />
-      </div>
-
-      {/* 4 District Civic Service Hubs */}
+      {/* Featured District Service Shortcuts */}
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Link
           to="/map"
-          className="group flex items-center gap-2.5 rounded-2xl border border-border/80 bg-card p-2.5 shadow-sm transition hover:border-primary/40 hover:bg-muted/40 active:scale-95"
+          className="group flex min-w-0 items-center gap-2.5 rounded-2xl border border-border/80 bg-card p-2.5 shadow-card transition hover:border-primary/40 hover:bg-muted/40 active:scale-95"
         >
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
             <MapPin className="h-4 w-4" />
           </div>
           <div className="min-w-0">
-            <p className="font-display text-xs font-bold text-foreground truncate">নোয়াখালী ম্যাপ</p>
-            <p className="text-[10px] text-muted-foreground truncate">৯ উপজেলা ও দূরত্ব</p>
+            <p className="truncate font-display text-xs font-bold text-foreground">
+              নোয়াখালী ম্যাপ
+            </p>
+            <p className="truncate text-[10px] text-muted-foreground">
+              ৯ উপজেলা ও দূরত্ব
+            </p>
           </div>
         </Link>
 
         <Link
           to="/directory"
-          className="group flex items-center gap-2.5 rounded-2xl border border-border/80 bg-card p-2.5 shadow-sm transition hover:border-primary/40 hover:bg-muted/40 active:scale-95"
+          className="group flex min-w-0 items-center gap-2.5 rounded-2xl border border-border/80 bg-card p-2.5 shadow-card transition hover:border-primary/40 hover:bg-muted/40 active:scale-95"
         >
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600">
             <Building2 className="h-4 w-4" />
           </div>
           <div className="min-w-0">
-            <p className="font-display text-xs font-bold text-foreground truncate">ডিরেক্টরি</p>
-            <p className="text-[10px] text-muted-foreground truncate">প্রতিষ্ঠান ও ব্যবসা</p>
+            <p className="truncate font-display text-xs font-bold text-foreground">
+              ডিরেক্টরি
+            </p>
+            <p className="truncate text-[10px] text-muted-foreground">
+              প্রতিষ্ঠান ও ব্যবসা
+            </p>
           </div>
         </Link>
 
         <Link
           to="/career"
-          className="group flex items-center gap-2.5 rounded-2xl border border-border/80 bg-card p-2.5 shadow-sm transition hover:border-primary/40 hover:bg-muted/40 active:scale-95"
+          className="group flex min-w-0 items-center gap-2.5 rounded-2xl border border-border/80 bg-card p-2.5 shadow-card transition hover:border-primary/40 hover:bg-muted/40 active:scale-95"
         >
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600">
             <Briefcase className="h-4 w-4" />
           </div>
           <div className="min-w-0">
-            <p className="font-display text-xs font-bold text-foreground truncate">শিক্ষা ও ক্যারিয়ার</p>
-            <p className="text-[10px] text-muted-foreground truncate">চাকরি ও প্রতিষ্ঠান</p>
+            <p className="truncate font-display text-xs font-bold text-foreground">
+              শিক্ষা ও ক্যারিয়ার
+            </p>
+            <p className="truncate text-[10px] text-muted-foreground">
+              চাকরি ও প্রতিষ্ঠান
+            </p>
           </div>
         </Link>
 
         <Link
           to="/complaint-tracking"
-          className="group flex items-center gap-2.5 rounded-2xl border border-border/80 bg-card p-2.5 shadow-sm transition hover:border-primary/40 hover:bg-muted/40 active:scale-95"
+          className="group flex min-w-0 items-center gap-2.5 rounded-2xl border border-border/80 bg-card p-2.5 shadow-card transition hover:border-primary/40 hover:bg-muted/40 active:scale-95"
         >
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600">
             <AlertTriangle className="h-4 w-4" />
           </div>
           <div className="min-w-0">
-            <p className="font-display text-xs font-bold text-foreground truncate">অভিযোগ ট্র্যাকিং</p>
-            <p className="text-[10px] text-muted-foreground truncate">লাইভ অগ্রগতি</p>
+            <p className="truncate font-display text-xs font-bold text-foreground">
+              অভিযোগ ট্র্যাকিং
+            </p>
+            <p className="truncate text-[10px] text-muted-foreground">
+              লাইভ অগ্রগতি
+            </p>
           </div>
         </Link>
       </div>
 
-      {/* 22 Major Divisions Horizontal Swipe & Scroll Section */}
-      <div className="mt-6 mb-2">
-        <div className="flex items-center justify-between mb-2 px-1">
-          <div className="flex items-center gap-2">
-            <h2 className="font-display text-sm font-bold text-primary-deep sm:text-base">
-              ২২টি প্রধান বিভাগ
-            </h2>
-            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
-              {divisions.length} টি বিভাগ
-            </span>
-          </div>
+      {/* Live Emergency Alert Banner */}
+      <EmergencyBanner />
 
-          {/* Desktop Left/Right Scroll Arrows */}
-          <div className="hidden sm:flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => scroll("left")}
-              aria-label="Scroll left"
-              className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => scroll("right")}
-              aria-label="Scroll right"
-              className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Horizontal Scroll Bar */}
-        <div
-          ref={scrollContainerRef}
-          className="flex items-center gap-2 overflow-x-auto py-1.5 scrollbar-none scroll-smooth -mx-3.5 px-3.5 sm:-mx-0 sm:px-0"
-          style={{ WebkitOverflowScrolling: "touch" }}
-        >
-          {/* 'All' Division Button */}
-          <button
-            type="button"
-            onClick={() => setSelectedDivisionId("all")}
-            className={`flex shrink-0 items-center gap-2 rounded-2xl px-3.5 py-2 text-xs font-bold transition-all duration-200 active:scale-95 ${
-              selectedDivisionId === "all"
-                ? "bg-primary text-primary-foreground shadow-sm ring-2 ring-primary/40 scale-102"
-                : "border border-border/80 bg-card text-foreground hover:bg-muted/60"
-            }`}
-          >
-            <Layers className="h-3.5 w-3.5" />
-            <span>সকল সেবা</span>
-            <span
-              className={`rounded-full px-1.5 py-0.2 text-[10px] ${
-                selectedDivisionId === "all"
-                  ? "bg-white/20 text-white"
-                  : "bg-muted text-muted-foreground"
-              }`}
-            >
-              {categories.length}
-            </span>
-          </button>
-
-          {/* 22 Individual Division Pills */}
-          {divisions.map((div) => {
-            const isSelected = selectedDivisionId === div.id;
-            const Icon = div.icon;
-            const divCategoryCount = categories.filter((c) => c.divisionId === div.id).length;
-
-            return (
-              <button
-                key={div.id}
-                type="button"
-                onClick={() => setSelectedDivisionId(div.id)}
-                className={`flex shrink-0 items-center gap-2 rounded-2xl px-3.5 py-2 text-xs font-bold transition-all duration-200 active:scale-95 ${
-                  isSelected
-                    ? "bg-primary text-primary-foreground shadow-sm ring-2 ring-primary/40 scale-102"
-                    : "border border-border/80 bg-card text-foreground hover:bg-muted/60"
-                }`}
-              >
-                {div.customIconUrl ? (
-                  <img
-                    src={div.customIconUrl}
-                    alt={div.bn}
-                    className="h-4 w-4 rounded-full object-cover shrink-0"
-                  />
-                ) : (
-                  <Icon className="h-3.5 w-3.5 shrink-0" />
-                )}
-                <span className="whitespace-nowrap">{div.bn}</span>
-                {divCategoryCount > 0 && (
-                  <span
-                    className={`rounded-full px-1.5 py-0.2 text-[9.5px] font-mono ${
-                      isSelected
-                        ? "bg-white/20 text-white"
-                        : "bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    {divCategoryCount}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
+      {/* ALL 22 MAIN SECTIONS — Vertically Stacked, Each with 2-Row Horizontal Scroll */}
+      <div className="mt-6 space-y-6">
+        {divisionSections.map(({ division, items }, index) => (
+          <DivisionHorizontalSection
+            key={division.id}
+            division={division}
+            items={items}
+            index={index}
+          />
+        ))}
       </div>
-
-      {/* Selected Division Header Banner (if a specific division is active) */}
-      {activeDivision && (
-        <div className="mt-2 mb-3 flex items-center justify-between rounded-xl bg-muted/40 px-3 py-2 border border-border/60">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-primary">{activeDivision.bn}:</span>
-            <span className="text-[11px] text-muted-foreground line-clamp-1">
-              {activeDivision.description}
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setSelectedDivisionId("all")}
-            className="text-[11px] font-bold text-primary hover:underline shrink-0"
-          >
-            সকল বিভাগ দেখুন
-          </button>
-        </div>
-      )}
-
-      {/* Categories Grid Header */}
-      <div className="mt-4 mb-3 flex items-center justify-between">
-        <h3 className="font-display text-sm font-bold text-foreground">
-          {selectedDivisionId === "all" ? "ক্যাটাগরি তালিকা" : `${activeDivision?.bn} ক্যাটাগরি`}
-        </h3>
-        <span className="text-xs text-muted-foreground">{filtered.length} টি প্রাপ্ত</span>
-      </div>
-
-      {/* Categories Cards Grid */}
-      {filtered.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-border p-8 text-center">
-          <p className="text-xs text-muted-foreground">
-            এই অনুসন্ধানে কোনো ক্যাটাগরি পাওয়া যায়নি।
-          </p>
-          <button
-            type="button"
-            onClick={() => {
-              setQuery("");
-              setSelectedDivisionId("all");
-            }}
-            className="mt-2 text-xs font-bold text-primary hover:underline"
-          >
-            ফিল্টার রিসেট করুন
-          </button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4 sm:gap-3">
-          {filtered.map((c) => {
-            const Icon = c.icon;
-            const inner = (
-              <div className="group relative flex h-full w-full min-w-0 flex-col items-center justify-center rounded-2xl border border-border/80 bg-card p-2.5 text-center shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-elevated active:scale-95 sm:p-3.5">
-                <div
-                  className={`mb-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${c.tint} text-primary-deep shadow-xs sm:h-11 sm:w-11 overflow-hidden`}
-                >
-                  {c.customIconUrl ? (
-                    <img
-                      src={c.customIconUrl}
-                      alt={c.bn}
-                      className="h-full w-full object-cover rounded-xl"
-                    />
-                  ) : (
-                    <Icon className="h-5 w-5" />
-                  )}
-                </div>
-                <p className="line-clamp-2 w-full text-center font-display text-[12px] font-bold leading-tight text-foreground sm:text-[13px] break-words">
-                  {c.bn}
-                </p>
-                {c.description && (
-                  <p className="mt-1 hidden w-full line-clamp-1 text-[10.5px] text-muted-foreground sm:block">
-                    {c.description}
-                  </p>
-                )}
-              </div>
-            );
-
-            // Special dedicated routes
-            if (c.slug === "submit-info")
-              return (
-                <Link key={c.slug} to="/submit-info" className="min-w-0 flex flex-col">
-                  {inner}
-                </Link>
-              );
-            if (c.slug === "about")
-              return (
-                <Link key={c.slug} to="/about" className="min-w-0 flex flex-col">
-                  {inner}
-                </Link>
-              );
-            if (c.slug === "board-result")
-              return (
-                <Link key={c.slug} to="/board-result" className="min-w-0 flex flex-col">
-                  {inner}
-                </Link>
-              );
-            if (c.slug === "donation")
-              return (
-                <Link key={c.slug} to="/donation" className="min-w-0 flex flex-col">
-                  {inner}
-                </Link>
-              );
-            if (c.slug === "blood-donor")
-              return (
-                <Link key={c.slug} to="/blood-donor" className="min-w-0 flex flex-col">
-                  {inner}
-                </Link>
-              );
-            if (c.slug === "emergency-request")
-              return (
-                <Link key={c.slug} to="/emergency-request" className="min-w-0 flex flex-col">
-                  {inner}
-                </Link>
-              );
-
-            // Dynamic category page
-            return (
-              <Link
-                key={c.slug}
-                to="/category/$slug"
-                params={{ slug: c.slug }}
-                className="min-w-0 flex flex-col"
-              >
-                {inner}
-              </Link>
-            );
-          })}
-        </div>
-      )}
 
       {/* App Download Footer Callout */}
-      <div className="mt-8 flex flex-col items-center gap-2 text-center">
+      <footer className="mt-9 flex flex-col items-center gap-2 border-t border-border/60 pt-6 text-center">
         <Link
           to="/app-download"
           className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold text-primary transition hover:text-primary-deep hover:underline"
@@ -420,15 +337,94 @@ function Index() {
         <p className="text-[11px] text-muted-foreground">
           © স্মার্ট নোয়াখালী • নোয়াখালীর ডিজিটাল সিটিজেন সেবা ডিরেক্টরি
         </p>
-      </div>
+      </footer>
 
-      <SmartSearchModal
-        isOpen={smartSearchOpen}
-        onClose={() => setSmartSearchOpen(false)}
-        initialQuery={query}
-      />
       <BannerPopup />
     </div>
+  );
+}
+
+function DivisionHorizontalSection({
+  division,
+  items,
+  index,
+}: {
+  division: Division;
+  items: Category[];
+  index: number;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const DivIcon = division.icon;
+
+  const scrollByAmount = (direction: "left" | "right") => {
+    if (!scrollRef.current) return;
+    const amount = direction === "left" ? -260 : 260;
+    scrollRef.current.scrollBy({ left: amount, behavior: "smooth" });
+  };
+
+  return (
+    <section
+      aria-labelledby={`division-heading-${division.id}`}
+      className="border-b border-border/50 pb-5 last:border-b-0 last:pb-0"
+    >
+      {/* Clear Bengali Section Heading (clean layout without standalone count badge) */}
+      <div className="mb-2.5 flex items-center justify-between gap-2 px-0.5">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-50 via-emerald-100 to-emerald-200/85 text-emerald-700 ring-1 ring-emerald-300/70 shadow-[inset_0_1px_1px_rgba(255,255,255,0.9),0_3px_8px_-3px_rgba(4,120,87,0.2)]">
+            {division.customIconUrl ? (
+              <img
+                src={division.customIconUrl}
+                alt={division.bn}
+                loading="lazy"
+                className="h-full w-full rounded-xl object-cover"
+              />
+            ) : (
+              <DivIcon className="h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
+            )}
+          </div>
+          <div className="min-w-0">
+            <h2
+              id={`division-heading-${division.id}`}
+              className="truncate font-bangla text-[15px] font-bold leading-snug text-primary-deep sm:text-base"
+            >
+              {index + 1}. {division.bn}
+            </h2>
+          </div>
+        </div>
+
+        {/* Desktop Left/Right Scroll Helpers */}
+        <div className="hidden shrink-0 items-center gap-1 sm:flex">
+          <button
+            type="button"
+            onClick={() => scrollByAmount("left")}
+            aria-label={`${division.bn} বামে স্ক্রল করুন`}
+            className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-95"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => scrollByAmount("right")}
+            aria-label={`${division.bn} ডানে স্ক্রল করুন`}
+            className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-95"
+          >
+            <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* 2-Row Horizontally Scrollable Category Container */}
+      <div
+        ref={scrollRef}
+        className={`grid grid-flow-col ${
+          items.length === 1 ? "grid-rows-1" : "grid-rows-2"
+        } auto-cols-[80px] min-[360px]:auto-cols-[86px] sm:auto-cols-[106px] md:auto-cols-[114px] gap-2 sm:gap-2.5 overflow-x-auto overscroll-x-contain touch-pan-x touch-pan-y scroll-smooth pb-1 scrollbar-none`}
+      >
+        {items.map((cat) => (
+          <ServiceCategoryCard key={cat.slug} category={cat} />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -436,21 +432,25 @@ function QuickLink({
   to,
   label,
   tone,
+  icon,
 }: {
   to: "/blood-donor" | "/donation" | "/emergency-request";
   label: string;
   tone: "rose" | "red" | "emerald";
+  icon: React.ReactNode;
 }) {
   const tones = {
-    rose: "from-rose-500/15 to-rose-600/5 text-rose-700",
-    red: "from-red-500/15 to-red-600/5 text-red-700",
-    emerald: "from-emerald-500/15 to-emerald-700/5 text-emerald-800",
+    red: "border-red-200/80 bg-gradient-to-br from-red-50 via-rose-50 to-red-100/70 text-red-700 hover:border-red-300",
+    rose: "border-rose-200/80 bg-gradient-to-br from-rose-50 via-pink-50 to-rose-100/70 text-rose-700 hover:border-rose-300",
+    emerald:
+      "border-emerald-200/80 bg-gradient-to-br from-emerald-50 via-teal-50 to-emerald-100/70 text-emerald-800 hover:border-emerald-300",
   };
   return (
     <Link
       to={to}
-      className={`flex min-w-0 items-center justify-center rounded-2xl bg-gradient-to-br ${tones[tone]} px-2 py-3 text-center text-xs font-bold shadow-card active:scale-95 transition`}
+      className={`flex min-w-0 items-center justify-center gap-1 rounded-full border px-2 py-2.5 text-center text-[11px] font-bold shadow-card transition active:scale-95 min-[360px]:gap-1.5 min-[360px]:text-xs sm:py-3 ${tones[tone]}`}
     >
+      {icon}
       <span className="truncate">{label}</span>
     </Link>
   );

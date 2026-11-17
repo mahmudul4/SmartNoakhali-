@@ -131,6 +131,7 @@ export interface Category {
   description: string;
   formType?: CategoryFormType;
   customIconUrl?: string;
+  customRoute?: string;
   visible?: boolean;
   sort_order?: number;
 }

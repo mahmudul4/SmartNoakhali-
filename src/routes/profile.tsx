@@ -42,8 +42,6 @@ import {
   useUserFavorites,
   toggleUserFavorite,
   useUserNotifications,
-  markNotificationRead,
-  markAllNotificationsRead,
   type ComplaintItem,
 } from "@/lib/district-platform";
 
@@ -121,7 +119,14 @@ function ProfilePage() {
   const { items: submissions } = useCloudSubmissions();
   const { complaints } = useComplaints();
   const { favorites } = useUserFavorites(user?.uid);
-  const { notifications, unreadCount } = useUserNotifications(user?.uid);
+  const {
+    notifications,
+    unreadCount,
+    loading: loadingNotifications,
+    error: notificationsError,
+    markAsRead,
+    markAllAsRead,
+  } = useUserNotifications(user?.uid);
 
   // Form states
   const [displayName, setDisplayName] = useState("");
@@ -150,10 +155,10 @@ function ProfilePage() {
     }
   }, [user, username]);
 
-  // Redirect if not logged in
+  // Redirect if not logged in, preserving return destination
   useEffect(() => {
     if (!authLoading && !isAuthed) {
-      navigate({ to: "/auth", replace: true });
+      navigate({ to: "/auth", search: { redirect: "/profile" } as any, replace: true });
     }
   }, [authLoading, isAuthed, navigate]);
 
@@ -922,10 +927,8 @@ function ProfilePage() {
               <button
                 type="button"
                 onClick={async () => {
-                  if (user?.uid) {
-                    await markAllNotificationsRead(user.uid);
-                    toast.success("সকল নোটিফিকেশন পঠিত হিসেবে চিহ্নিত হয়েছে");
-                  }
+                  await markAllAsRead();
+                  toast.success("সকল নোটিফিকেশন পঠিত হিসেবে চিহ্নিত হয়েছে");
                 }}
                 className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline"
               >
@@ -934,7 +937,19 @@ function ProfilePage() {
             )}
           </div>
 
-          {notifications.length === 0 ? (
+          {notificationsError && (
+            <div className="flex items-center gap-2 rounded-2xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-800">
+              <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
+              <span>{notificationsError}</span>
+            </div>
+          )}
+
+          {loadingNotifications && notifications.length === 0 ? (
+            <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border p-8 text-center text-xs text-muted-foreground">
+              <Loader2 className="mb-2 h-6 w-6 animate-spin text-primary" />
+              বিজ্ঞপ্তি লোড হচ্ছে...
+            </div>
+          ) : notifications.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border p-8 text-center text-xs text-muted-foreground">
               <Bell className="mx-auto mb-2 h-6 w-6 text-muted-foreground/60" />
               এখনো কোনো নোটিফিকেশন নেই।
@@ -981,7 +996,7 @@ function ProfilePage() {
                       <button
                         type="button"
                         onClick={async () => {
-                          if (user?.uid) await markNotificationRead(user.uid, notif.id);
+                          await markAsRead(notif.id);
                         }}
                         className="rounded-lg bg-card border border-border p-1 text-muted-foreground hover:text-foreground"
                         title="পঠিত চিহ্নিত করুন"

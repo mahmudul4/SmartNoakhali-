@@ -143,12 +143,21 @@ function AuthPage() {
   const [busy, setBusy] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
 
+  const rawRedirect =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("redirect")
+      : null;
+  const safeRedirectPath =
+    rawRedirect && rawRedirect.startsWith("/") && !rawRedirect.startsWith("//")
+      ? rawRedirect
+      : null;
+
   async function handleGoogleLogin() {
     setGoogleBusy(true);
     try {
       const u = await signInWithGoogle();
       toast.success(`স্বাগতম, ${u.displayName || "ইউজার"}! Google দিয়ে লগইন সফল হয়েছে`);
-      navigate({ to: "/" });
+      navigate({ to: (safeRedirectPath || "/") as any });
     } catch (err: any) {
       toast.error(err?.message || "Google দিয়ে লগইন ব্যর্থ হয়েছে");
     } finally {
@@ -158,13 +167,15 @@ function AuthPage() {
 
   useEffect(() => {
     if (isAuthed) {
-      if (isMainAdmin || isStaff) {
+      if (safeRedirectPath) {
+        navigate({ to: safeRedirectPath as any, replace: true });
+      } else if (isMainAdmin || isStaff) {
         navigate({ to: "/mdmahmudulhashan" });
       } else {
         navigate({ to: "/" });
       }
     }
-  }, [isAuthed, isMainAdmin, isStaff, navigate]);
+  }, [isAuthed, isMainAdmin, isStaff, navigate, safeRedirectPath]);
 
   async function handleLogin() {
     const cleanInput = toEnglishDigits(loginId.trim());
@@ -186,7 +197,10 @@ function AuthPage() {
     const res = await signInUserOrStaff(cleanInput, password);
     await logEvent("login_success", res.isStaff ? "staff_via_user_login" : "user_login");
 
-    if (res.isStaff) {
+    if (safeRedirectPath) {
+      toast.success("লগইন সফল হয়েছে");
+      navigate({ to: safeRedirectPath as any });
+    } else if (res.isStaff) {
       toast.success("স্বাগতম! স্টাফ ড্যাশবোর্ডে প্রবেশ সফল");
       navigate({ to: "/mdmahmudulhashan" });
     } else {
@@ -241,7 +255,7 @@ function AuthPage() {
 
     await logEvent("signup_success", `direct_${channel}_signup`);
     toast.success("অভিনন্দন! আপনার অ্যাকাউন্ট তৈরি ও সরাসরি লগইন সফল হয়েছে।");
-    navigate({ to: "/" });
+    navigate({ to: (safeRedirectPath || "/") as any });
   }
 
   async function onSubmit(e: React.FormEvent) {

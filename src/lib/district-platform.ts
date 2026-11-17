@@ -14,8 +14,20 @@ import {
   serverTimestamp,
   limit,
 } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
 import { db, auth } from "@/lib/firebase";
 import { sanitizeFirestorePayload } from "@/lib/store";
+
+function useFirebaseAuthUid(): string | null {
+  const [authUid, setAuthUid] = useState<string | null>(() => auth.currentUser?.uid ?? null);
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setAuthUid(u?.uid ?? null);
+    });
+    return () => unsub();
+  }, []);
+  return authUid;
+}
 
 // ============================================================================
 // 1. CONSTANTS & LOCATION DATA
@@ -945,15 +957,18 @@ export async function lookupComplaintByTrackingNumber(trackingNumber: string): P
 export function useUserFavorites(userId?: string) {
   const [favorites, setFavorites] = useState<UserFavoriteItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const firebaseAuthUid = useFirebaseAuthUid();
+  const effectiveAuthUid = userId && firebaseAuthUid === userId ? firebaseAuthUid : null;
 
   useEffect(() => {
-    if (!userId) {
+    if (!effectiveAuthUid) {
       setFavorites([]);
+      setLoading(false);
       return;
     }
 
     setLoading(true);
-    const q = query(collection(db, "user_favorites"), where("user_id", "==", userId));
+    const q = query(collection(db, "user_favorites"), where("user_id", "==", effectiveAuthUid));
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -978,23 +993,25 @@ export function useUserFavorites(userId?: string) {
     );
 
     return () => unsub();
-  }, [userId]);
+  }, [effectiveAuthUid]);
 
   const toggleFavorite = useCallback(
     async (item: { target_id: string; target_type: "institution" | "job" | "service"; title: string; subtitle?: string; link: string }) => {
-      if (!userId) {
-        throw new Error("প্রিয় তালিকায় যোগ করতে দয়া করে লগইন করুন।");
+      const liveUid = auth.currentUser?.uid;
+      if (!userId || !liveUid || liveUid !== userId) {
+        throw new Error("প্রিয় তালিকায় যোগ করতে দয়া করে আপনার অ্যাকাউন্টে পুনরায় লগইন করুন।");
       }
       const existing = favorites.find((f) => f.target_id === item.target_id);
       if (existing) {
         await deleteDoc(doc(db, "user_favorites", existing.id));
       } else {
-        const id = `fav-${userId}-${item.target_id}`;
+        const safeTargetId = String(item.target_id || "item").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 60);
+        const id = `fav-${liveUid}-${safeTargetId}`.slice(0, 128);
         await setDoc(
           doc(db, "user_favorites", id),
           sanitizeFirestorePayload({
             id,
-            user_id: userId,
+            user_id: liveUid,
             target_id: item.target_id,
             target_type: item.target_type,
             title: item.title,
@@ -1022,20 +1039,99 @@ export function useUserFavorites(userId?: string) {
 }
 
 // --- USER NOTIFICATIONS ---
+function mapNotificationPermissionError(err: any): string {
+  const code = String(err?.code || "");
+  const msg = String(err?.message || "");
+  if (code.includes("permission-denied") || msg.toLowerCase().includes("insufficient permissions")) {
+    return "বিজ্ঞপ্তি অ্যাক্সেসে অনুমতি সমস্যা হয়েছে। পেজ রিলোড বা পুনরায় লগইন করে চেষ্টা করুন।";
+  }
+  return msg || "বিজ্ঞপ্তি লোড করতে সমস্যা হয়েছে";
+}
+
+function getLocalReadStorageKey(userId?: string): string {
+  return `sn_read_notif_ids_${userId || "guest"}`;
+}
+
+function readLocalReadIds(userId?: string): string[] {
+  try {
+    const key = getLocalReadStorageKey(userId);
+    const raw = localStorage.getItem(key) || (!userId ? localStorage.getItem("sn_guest_read_notif_ids") : null);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
 export function useUserNotifications(userId?: string) {
-  const [notifications, setNotifications] = useState<UserNotificationItem[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const firebaseAuthUid = useFirebaseAuthUid();
+  // Only run user-scoped Firestore listeners when real Firebase Auth UID matches userId
+  const effectiveAuthUid = userId && firebaseAuthUid === userId ? firebaseAuthUid : null;
+
+  const [globalItems, setGlobalItems] = useState<UserNotificationItem[]>([]);
+  const [userItems, setUserItems] = useState<UserNotificationItem[]>([]);
+  const [cloudReadIds, setCloudReadIds] = useState<string[]>([]);
+  const [loadingGlobal, setLoadingGlobal] = useState(true);
+  const [loadingUser, setLoadingUser] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [localReadIds, setLocalReadIds] = useState<string[]>(() => readLocalReadIds(userId));
 
   useEffect(() => {
-    // Listen to global notifications and user specific
-    const q = query(collection(db, "user_notifications"), orderBy("created_at", "desc"), limit(50));
-    const unsub = onSnapshot(
-      q,
+    setLocalReadIds(readLocalReadIds(userId));
+  }, [userId]);
+
+  useEffect(() => {
+    setLoadingGlobal(true);
+    setError(null);
+    const qGlobal = query(
+      collection(db, "user_notifications"),
+      where("is_global", "==", true),
+      limit(30)
+    );
+    const unsubGlobal = onSnapshot(
+      qGlobal,
       (snap) => {
         const list: UserNotificationItem[] = [];
         snap.forEach((d) => {
           const data = d.data();
-          if (data.is_global || (userId && data.user_id === userId)) {
+          const readBy: string[] = Array.isArray(data.read_by) ? data.read_by : [];
+          const isReadLegacy = Boolean(data.read) || (userId ? readBy.includes(userId) : false);
+          list.push({
+            id: d.id,
+            user_id: data.user_id,
+            is_global: true,
+            title: String(data.title || ""),
+            message: String(data.message || ""),
+            type: data.type || "info",
+            link: data.link,
+            read: isReadLegacy,
+            created_at: String(data.created_at || new Date().toISOString()),
+          });
+        });
+        setGlobalItems(list);
+        setLoadingGlobal(false);
+      },
+      (err) => {
+        setError(mapNotificationPermissionError(err));
+        setLoadingGlobal(false);
+      }
+    );
+
+    let unsubUser: (() => void) | null = null;
+    let unsubReceipts: (() => void) | null = null;
+
+    if (effectiveAuthUid) {
+      setLoadingUser(true);
+      const qUser = query(
+        collection(db, "user_notifications"),
+        where("user_id", "==", effectiveAuthUid),
+        limit(40)
+      );
+      unsubUser = onSnapshot(
+        qUser,
+        (snap) => {
+          const list: UserNotificationItem[] = [];
+          snap.forEach((d) => {
+            const data = d.data();
             list.push({
               id: d.id,
               user_id: data.user_id,
@@ -1047,27 +1143,220 @@ export function useUserNotifications(userId?: string) {
               read: Boolean(data.read),
               created_at: String(data.created_at || new Date().toISOString()),
             });
-          }
-        });
-        setNotifications(list);
-        setUnreadCount(list.filter((n) => !n.read).length);
-      },
-      () => {}
-    );
-    return () => unsub();
-  }, [userId]);
+          });
+          setUserItems(list);
+          setLoadingUser(false);
+        },
+        (err) => {
+          setError(mapNotificationPermissionError(err));
+          setLoadingUser(false);
+        }
+      );
 
-  const markAsRead = useCallback(async (id: string) => {
-    try {
-      await updateDoc(doc(db, "user_notifications", id), { read: true });
-    } catch {}
-  }, []);
+      // Per-user read receipts for global notifications (/users/{uid}/notification_reads)
+      const qReceipts = query(
+        collection(db, "users", effectiveAuthUid, "notification_reads"),
+        limit(100)
+      );
+      unsubReceipts = onSnapshot(
+        qReceipts,
+        (snap) => {
+          setCloudReadIds(snap.docs.map((d) => d.id));
+        },
+        () => {
+          // Silently rely on local read cache if subcollection has no rules yet
+        }
+      );
+    } else {
+      setUserItems([]);
+      setCloudReadIds([]);
+      setLoadingUser(false);
+    }
+
+    return () => {
+      unsubGlobal();
+      if (unsubUser) unsubUser();
+      if (unsubReceipts) unsubReceipts();
+    };
+  }, [userId, effectiveAuthUid]);
+
+  const notifications = useMemo(() => {
+    const merged = new Map<string, UserNotificationItem>();
+    for (const item of [...globalItems, ...userItems]) {
+      const effectiveRead =
+        item.read ||
+        cloudReadIds.includes(item.id) ||
+        localReadIds.includes(item.id);
+      merged.set(item.id, { ...item, read: effectiveRead });
+    }
+    return Array.from(merged.values()).sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+  }, [globalItems, userItems, cloudReadIds, localReadIds]);
+
+  const unreadCount = useMemo(
+    () => notifications.filter((n) => !n.read).length,
+    [notifications]
+  );
+
+  const persistLocalRead = useCallback(
+    (ids: string[]) => {
+      setLocalReadIds((prev) => {
+        const next = Array.from(new Set([...prev, ...ids]));
+        try {
+          localStorage.setItem(getLocalReadStorageKey(userId), JSON.stringify(next));
+          if (!userId) {
+            localStorage.setItem("sn_guest_read_notif_ids", JSON.stringify(next));
+          }
+        } catch {}
+        return next;
+      });
+    },
+    [userId]
+  );
+
+  const markAsRead = useCallback(
+    async (id: string) => {
+      const target = notifications.find((n) => n.id === id);
+      persistLocalRead([id]);
+
+      if (!effectiveAuthUid) {
+        return;
+      }
+
+      if (target && !target.is_global && target.user_id === effectiveAuthUid) {
+        await updateDoc(doc(db, "user_notifications", id), {
+          read: true,
+          updated_at: new Date().toISOString(),
+        }).catch(() => {});
+      } else {
+        // Least-privilege: record read state inside user's own notification_reads subcollection
+        await setDoc(
+          doc(db, "users", effectiveAuthUid, "notification_reads", id),
+          {
+            notif_id: id,
+            user_id: effectiveAuthUid,
+            read_at: new Date().toISOString(),
+          },
+          { merge: true }
+        ).catch(() => {});
+      }
+    },
+    [effectiveAuthUid, notifications, persistLocalRead]
+  );
+
+  const markAllAsRead = useCallback(async () => {
+    const unread = notifications.filter((n) => !n.read);
+    if (unread.length === 0) return;
+
+    persistLocalRead(unread.map((u) => u.id));
+    if (!effectiveAuthUid) return;
+
+    await Promise.all(unread.map((n) => markAsRead(n.id)));
+  }, [notifications, effectiveAuthUid, persistLocalRead, markAsRead]);
 
   return {
     notifications,
     unreadCount,
+    loading: loadingGlobal || loadingUser,
+    error,
     markAsRead,
+    markAllAsRead,
   };
+}
+
+// --- MAIN ADMIN NOTIFICATIONS MANAGEMENT ---
+export function useAdminNotifications(enabled: boolean) {
+  const firebaseAuthUid = useFirebaseAuthUid();
+  const [items, setItems] = useState<UserNotificationItem[]>([]);
+  const [loading, setLoading] = useState(Boolean(enabled));
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!enabled || !firebaseAuthUid) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    const q = query(collection(db, "user_notifications"), limit(80));
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const list: UserNotificationItem[] = snap.docs.map((d) => {
+          const data = d.data();
+          return {
+            id: d.id,
+            user_id: data.user_id ? String(data.user_id) : undefined,
+            is_global: Boolean(data.is_global),
+            title: String(data.title || ""),
+            message: String(data.message || ""),
+            type: (data.type as UserNotificationItem["type"]) || "info",
+            link: data.link ? String(data.link) : undefined,
+            read: Boolean(data.read),
+            created_at: String(data.created_at || new Date().toISOString()),
+          };
+        });
+        list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        setItems(list);
+        setLoading(false);
+      },
+      (err) => {
+        setError(mapNotificationPermissionError(err));
+        setLoading(false);
+      }
+    );
+
+    return () => unsub();
+  }, [enabled, firebaseAuthUid]);
+
+  return { items, loading, error };
+}
+
+export async function createAdminNotification(input: {
+  title: string;
+  message: string;
+  type: UserNotificationItem["type"];
+  is_global: boolean;
+  user_id?: string;
+  link?: string;
+}) {
+  if (!auth.currentUser) {
+    throw new Error("অনুগ্রহ করে প্রধান এডমিন হিসেবে Firebase Auth সেশনে লগইন করুন।");
+  }
+  const title = input.title.trim();
+  const message = input.message.trim();
+  if (!title || !message) {
+    throw new Error("বিজ্ঞপ্তির শিরোনাম ও বিস্তারিত বার্তা আবশ্যক।");
+  }
+  if (!input.is_global && !input.user_id?.trim()) {
+    throw new Error("ব্যক্তিগত বিজ্ঞপ্তির জন্য ব্যবহারকারীর UID আবশ্যক।");
+  }
+
+  const notifId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const cleanPayload = sanitizeFirestorePayload({
+    id: notifId,
+    is_global: Boolean(input.is_global),
+    ...(input.is_global ? {} : { user_id: input.user_id!.trim() }),
+    title: title.slice(0, 200),
+    message: message.slice(0, 1500),
+    type: input.type || "info",
+    ...(input.link?.trim() ? { link: input.link.trim().slice(0, 500) } : {}),
+    read: false,
+    created_at: new Date().toISOString(),
+  });
+
+  await setDoc(doc(db, "user_notifications", notifId), cleanPayload);
+  return notifId;
+}
+
+export async function deleteAdminNotification(notifId: string) {
+  if (!auth.currentUser) {
+    throw new Error("অনুমতি নেই।");
+  }
+  await deleteDoc(doc(db, "user_notifications", notifId));
 }
 
 // Standalone Helper Functions & Aliases
@@ -1141,8 +1430,14 @@ export async function toggleUserFavorite(
     link?: string;
   }
 ) {
-  const targetId = item.targetId || item.target_id || "fav_item";
-  const favDocId = `${userId}_${targetId}`;
+  const liveUid = auth.currentUser?.uid;
+  if (!liveUid || liveUid !== userId) {
+    throw new Error("প্রিয় তালিকায় যোগ করতে দয়া করে আপনার অ্যাকাউন্টে পুনরায় লগইন করুন।");
+  }
+  const targetId = String(item.targetId || item.target_id || "fav_item")
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 60);
+  const favDocId = `${liveUid}_${targetId}`.slice(0, 128);
   const docRef = doc(db, "user_favorites", favDocId);
   const snap = await getDoc(docRef);
   if (snap.exists()) {
@@ -1152,8 +1447,8 @@ export async function toggleUserFavorite(
       docRef,
       sanitizeFirestorePayload({
         id: favDocId,
-        user_id: userId,
-        target_id: targetId,
+        user_id: liveUid,
+        target_id: item.targetId || item.target_id || "fav_item",
         target_type: item.targetType || item.target_type || "service",
         title: item.title || "সংরক্ষিত আইটেম",
         subtitle: item.subtitle || undefined,
@@ -1165,18 +1460,62 @@ export async function toggleUserFavorite(
 }
 
 export async function markNotificationRead(userId: string, notifId: string) {
+  const existingLocal = readLocalReadIds(userId);
+  if (!existingLocal.includes(notifId)) {
+    try {
+      localStorage.setItem(
+        getLocalReadStorageKey(userId),
+        JSON.stringify([...existingLocal, notifId])
+      );
+    } catch {}
+  }
+
+  const liveUid = auth.currentUser?.uid;
+  if (!liveUid || liveUid !== userId) return;
+
   const docRef = doc(db, "user_notifications", notifId);
-  await setDoc(docRef, { read: true, updated_at: new Date().toISOString() }, { merge: true });
+  const snap = await getDoc(docRef).catch(() => null);
+  if (!snap?.exists()) return;
+  const data = snap.data();
+  if (!data.is_global && data.user_id === liveUid) {
+    await updateDoc(docRef, { read: true, updated_at: new Date().toISOString() }).catch(() => {});
+  } else if (data.is_global) {
+    await setDoc(
+      doc(db, "users", liveUid, "notification_reads", notifId),
+      {
+        notif_id: notifId,
+        user_id: liveUid,
+        read_at: new Date().toISOString(),
+      },
+      { merge: true }
+    ).catch(() => {});
+  }
 }
 
 export async function markAllNotificationsRead(userId: string) {
+  const liveUid = auth.currentUser?.uid;
+  if (!liveUid || liveUid !== userId) return;
   try {
-    const q = query(collection(db, "user_notifications"));
-    const snap = await getDocs(q);
-    const batchPromises = snap.docs.map((d) =>
-      setDoc(d.ref, { read: true, updated_at: new Date().toISOString() }, { merge: true })
+    const qUser = query(collection(db, "user_notifications"), where("user_id", "==", liveUid));
+    const snapUser = await getDocs(qUser);
+    const userPromises = snapUser.docs.map((d) =>
+      updateDoc(d.ref, { read: true, updated_at: new Date().toISOString() }).catch(() => {})
     );
-    await Promise.all(batchPromises);
+    const qGlobal = query(collection(db, "user_notifications"), where("is_global", "==", true), limit(30));
+    const snapGlobal = await getDocs(qGlobal);
+    const globalPromises = snapGlobal.docs.map((d) =>
+      setDoc(
+        doc(db, "users", liveUid, "notification_reads", d.id),
+        {
+          notif_id: d.id,
+          user_id: liveUid,
+          read_at: new Date().toISOString(),
+        },
+        { merge: true }
+      ).catch(() => {})
+    );
+    await Promise.all([...userPromises, ...globalPromises]);
   } catch {}
 }
+
 

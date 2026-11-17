@@ -24,6 +24,7 @@ import {
   useCloudDonorEvents,
   type DonorRow,
 } from "@/lib/cloud";
+import { CategoryIconBadge } from "@/components/ServiceCategoryCard";
 import { toast } from "sonner";
 
 export interface Listing {
@@ -213,18 +214,11 @@ function CategoryPage() {
       </div>
 
       <div className="mb-4 flex w-full min-w-0 items-center gap-3 overflow-hidden rounded-2xl bg-gradient-card p-3.5 shadow-card sm:p-4">
-        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${cat.tint} text-primary-deep sm:h-12 sm:w-12 overflow-hidden`}>
-          {cat.customIconUrl ? (
-            <img src={cat.customIconUrl} alt={cat.bn} className="h-full w-full object-cover rounded-xl" />
-          ) : (
-            <cat.icon className="h-6 w-6" />
-          )}
-        </div>
+        <CategoryIconBadge category={cat} size="lg" />
         <div className="min-w-0 flex-1">
           <h1 className="truncate font-display text-lg font-bold text-primary-deep">{cat.bn}</h1>
           <p className="truncate text-xs text-muted-foreground">{cat.description}</p>
         </div>
-        <span className="shrink-0 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">{list.length}</span>
       </div>
 
       <Link

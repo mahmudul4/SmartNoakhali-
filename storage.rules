@@ -1,36 +1,59 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    
+
     function isSignedIn() {
       return request.auth != null;
     }
-    
-    function isSuperAdmin() {
-      return isSignedIn() && (
-        request.auth.token.email == "mdmahmudulhashan0@gmail.com"
-      );
+
+    function isNonAnonymous() {
+      return isSignedIn() && request.auth.token.firebase.sign_in_provider != 'anonymous';
     }
-    
+
+    // Main Admin ONLY (mdmahmudulhashan0@gmail.com)
+    function isMainAdmin() {
+      return isSignedIn() &&
+        request.auth.token.email != null &&
+        request.auth.token.email.lower() == "mdmahmudulhashan0@gmail.com" &&
+        (request.auth.token.email_verified == true || request.auth.token.firebase.sign_in_provider == 'password');
+    }
+
+    // Ordinary Admin / Editor (requires verified email)
+    function isSecondaryAdmin() {
+      return isSignedIn() &&
+        request.auth.token.email_verified == true &&
+        request.auth.token.email != null &&
+        request.auth.token.email.lower() == "mr.bear444plus@gmail.com";
+    }
+
     function isStaff() {
-      return isSuperAdmin() || (
-        isSignedIn() && (
-          request.auth.token.email == "mr.bear444plus@gmail.com"
-        )
-      );
+      return isMainAdmin() || isSecondaryAdmin();
     }
 
-    function isImage() {
-      return request.resource.contentType.matches('image/.*')
-        && request.resource.size < 20 * 1024 * 1024;
+    function isValidImageUpload() {
+      return request.resource != null &&
+        request.resource.size > 0 &&
+        request.resource.size <= 10 * 1024 * 1024 &&
+        (
+          request.resource.contentType == 'image/jpeg' ||
+          request.resource.contentType == 'image/jpg' ||
+          request.resource.contentType == 'image/png' ||
+          request.resource.contentType == 'image/webp' ||
+          request.resource.contentType == 'image/gif' ||
+          request.resource.contentType == 'image/svg+xml' ||
+          request.resource.contentType == 'image/x-icon'
+        );
     }
 
-    function isMedia() {
-      return (
-        request.resource.contentType.matches('image/.*') ||
-        request.resource.contentType.matches('audio/.*') ||
-        request.resource.contentType.matches('application/pdf')
-      ) && request.resource.size < 20 * 1024 * 1024;
+    function isValidMediaUpload() {
+      return request.resource != null &&
+        request.resource.size > 0 &&
+        request.resource.size <= 20 * 1024 * 1024 &&
+        (
+          request.resource.contentType.matches('image/.*') ||
+          request.resource.contentType.matches('audio/.*') ||
+          request.resource.contentType == 'application/pdf'
+        );
     }
 
     // Public readable assets across the portal
@@ -38,59 +61,76 @@ service firebase.storage {
       allow read: if true;
     }
 
-    // User profile avatars
+    // User profile avatars — owner or Main Admin only
     match /users/{userId}/avatar/{fileName} {
-      allow write: if isSignedIn() && isImage();
+      allow write: if (isSignedIn() && request.auth.uid == userId && isValidImageUpload()) || (isMainAdmin() && isValidImageUpload());
+      allow delete: if (isSignedIn() && request.auth.uid == userId) || isMainAdmin();
     }
 
-    // Staff avatars
+    // Staff avatars — owner or Main Admin
     match /staff_avatars/{userId}/{fileName} {
-      allow write: if isSignedIn() && isImage();
+      allow write: if ((isSignedIn() && request.auth.uid == userId) || isMainAdmin() || isStaff()) && isValidImageUpload();
+      allow delete: if (isSignedIn() && request.auth.uid == userId) || isMainAdmin();
     }
 
     // Citizen submissions / directory listings
     match /submissions/{subId}/{fileName} {
-      allow write: if isSignedIn() && isImage();
+      allow write: if isSignedIn() && isValidImageUpload();
+      allow delete: if isStaff();
     }
 
     // Blood donor profile images
     match /donors/{donorId}/{fileName} {
-      allow write: if isSignedIn() && isImage();
+      allow write: if isSignedIn() && isValidImageUpload();
+      allow delete: if isStaff();
     }
 
     // Blood donation event certificates / photos
     match /donor-events/{donorId}/{fileName} {
-      allow write: if isSignedIn() && isImage();
+      allow write: if isSignedIn() && isValidImageUpload();
+      allow delete: if isStaff();
     }
 
-    // Site settings & logo
+    // Protected site settings & logo — Main Admin ONLY
     match /settings/{settingKey}/{fileName} {
-      allow write: if isSignedIn() && isImage();
+      allow write: if isMainAdmin() && isValidImageUpload();
+      allow delete: if isMainAdmin();
     }
 
-    // Branding assets (logos, favicons, PWA icons)
+    // Branding assets (logos, favicons, PWA icons) — Main Admin ONLY
     match /branding/{fileName} {
-      allow write: if isSignedIn() && isImage();
+      allow write: if isMainAdmin() && isValidImageUpload();
+      allow delete: if isMainAdmin();
     }
 
-    // Category images
+    // Category images — Staff / Main Admin
     match /categories/{categorySlug}/{fileName} {
-      allow write: if isSignedIn() && isImage();
+      allow write: if isStaff() && isValidImageUpload();
+      allow delete: if isMainAdmin();
     }
 
-    // Emergency banners
+    // Hero Banner assets — STRICTLY Main Admin ONLY
+    match /banners/hero_banner/{fileName} {
+      allow write: if isMainAdmin() && isValidImageUpload();
+      allow delete: if isMainAdmin();
+    }
+
+    // Other Emergency / Popup banners — Staff / Main Admin
     match /banners/{bannerId}/{fileName} {
-      allow write: if isSignedIn() && isImage();
+      allow write: if (bannerId != "hero_banner" ? isStaff() : isMainAdmin()) && isValidImageUpload();
+      allow delete: if bannerId != "hero_banner" ? isStaff() : isMainAdmin();
     }
 
     // Chat attachments (images, voice recordings, PDFs)
     match /chat/{threadId}/{fileName} {
-      allow write: if isSignedIn() && isMedia();
+      allow write: if isSignedIn() && isValidMediaUpload();
+      allow delete: if isMainAdmin();
     }
 
-    // General fallback uploads
+    // General uploads — Authenticated non-anonymous users or staff
     match /uploads/{entityId}/{fileName} {
-      allow write: if isSignedIn() && isMedia();
+      allow write: if (isNonAnonymous() || isStaff()) && isValidMediaUpload();
+      allow delete: if isMainAdmin();
     }
   }
 }

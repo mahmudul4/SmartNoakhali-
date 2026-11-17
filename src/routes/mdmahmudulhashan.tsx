@@ -133,6 +133,8 @@ import { UniversalImageUploader } from "@/components/UniversalImageUploader";
 import { SecurityPanel } from "@/components/security/SecurityPanel";
 import { RolePermissionsManager } from "@/components/RolePermissionsManager";
 import { WebsiteBrandingManager } from "@/components/WebsiteBrandingManager";
+import { HeroBannerManager } from "@/components/HeroBannerManager";
+import { AdminNotificationsManager } from "@/components/AdminNotificationsManager";
 import { TaskManager } from "@/components/TaskManager";
 import {
   InstitutionsAdminPanel,
@@ -479,6 +481,8 @@ function AdminLoginForm() {
 
 type Tab =
   | "overview"
+  | "homepage"
+  | "notifications"
   | "tasks"
   | "roles"
   | "branding"
@@ -617,6 +621,8 @@ function Dashboard({
   // Enforce dynamic tab access based on permissions
   useEffect(() => {
     const mainAdminOnlyTabs: Tab[] = [
+      "homepage",
+      "notifications",
       "roles",
       "services",
       "donation",
@@ -783,6 +789,16 @@ function Dashboard({
         <TabBtn active={tab === "overview"} onClick={() => setTab("overview")}>
           ড্যাশবোর্ড
         </TabBtn>
+        {isMainAdmin && (
+          <TabBtn active={tab === "homepage"} onClick={() => setTab("homepage")}>
+            🏠 হোমপেজ ও হিরো ব্যানার
+          </TabBtn>
+        )}
+        {isMainAdmin && (
+          <TabBtn active={tab === "notifications"} onClick={() => setTab("notifications")}>
+            🔔 বিজ্ঞপ্তি পরিচালনা
+          </TabBtn>
+        )}
         <TabBtn active={tab === "tasks"} onClick={() => setTab("tasks")}>
           📋 টাস্ক ও করণীয়
         </TabBtn>
@@ -961,6 +977,10 @@ function Dashboard({
             auditLogs={auditHook.logs}
           />
         )}
+
+        {tab === "homepage" && isMainAdmin && <HeroBannerManager />}
+
+        {tab === "notifications" && isMainAdmin && <AdminNotificationsManager />}
 
         {tab === "tasks" && <TaskManager />}
 

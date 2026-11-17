@@ -39,11 +39,12 @@ export interface CategoryAuditReport {
   }>;
   missingFromFirestore: string[];
   orphanInFirestore: string[];
+  duplicateDocIds: Array<{ docId: string; canonicalSlug: string; bn: string; divisionId: string }>;
 }
 
 /**
- * Idempotent batch-synchronization of all 181 categories and 22 divisions into Firebase Firestore.
- * Does not overwrite existing custom descriptions or logos; preserves references.
+ * Idempotent batch-synchronization of all master categories and 22 divisions into Firebase Firestore.
+ * Does not overwrite existing custom descriptions or logos; preserves deletedSlugs and trashedItems.
  */
 export async function syncCategoriesToFirestore(
   onProgress?: (msg: string, percent: number) => void
@@ -64,13 +65,33 @@ export async function syncCategoriesToFirestore(
   try {
     onProgress?.("বর্তমান Firestore ক্যাটাগরি রেকর্ড নিরীক্ষণ করা হচ্ছে...", 10);
 
+    // Preserve any existing deletedSlugs & trashedItems
+    let existingDeletedSlugs: string[] = [];
+    let existingTrashedItems: any[] = [];
+    try {
+      const rawLocal = localStorage.getItem(LOCAL_CATEGORIES_KEY);
+      if (rawLocal) {
+        const parsedLocal = JSON.parse(rawLocal);
+        if (parsedLocal && typeof parsedLocal === "object" && !Array.isArray(parsedLocal)) {
+          if (Array.isArray(parsedLocal.deletedSlugs)) existingDeletedSlugs = parsedLocal.deletedSlugs;
+          if (Array.isArray(parsedLocal.trashedItems)) existingTrashedItems = parsedLocal.trashedItems;
+        }
+      }
+    } catch {}
+
     // 1. Fetch current categories from Firestore /categories collection
     const categoriesColRef = collection(db, "categories");
     const existingSnap = await getDocs(categoriesColRef);
     const existingDocsMap = new Map<string, Record<string, any>>();
     existingSnap.forEach((docSnap) => {
       existingDocsMap.set(docSnap.id, docSnap.data());
+      const d = docSnap.data();
+      if (d?.isDeleted === true && !existingDeletedSlugs.includes(docSnap.id)) {
+        existingDeletedSlugs.push(docSnap.id);
+      }
     });
+
+    const deletedSet = new Set(existingDeletedSlugs.map((s) => String(s).trim().toLowerCase()));
 
     onProgress?.(`Firestore-এ প্রাপ্ত ${existingDocsMap.size}টি ক্যাটাগরি। মাস্টার তালিকার সঙ্গে তুলনা হচ্ছে...`, 25);
 
@@ -81,12 +102,14 @@ export async function syncCategoriesToFirestore(
 
     for (let i = 0; i < masterCategories.length; i++) {
       const c = masterCategories[i];
+      if (deletedSet.has(c.slug)) {
+        continue;
+      }
       const existing = existingDocsMap.get(c.slug);
 
       const targetDocRef = doc(db, "categories", c.slug);
 
       if (!existing) {
-        // Document does not exist: create it
         const newDocData: Record<string, any> = {
           slug: c.slug,
           divisionId: c.divisionId,
@@ -97,6 +120,7 @@ export async function syncCategoriesToFirestore(
           description: c.description || c.bn,
           formType: c.formType || "general",
           visible: true,
+          isDeleted: false,
           sort_order: c.sort_order || i + 1,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -113,7 +137,6 @@ export async function syncCategoriesToFirestore(
           detail: `নতুন ক্যাটাগরি তৈরি হয়েছে: ${c.bn} (${c.divisionId})`,
         });
       } else {
-        // Check for department mismatch or missing fields
         const needsDivisionFix = existing.divisionId !== c.divisionId;
         const needsFormTypeFix = !existing.formType || existing.formType !== c.formType;
         const needsBnFix = !existing.bn || (existing.bn !== c.bn && existing.bn === c.slug);
@@ -132,7 +155,6 @@ export async function syncCategoriesToFirestore(
           if (needsBnFix) {
             patch.bn = c.bn;
           }
-          // Preserve customIconUrl, custom description if already present
           if (!existing.iconName) patch.iconName = c.iconName || "Users";
           if (!existing.tint) patch.tint = c.tint;
           if (c.customIconUrl && !existing.customIconUrl) {
@@ -157,7 +179,6 @@ export async function syncCategoriesToFirestore(
         }
       }
 
-      // Commit batch when threshold reached
       if (opCount >= BATCH_SIZE) {
         onProgress?.(`Firestore ব্যাচ রাইট সম্পন্ন হচ্ছে (${result.addedCount + result.updatedCount} টি কার্যক্রম)...`, 50);
         await currentBatch.commit();
@@ -166,26 +187,28 @@ export async function syncCategoriesToFirestore(
       }
     }
 
-    // Commit any remaining writes
     if (opCount > 0) {
       onProgress?.("অবশিষ্ট ক্যাটাগরি ব্যাচ রাইট সম্পন্ন হচ্ছে...", 70);
       await currentBatch.commit();
     }
 
-    // 3. Sync full categories to Firestore settings/categories_config & Server content store
+    // 3. Sync full categories wrapper payload to Firestore settings/categories_config & Server content store
     onProgress?.("ক্যাটাগরি কনফিগ রেজিস্ট্রি ক্লাউডে সিঙ্ক হচ্ছে...", 85);
-    const categoryRegistry = masterCategories.map((c, idx) => ({
-      slug: c.slug,
-      divisionId: c.divisionId,
-      bn: c.bn,
-      en: c.en,
-      iconName: c.iconName || "Users",
-      tint: c.tint,
-      description: c.description,
-      formType: c.formType || "general",
-      visible: true,
-      sort_order: c.sort_order || idx + 1,
-    }));
+    const categoryRegistry = masterCategories
+      .filter((c) => !deletedSet.has(c.slug))
+      .map((c, idx) => ({
+        slug: c.slug,
+        divisionId: c.divisionId,
+        bn: c.bn,
+        en: c.en,
+        iconName: c.iconName || "Users",
+        tint: c.tint,
+        description: c.description,
+        formType: c.formType || "general",
+        visible: true,
+        isDeleted: false,
+        sort_order: c.sort_order || idx + 1,
+      }));
 
     const divisionsRegistry = masterDivisions.map((d, idx) => ({
       id: d.id,
@@ -198,25 +221,32 @@ export async function syncCategoriesToFirestore(
       sort_order: d.sort_order || idx + 1,
     }));
 
-    const serializedCategories = JSON.stringify(categoryRegistry);
-    const serializedDivisions = JSON.stringify(divisionsRegistry);
+    const serializedCategories = JSON.stringify({
+      items: categoryRegistry,
+      deletedSlugs: Array.from(deletedSet),
+      trashedItems: existingTrashedItems,
+      updatedAt: new Date().toISOString(),
+    });
+    const serializedDivisions = JSON.stringify({
+      items: divisionsRegistry,
+      deletedDivisionIds: [],
+      trashedDivisions: [],
+      updatedAt: new Date().toISOString(),
+    });
 
-    // Save to Firestore settings documents
     await upsertSettingDoc(CATEGORIES_CONFIG_ID, serializedCategories);
     await upsertSettingDoc(DIVISIONS_CONFIG_ID, serializedDivisions);
 
-    // Update localStorage
     try {
       localStorage.setItem(LOCAL_CATEGORIES_KEY, serializedCategories);
       localStorage.setItem(LOCAL_DIVISIONS_KEY, serializedDivisions);
     } catch {}
 
-    // 4. Verification Read-back from Firestore to confirm authoritative numbers
+    // 4. Verification Read-back from Firestore
     onProgress?.("Firestore থেকে রিড-ব্যাক ভেরিফিকেশন চলছে...", 95);
     const verifySnap = await getDocs(categoriesColRef);
     result.verifiedInFirestoreCount = verifySnap.size;
 
-    // Calculate per-division actual counts
     for (const d of masterDivisions) {
       const expected = masterCategories.filter((c) => c.divisionId === d.id).length;
       result.divisionCounts[d.id] = {
@@ -228,7 +258,7 @@ export async function syncCategoriesToFirestore(
     verifySnap.forEach((docSnap) => {
       const data = docSnap.data();
       const divId = data.divisionId;
-      if (result.divisionCounts[divId]) {
+      if (data.isDeleted !== true && result.divisionCounts[divId]) {
         result.divisionCounts[divId].actual++;
       }
     });
@@ -249,14 +279,33 @@ export async function syncCategoriesToFirestore(
 }
 
 /**
- * Audit categories in Firestore vs the 181 Master Specification.
+ * Audit categories in Firestore vs the Master Specification, including duplicate/alias document IDs.
  */
 export async function auditCategoriesFromFirestore(): Promise<CategoryAuditReport> {
   const categoriesColRef = collection(db, "categories");
   const snap = await getDocs(categoriesColRef);
   const firestoreMap = new Map<string, Record<string, any>>();
+  const seenCanonical = new Map<string, string>();
+  const duplicateDocIds: Array<{ docId: string; canonicalSlug: string; bn: string; divisionId: string }> = [];
+
   snap.forEach((docSnap) => {
-    firestoreMap.set(docSnap.id, docSnap.data());
+    const data = docSnap.data();
+    firestoreMap.set(docSnap.id, data);
+    const canonicalSlug = String(data.slug || docSnap.id)
+      .trim()
+      .toLowerCase()
+      .replace(/_/g, "-");
+    const isAliasDocId = docSnap.id !== canonicalSlug && docSnap.id.toLowerCase().replace(/_/g, "-") === canonicalSlug;
+    if (seenCanonical.has(canonicalSlug) || isAliasDocId) {
+      duplicateDocIds.push({
+        docId: docSnap.id,
+        canonicalSlug,
+        bn: String(data.bn || data.name || docSnap.id),
+        divisionId: String(data.divisionId || data.departmentId || ""),
+      });
+    } else {
+      seenCanonical.set(canonicalSlug, docSnap.id);
+    }
   });
 
   const missingFromFirestore: string[] = [];
@@ -268,7 +317,8 @@ export async function auditCategoriesFromFirestore(): Promise<CategoryAuditRepor
     }
   }
 
-  for (const [id] of firestoreMap) {
+  for (const [id, data] of firestoreMap) {
+    if (data?.isDeleted === true) continue;
     if (!masterCategories.some((c) => c.slug === id)) {
       orphanInFirestore.push(id);
     }
@@ -299,5 +349,6 @@ export async function auditCategoriesFromFirestore(): Promise<CategoryAuditRepor
     divisionSummary,
     missingFromFirestore,
     orphanInFirestore,
+    duplicateDocIds,
   };
 }

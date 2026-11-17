@@ -24,11 +24,16 @@ import { SmartSearchModal } from "@/components/SmartSearchDialog";
 export function SiteHeader() {
   const [open, setOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [avatarError, setAvatarError] = useState(false);
   const navigate = useNavigate();
   const { logo } = useLogo();
   const { categories } = useCategories();
   const { isAuthed, isStaff, isAdmin, isMainAdmin, user, signOut } = useAuth();
   const { isOnline } = useNetworkStatus();
+
+  useEffect(() => {
+    setAvatarError(false);
+  }, [user?.photoURL]);
 
   // Keyboard shortcut Ctrl+K / Cmd+K
   useEffect(() => {
@@ -134,6 +139,25 @@ export function SiteHeader() {
                   .filter((c) => c.slug !== "chat" && c.slug !== "app-download")
                   .map((c) => {
                     const common = "flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-sidebar-accent";
+                    if (c.customRoute) {
+                      const cleanRoute = c.customRoute.trim();
+                      if (cleanRoute.startsWith("/")) {
+                        return (
+                          <Link key={c.slug} to={cleanRoute as "/"} onClick={() => setOpen(false)} className={common}>
+                            <c.icon className="h-4 w-4 shrink-0 text-gold" />
+                            <span className="truncate">{c.bn}</span>
+                          </Link>
+                        );
+                      }
+                      if (/^https?:\/\//i.test(cleanRoute)) {
+                        return (
+                          <a key={c.slug} href={cleanRoute} target="_blank" rel="noreferrer" onClick={() => setOpen(false)} className={common}>
+                            <c.icon className="h-4 w-4 shrink-0 text-gold" />
+                            <span className="truncate">{c.bn}</span>
+                          </a>
+                        );
+                      }
+                    }
                     if (c.slug === "submit-info")
                       return <Link key={c.slug} to="/submit-info" onClick={() => setOpen(false)} className={common}><c.icon className="h-4 w-4 shrink-0 text-gold" /><span className="truncate">{c.bn}</span></Link>;
                     if (c.slug === "donation")
@@ -144,6 +168,8 @@ export function SiteHeader() {
                       return <Link key={c.slug} to="/board-result" onClick={() => setOpen(false)} className={common}><c.icon className="h-4 w-4 shrink-0 text-gold" /><span className="truncate">{c.bn}</span></Link>;
                     if (c.slug === "blood-donor")
                       return <Link key={c.slug} to="/blood-donor" onClick={() => setOpen(false)} className={common}><c.icon className="h-4 w-4 shrink-0 text-gold" /><span className="truncate">{c.bn}</span></Link>;
+                    if (c.slug === "emergency-request")
+                      return <Link key={c.slug} to="/emergency-request" onClick={() => setOpen(false)} className={common}><c.icon className="h-4 w-4 shrink-0 text-gold" /><span className="truncate">{c.bn}</span></Link>;
                     return (
                       <Link key={c.slug} to="/category/$slug" params={{ slug: c.slug }} onClick={() => setOpen(false)} className={common}>
                         <c.icon className="h-4 w-4 shrink-0 text-gold" />
@@ -165,7 +191,7 @@ export function SiteHeader() {
                   <>
                     <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-muted-foreground">
                       <UserIcon className="h-4 w-4 shrink-0 text-gold" />
-                      <span className="truncate">{user?.email}</span>
+                      <span className="truncate">{user?.email || user?.displayName || "ব্যবহারকারী"}</span>
                       {isAdmin && <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-gold" />}
                     </div>
                     <button onClick={() => void handleHeaderLogout()} className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-sidebar-accent">
@@ -181,8 +207,8 @@ export function SiteHeader() {
             </SheetContent>
           </Sheet>
 
-          <Link to="/" className="group flex min-w-0 flex-1 items-center justify-center gap-2.5">
-            <div className="relative h-10 w-10 shrink-0 sm:h-11 sm:w-11 flex items-center justify-center">
+          <Link to="/" className="group flex min-w-0 flex-1 items-center justify-start gap-2 sm:justify-center sm:gap-2.5">
+            <div className="relative flex h-8 w-8 shrink-0 items-center justify-center min-[360px]:h-9 min-[360px]:w-9 sm:h-11 sm:w-11">
               <img
                 src={logo}
                 alt="Smart Noakhali Logo"
@@ -190,23 +216,24 @@ export function SiteHeader() {
               />
             </div>
             <div className="min-w-0 text-left leading-none">
-              <p className="truncate font-brand text-[17px] font-black tracking-wide text-brand-shimmer sm:text-[21px]">
+              <p className="truncate font-brand text-[14px] font-black tracking-wide text-brand-shimmer min-[360px]:text-[16px] sm:text-[21px]">
                 Smart Noakhali
               </p>
-              <div className="mt-1 flex items-center gap-1.5">
+              <div className="mt-0.5 flex items-center gap-1 sm:mt-1 sm:gap-1.5">
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-300 shadow-[0_0_6px_#fcd34d]" />
-                <p className="truncate text-[11px] font-bold tracking-wider text-amber-200 drop-shadow-sm sm:text-xs">
+                <p className="truncate text-[10px] font-bold tracking-wider text-amber-200 drop-shadow-sm min-[360px]:text-[11px] sm:text-xs">
                   স্মার্ট নোয়াখালী
                 </p>
               </div>
             </div>
           </Link>
 
-          <div className="flex shrink-0 items-center gap-1.5">
+          <div className="flex shrink-0 items-center gap-1 min-[360px]:gap-1.5">
             <button
               type="button"
               onClick={() => setSearchOpen(true)}
-              className="flex items-center gap-1 rounded-full border border-white/20 bg-white/10 px-2.5 py-1.5 text-xs font-semibold text-white backdrop-blur hover:bg-white/20 active:scale-95 transition"
+              aria-label="স্মার্ট সার্চ"
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-white/10 text-xs font-semibold text-white backdrop-blur transition hover:bg-white/20 active:scale-95 sm:h-auto sm:w-auto sm:gap-1 sm:px-2.5 sm:py-1.5"
               title="স্মার্ট সার্চ (Ctrl+K)"
             >
               <Search className="h-3.5 w-3.5 text-amber-300" />
@@ -226,24 +253,31 @@ export function SiteHeader() {
             {isAuthed && (isMainAdmin || isStaff) && (
               <Link
                 to="/mdmahmudulhashan"
-                className="flex shrink-0 items-center gap-1 rounded-full border border-gold/50 bg-white/10 px-2.5 py-1.5 text-[11px] font-bold text-gold transition hover:bg-white/20"
-                title="ড্যাশবোর্ড / এডমিন প্যানেল"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-gold/50 bg-white/10 text-[11px] font-bold text-gold transition hover:bg-white/20 sm:h-auto sm:w-auto sm:gap-1 sm:px-2.5 sm:py-1.5"
+                title="সিকিউরিটি / এডমিন ড্যাশবোর্ড"
+                aria-label="সিকিউরিটি ড্যাশবোর্ড"
               >
                 <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
-                <span className="hidden sm:inline">ড্যাশবোর্ড</span>
+                <span className="hidden md:inline">ড্যাশবোর্ড</span>
               </Link>
             )}
-            {isAuthed ? (
-              <button onClick={() => void handleHeaderLogout()} className="flex shrink-0 items-center gap-1 rounded-full bg-white/15 px-2.5 py-1.5 text-xs font-semibold transition hover:bg-white/25 sm:px-3">
-                <LogOut className="h-3.5 w-3.5 shrink-0" />
-                <span className="hidden sm:inline">লগআউট</span>
-              </button>
-            ) : (
-              <Link to="/auth" className="flex shrink-0 items-center gap-1 rounded-full bg-gradient-gold px-2.5 py-1.5 text-xs font-extrabold text-primary-deep shadow-gold transition active:scale-95 sm:px-3">
-                <LogIn className="h-3.5 w-3.5 shrink-0" />
-                <span>লগইন</span>
-              </Link>
-            )}
+            <Link
+              to="/profile"
+              aria-label={isAuthed && user?.displayName ? `${user.displayName} — আমার প্রোফাইল` : "আমার প্রোফাইল"}
+              title={isAuthed && user?.displayName ? `${user.displayName} — আমার প্রোফাইল` : "আমার প্রোফাইল"}
+              className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-white/85 bg-white/15 text-white shadow-sm ring-1 ring-emerald-200/35 transition-all duration-200 hover:scale-105 hover:border-white active:scale-95 sm:h-9 sm:w-9"
+            >
+              {isAuthed && user?.photoURL && !avatarError ? (
+                <img
+                  src={user.photoURL}
+                  alt={user.displayName || "আমার প্রোফাইল"}
+                  onError={() => setAvatarError(true)}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <UserIcon className="h-4 w-4 text-white" />
+              )}
+            </Link>
           </div>
         </div>
       </header>

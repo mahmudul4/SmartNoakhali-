@@ -24,4 +24,7 @@ export const DIRTY_DOZEN_CASES: DirtyDozenCase[] = [
   { id: 10, name: "Client timestamp forgery on emergency_blood_requests", collection: "emergency_blood_requests", operation: "create", expected: "PERMISSION_DENIED" },
   { id: 11, name: "Cross-thread message injection in chat_threads subcollection", collection: "chat_threads/t1/messages", operation: "create", expected: "PERMISSION_DENIED" },
   { id: 12, name: "Oversized string / ID poisoning attack", collection: "blood_donors", operation: "create", expected: "PERMISSION_DENIED" },
+  { id: 13, name: "Global notification mutation or unprivileged broadcast creation", collection: "user_notifications", operation: "create", expected: "PERMISSION_DENIED" },
+  { id: 14, name: "Ordinary Admin tampering protected hero_banner_config", collection: "settings", operation: "update", expected: "PERMISSION_DENIED" },
 ];
+

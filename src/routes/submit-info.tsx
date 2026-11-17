@@ -230,7 +230,7 @@ function SubmitInfo() {
               তথ্য দিন — স্মার্ট নোয়াখালী
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              ২২টি প্রধান বিভাগের ১৮১টি ক্যাটাগরির যেকোনো সেবা বা প্রতিষ্ঠানের তথ্য যোগ করুন
+              নোয়াখালীর সকল বিভাগ ও ক্যাটাগরির যেকোনো সেবা বা প্রতিষ্ঠানের তথ্য যোগ করুন
             </p>
           </div>
         </div>
@@ -256,12 +256,12 @@ function SubmitInfo() {
             onChange={(e) => handleCategoryChange(e.target.value)}
             className="w-full rounded-2xl border border-border bg-background px-3.5 py-3 text-xs sm:text-sm font-semibold outline-none focus:border-primary"
           >
-            <option value="">-- ১৮১টি ক্যাটাগরি থেকে নির্বাচন করুন --</option>
+            <option value="">-- ক্যাটাগরি নির্বাচন করুন --</option>
             {divisions.map((div) => {
               const divCats = categories.filter((c) => c.divisionId === div.id);
               if (divCats.length === 0) return null;
               return (
-                <optgroup key={div.id} label={`━━ ${div.bn} (${divCats.length}টি) ━━`}>
+                <optgroup key={div.id} label={`━━ ${div.bn} ━━`}>
                   {divCats.map((c) => (
                     <option key={c.slug} value={c.slug}>
                       {c.bn} ({c.en})

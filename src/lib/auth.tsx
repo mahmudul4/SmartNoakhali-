@@ -295,10 +295,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               typeof data.username === "string"
                 ? data.username
                 : vaultEntry?.username || currentVerified?.username || null;
-            setUsername(resolvedUsername);
+            const docPhotoUrl =
+              typeof data.photo_url === "string" && data.photo_url.trim()
+                ? data.photo_url.trim()
+                : appU.photoURL;
+            const docFullName =
+              typeof data.full_name === "string" && data.full_name.trim()
+                ? data.full_name.trim()
+                : appU.displayName;
+            const hydratedUser: AppUser = {
+              ...appU,
+              photoURL: docPhotoUrl || null,
+              displayName: docFullName || null,
+              phone:
+                typeof data.phone === "string" && data.phone.trim()
+                  ? data.phone.trim()
+                  : appU.phone,
+            };
+            setUser(hydratedUser);
 
             writeVerifiedSession({
-              user: appU,
+              user: hydratedUser,
               roles: effectiveRoles,
               username: resolvedUsername,
             });

@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import fs from "fs";
 import path from "path";
+import crypto from "node:crypto";
 import { fileURLToPath } from "url";
 import nodemailer from "nodemailer";
 import { GoogleGenAI } from "@google/genai";
@@ -137,6 +138,7 @@ interface VerifiedUserRecord {
   email: string;
   phone: string;
   password?: string;
+  passwordHash?: string;
   full_name: string;
   username: string;
   verified_via: "email" | "phone" | "google";
@@ -147,6 +149,47 @@ interface VerifiedUserRecord {
   suspended?: boolean;
   created_at: string;
   updated_at: string;
+}
+
+function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const derived = crypto.scryptSync(password, salt, 64).toString("hex");
+  return `scrypt:${salt}:${derived}`;
+}
+
+function verifyPassword(
+  password: string,
+  storedHash?: string,
+  legacyPlain?: string
+): boolean {
+  if (!password) return false;
+  if (storedHash && storedHash.startsWith("scrypt:")) {
+    const parts = storedHash.split(":");
+    if (parts.length === 3) {
+      const [, salt, hex] = parts;
+      try {
+        const derived = crypto.scryptSync(password, salt, 64);
+        const storedBuf = Buffer.from(hex, "hex");
+        if (derived.length === storedBuf.length) {
+          return crypto.timingSafeEqual(derived, storedBuf);
+        }
+      } catch {
+        return false;
+      }
+    }
+  }
+  if (legacyPlain) {
+    return legacyPlain === password;
+  }
+  return false;
+}
+
+function stripSensitiveUserFields(u: VerifiedUserRecord) {
+  const { password: _p, passwordHash: _ph, ...safeUser } = u;
+  return {
+    ...safeUser,
+    hasPassword: Boolean(u.passwordHash || u.password),
+  };
 }
 
 function readVerifiedUsers(): Record<string, VerifiedUserRecord> {
@@ -163,7 +206,17 @@ function readVerifiedUsers(): Record<string, VerifiedUserRecord> {
 
 function writeVerifiedUsers(data: Record<string, VerifiedUserRecord>) {
   try {
-    fs.writeFileSync(AUTH_USERS_PATH, JSON.stringify(data, null, 2), "utf-8");
+    const sanitized: Record<string, VerifiedUserRecord> = {};
+    for (const [k, u] of Object.entries(data)) {
+      if (!u) continue;
+      const copy: VerifiedUserRecord = { ...u };
+      if (copy.password && !copy.passwordHash) {
+        copy.passwordHash = hashPassword(copy.password);
+      }
+      delete copy.password;
+      sanitized[k] = copy;
+    }
+    fs.writeFileSync(AUTH_USERS_PATH, JSON.stringify(sanitized, null, 2), "utf-8");
   } catch (err) {
     console.error("Failed to write verified users:", err);
   }
@@ -249,10 +302,52 @@ function readOtpGatewayConfig(): OtpGatewayConfig {
   return defaults;
 }
 
+const MASKED_SECRET = "••••••••";
+
+function maskOtpGatewayConfig(cfg: OtpGatewayConfig) {
+  return {
+    smtpHost: cfg.smtpHost,
+    smtpPort: cfg.smtpPort,
+    smtpUser: cfg.smtpUser,
+    smtpPass: cfg.smtpPass ? MASKED_SECRET : "",
+    smtpFromName: cfg.smtpFromName,
+    resendApiKey: cfg.resendApiKey ? MASKED_SECRET : "",
+    bulksmsApiKey: cfg.bulksmsApiKey ? MASKED_SECRET : "",
+    bulksmsSenderId: cfg.bulksmsSenderId,
+    greenwebToken: cfg.greenwebToken ? MASKED_SECRET : "",
+    customSmsUrl: cfg.customSmsUrl,
+    configured: {
+      smtpPass: Boolean(cfg.smtpPass),
+      resendApiKey: Boolean(cfg.resendApiKey),
+      bulksmsApiKey: Boolean(cfg.bulksmsApiKey),
+      greenwebToken: Boolean(cfg.greenwebToken),
+    },
+  };
+}
+
 function writeOtpGatewayConfig(cfg: Partial<OtpGatewayConfig>) {
   try {
     const current = readOtpGatewayConfig();
-    const merged = { ...current, ...cfg };
+    const resolveSecret = (incoming: string | undefined, prev: string): string => {
+      if (incoming === undefined || incoming === MASKED_SECRET || incoming.trim() === "") {
+        return prev;
+      }
+      if (incoming === "__CLEAR__") return "";
+      return incoming;
+    };
+    const merged: OtpGatewayConfig = {
+      smtpHost: cfg.smtpHost !== undefined ? String(cfg.smtpHost) : current.smtpHost,
+      smtpPort: cfg.smtpPort !== undefined ? Number(cfg.smtpPort) || current.smtpPort : current.smtpPort,
+      smtpUser: cfg.smtpUser !== undefined ? String(cfg.smtpUser) : current.smtpUser,
+      smtpPass: resolveSecret(cfg.smtpPass, current.smtpPass),
+      smtpFromName: cfg.smtpFromName !== undefined ? String(cfg.smtpFromName) : current.smtpFromName,
+      resendApiKey: resolveSecret(cfg.resendApiKey, current.resendApiKey),
+      bulksmsApiKey: resolveSecret(cfg.bulksmsApiKey, current.bulksmsApiKey),
+      bulksmsSenderId:
+        cfg.bulksmsSenderId !== undefined ? String(cfg.bulksmsSenderId) : current.bulksmsSenderId,
+      greenwebToken: resolveSecret(cfg.greenwebToken, current.greenwebToken),
+      customSmsUrl: cfg.customSmsUrl !== undefined ? String(cfg.customSmsUrl) : current.customSmsUrl,
+    };
     fs.writeFileSync(OTP_CONFIG_PATH, JSON.stringify(merged, null, 2), "utf-8");
   } catch (err) {
     console.error("Failed to write OTP gateway config:", err);
@@ -625,11 +720,13 @@ async function startServer() {
         const emailMatches = mode === "email" && cleanEmail && u.email.toLowerCase() === cleanEmail;
         const phoneMatches = mode === "phone" && cleanPhone && normalizePhone(u.phone) === cleanPhone;
         if (emailMatches || phoneMatches) {
-          store[key] = {
+          const updatedRec: VerifiedUserRecord = {
             ...u,
-            password: pwd,
+            passwordHash: hashPassword(pwd),
             updated_at: new Date().toISOString(),
           };
+          delete updatedRec.password;
+          store[key] = updatedRec;
           updatedCount++;
         }
       }
@@ -674,11 +771,13 @@ async function startServer() {
           (u.email && u.email.toLowerCase() === rawId) ||
           (cleanPhone && u.phone && normalizePhone(u.phone) === cleanPhone)
         ) {
-          store[key] = {
+          const updatedRec: VerifiedUserRecord = {
             ...u,
-            password: pwd,
+            passwordHash: hashPassword(pwd),
             updated_at: new Date().toISOString(),
           };
+          delete updatedRec.password;
+          store[key] = updatedRec;
           updated = true;
         }
       }
@@ -697,7 +796,7 @@ async function startServer() {
     const activeSessions: Array<{
       target: string;
       channel: "email" | "phone";
-      code: string;
+      codePreview: string;
       expiresAt: number;
     }> = [];
     for (const s of otpMemoryStore.values()) {
@@ -705,19 +804,19 @@ async function startServer() {
         activeSessions.push({
           target: s.target,
           channel: s.channel,
-          code: s.code,
+          codePreview: "••••••",
           expiresAt: s.expiresAt,
         });
       }
     }
-    res.json({ ok: true, config: cfg, activeSessions });
+    res.json({ ok: true, config: maskOtpGatewayConfig(cfg), activeSessions });
   });
 
   app.post("/api/admin/otp-config", (req, res) => {
     try {
       const body = req.body as Partial<OtpGatewayConfig>;
       writeOtpGatewayConfig(body);
-      res.json({ ok: true, config: readOtpGatewayConfig() });
+      res.json({ ok: true, config: maskOtpGatewayConfig(readOtpGatewayConfig()) });
     } catch (err) {
       res.status(500).json({
         error: err instanceof Error ? err.message : "কনফিগারেশন সংরক্ষণ ব্যর্থ হয়েছে",
@@ -780,11 +879,16 @@ async function startServer() {
         (cleanPhone ? Object.values(store).find((u) => u.phone === cleanPhone) : undefined);
 
       const now = new Date().toISOString();
+      const incomingPwd = typeof body.password === "string" && body.password.trim() ? body.password.trim() : "";
+      const nextHash = incomingPwd
+        ? hashPassword(incomingPwd)
+        : existing?.passwordHash || (existing?.password ? hashPassword(existing.password) : undefined);
+
       const record: VerifiedUserRecord = {
         uid: existing?.uid || uid,
         email: cleanEmail || existing?.email || (cleanPhone ? `${cleanPhone}@phone.smartnoakhali.app` : ""),
         phone: cleanPhone || existing?.phone || "",
-        password: body.password !== undefined ? body.password : existing?.password,
+        passwordHash: nextHash,
         full_name: body.full_name || existing?.full_name || "ইউজার",
         username: body.username || existing?.username || "user",
         verified_via: body.verified_via || existing?.verified_via || "email",
@@ -799,7 +903,7 @@ async function startServer() {
 
       store[record.uid] = record;
       writeVerifiedUsers(store);
-      res.json({ ok: true, user: record });
+      res.json({ ok: true, user: stripSensitiveUserFields(record) });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : "Sync failed" });
     }
@@ -942,7 +1046,16 @@ async function startServer() {
         return;
       }
 
-      const passwordMatches = Boolean(password && matched.password && matched.password === password);
+      const passwordMatches = Boolean(
+        password && verifyPassword(password, matched.passwordHash, matched.password)
+      );
+      if (passwordMatches && matched.password && !matched.passwordHash) {
+        matched.passwordHash = hashPassword(password!);
+        delete matched.password;
+        store[matched.uid] = matched;
+        writeVerifiedUsers(store);
+      }
+
       res.json({
         ok: true,
         found: true,
@@ -978,7 +1091,7 @@ async function startServer() {
           const parsed = JSON.parse(rawMirror);
           const mirrorUsers = parsed?.users && typeof parsed.users === "object" ? parsed.users : parsed;
           if (mirrorUsers && typeof mirrorUsers === "object") {
-            for (const u of Object.values(mirrorUsers) as Array< Record<string, any> >) {
+            for (const u of Object.values(mirrorUsers) as Array<Record<string, any>>) {
               if (!u || typeof u !== "object") continue;
               const uid = String(u.uid || u.email || "").trim();
               const email = String(u.email || "").trim().toLowerCase();
@@ -989,7 +1102,10 @@ async function startServer() {
                   uid: key,
                   email: email || `${key}@user.smartnoakhali.app`,
                   phone: normalizePhone(String(u.phone || "")),
-                  password: u.password,
+                  passwordHash:
+                    typeof u.password === "string" && u.password.trim()
+                      ? hashPassword(u.password.trim())
+                      : undefined,
                   full_name: u.full_name || email.split("@")[0] || "ইউজার",
                   username: u.username || email.split("@")[0] || "user",
                   verified_via: u.verified_via || "email",
@@ -1036,7 +1152,7 @@ async function startServer() {
       // ignore merge errors
     }
 
-    const seenMap = new Map<string, VerifiedUserRecord>();
+    const seenMap = new Map<string, ReturnType<typeof stripSensitiveUserFields>>();
     for (const u of Object.values(store)) {
       if (!u || (!u.uid && !u.email)) continue;
       const uidLow = (u.uid || "").toLowerCase();
@@ -1049,7 +1165,7 @@ async function startServer() {
       }
       const dedupKey = emLow || uidLow;
       if (!seenMap.has(dedupKey)) {
-        seenMap.set(dedupKey, u);
+        seenMap.set(dedupKey, stripSensitiveUserFields(u));
       }
     }
     const activeUsers = Array.from(seenMap.values());
@@ -1322,6 +1438,61 @@ async function startServer() {
   app.post("/api/audit/clear", (_req, res) => {
     writeAuditLogs([]);
     res.json({ ok: true });
+  });
+
+  // Immutable Super Admin Audit History (/api/audit/super-logs & /api/audit/super-record)
+  const SUPER_AUDIT_FILE = path.join(DATA_DIR, "super_admin_audit_logs.json");
+  function readSuperAuditLogs(): Array<Record<string, unknown>> {
+    try {
+      if (fs.existsSync(SUPER_AUDIT_FILE)) {
+        const parsed = JSON.parse(fs.readFileSync(SUPER_AUDIT_FILE, "utf8"));
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  }
+  function sanitizeServerAuditValue(val: unknown): unknown {
+    if (val === null || val === undefined) return val;
+    if (Array.isArray(val)) return val.slice(0, 40).map(sanitizeServerAuditValue);
+    if (typeof val === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+        if (/pass|password|secret|token|apikey|smtppass|otp|pin|credential/i.test(k)) {
+          out[k] = "[REDACTED]";
+        } else {
+          out[k] = sanitizeServerAuditValue(v);
+        }
+      }
+      return out;
+    }
+    return val;
+  }
+
+  app.get("/api/audit/super-logs", (_req, res) => {
+    res.json({ ok: true, logs: readSuperAuditLogs() });
+  });
+
+  app.post("/api/audit/super-record", (req, res) => {
+    const { entry } = req.body as { entry?: Record<string, unknown> };
+    if (entry && typeof entry === "object" && entry.id) {
+      const current = readSuperAuditLogs();
+      if (current.some((x) => x.id === entry.id)) {
+        res.json({ ok: true, immutable: true });
+        return;
+      }
+      const cleanEntry = sanitizeServerAuditValue(entry) as Record<string, unknown>;
+      const next = [cleanEntry, ...current].slice(0, 500);
+      try {
+        fs.writeFileSync(SUPER_AUDIT_FILE, JSON.stringify(next, null, 2), "utf8");
+      } catch {
+        // ignore
+      }
+      res.json({ ok: true, count: next.length });
+      return;
+    }
+    res.status(400).json({ ok: false });
   });
 
   // ============================================================================
