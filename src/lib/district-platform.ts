@@ -566,6 +566,37 @@ export interface UserFavoriteItem {
   created_at: string;
 }
 
+export const NOTIFICATION_CATEGORIES = [
+  "জরুরি বিজ্ঞপ্তি",
+  "রক্তের প্রয়োজন",
+  "রক্তদাতা সংক্রান্ত আপডেট",
+  "অনুদান সংক্রান্ত বিজ্ঞপ্তি",
+  "নতুন তথ্য অনুমোদন",
+  "তথ্য সংশোধন",
+  "অভিযোগের আপডেট",
+  "অ্যাকাউন্ট সংক্রান্ত বিজ্ঞপ্তি",
+  "প্রশাসনিক বিজ্ঞপ্তি",
+  "সিস্টেম বিজ্ঞপ্তি",
+] as const;
+
+export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
+
+export const ESSENTIAL_NOTIFICATION_CATEGORIES: NotificationCategory[] = [
+  "সিস্টেম বিজ্ঞপ্তি",
+  "জরুরি বিজ্ঞপ্তি",
+];
+
+export type NotificationPriority = "normal" | "high" | "urgent";
+
+export type NotificationAudience =
+  | "all_users"
+  | "specific_users"
+  | "all_admins"
+  | "ordinary_admins"
+  | "staff_editors";
+
+export type NotificationStatus = "created" | "queued" | "sent" | "failed" | "partial";
+
 export interface UserNotificationItem {
   id: string;
   user_id?: string; // empty means global broadcast
@@ -573,9 +604,45 @@ export interface UserNotificationItem {
   title: string;
   message: string;
   type: "info" | "success" | "warning" | "status_update";
+  category?: NotificationCategory;
+  priority?: NotificationPriority;
+  audience?: NotificationAudience;
+  target_roles?: string[];
+  scheduled_at?: string;
+  status?: NotificationStatus;
+  idempotency_key?: string;
+  channels?: Array<"in_app" | "web_push" | "email">;
+  created_by?: string;
   link?: string;
   read: boolean;
   created_at: string;
+  updated_at?: string;
+}
+
+export interface NotificationDeliveryRecord {
+  id: string;
+  notification_id: string;
+  title: string;
+  category: NotificationCategory;
+  priority: NotificationPriority;
+  audience: NotificationAudience;
+  channel: "in_app" | "web_push" | "email";
+  recipient: string;
+  status: "queued" | "sent" | "failed";
+  error_message?: string;
+  idempotency_key?: string;
+  scheduled_at?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface NotificationPreferences {
+  in_app: boolean;
+  web_push: boolean;
+  email: boolean;
+  muted_categories: NotificationCategory[];
+  email_address?: string;
+  updated_at?: string;
 }
 
 // ============================================================================
@@ -1062,10 +1129,108 @@ function readLocalReadIds(userId?: string): string[] {
   }
 }
 
-export function useUserNotifications(userId?: string) {
+function normalizeNotificationCategory(raw: unknown): NotificationCategory {
+  if (typeof raw === "string" && (NOTIFICATION_CATEGORIES as readonly string[]).includes(raw)) {
+    return raw as NotificationCategory;
+  }
+  return "সিস্টেম বিজ্ঞপ্তি";
+}
+
+function normalizeNotificationPriority(raw: unknown): NotificationPriority {
+  if (raw === "urgent" || raw === "high" || raw === "normal") return raw;
+  return "normal";
+}
+
+function normalizeNotificationAudience(raw: unknown, isGlobal: boolean): NotificationAudience {
+  if (
+    raw === "all_users" ||
+    raw === "specific_users" ||
+    raw === "all_admins" ||
+    raw === "ordinary_admins" ||
+    raw === "staff_editors"
+  ) {
+    return raw;
+  }
+  return isGlobal ? "all_users" : "specific_users";
+}
+
+function mapDocToNotificationItem(id: string, data: Record<string, any>, fallbackRead = false): UserNotificationItem {
+  const isGlobal = Boolean(data.is_global);
+  return {
+    id,
+    user_id: data.user_id ? String(data.user_id) : undefined,
+    is_global: isGlobal,
+    title: String(data.title || ""),
+    message: String(data.message || ""),
+    type: (data.type as UserNotificationItem["type"]) || "info",
+    category: normalizeNotificationCategory(data.category),
+    priority: normalizeNotificationPriority(data.priority),
+    audience: normalizeNotificationAudience(data.audience, isGlobal),
+    target_roles: Array.isArray(data.target_roles) ? data.target_roles.map(String) : undefined,
+    scheduled_at: typeof data.scheduled_at === "string" && data.scheduled_at ? data.scheduled_at : undefined,
+    status: (data.status as NotificationStatus) || "sent",
+    idempotency_key: typeof data.idempotency_key === "string" ? data.idempotency_key : undefined,
+    channels: Array.isArray(data.channels) ? data.channels : ["in_app"],
+    created_by: typeof data.created_by === "string" ? data.created_by : undefined,
+    link: data.link ? String(data.link) : undefined,
+    read: Boolean(data.read) || fallbackRead,
+    created_at: String(data.created_at || new Date().toISOString()),
+    updated_at: typeof data.updated_at === "string" ? data.updated_at : undefined,
+  };
+}
+
+export interface NotificationRoleContext {
+  isMainAdmin?: boolean;
+  isAdmin?: boolean;
+  isStaff?: boolean;
+}
+
+function matchesNotificationAudience(
+  item: UserNotificationItem,
+  userId?: string,
+  roleContext?: NotificationRoleContext
+): boolean {
+  // Scheduled notifications stay hidden for regular recipients until their scheduled time arrives
+  if (item.scheduled_at) {
+    const schedMs = new Date(item.scheduled_at).getTime();
+    if (!Number.isNaN(schedMs) && schedMs > Date.now() && !roleContext?.isMainAdmin) {
+      return false;
+    }
+  }
+
+  const audience = item.audience || (item.is_global ? "all_users" : "specific_users");
+  if (audience === "all_users") return true;
+  if (audience === "specific_users") {
+    return Boolean(userId && item.user_id === userId);
+  }
+  if (audience === "all_admins") {
+    return Boolean(roleContext?.isMainAdmin || roleContext?.isAdmin || (userId && item.user_id === userId));
+  }
+  if (audience === "ordinary_admins") {
+    return Boolean(
+      (roleContext?.isAdmin && !roleContext?.isMainAdmin) ||
+        roleContext?.isMainAdmin ||
+        (userId && item.user_id === userId)
+    );
+  }
+  if (audience === "staff_editors") {
+    return Boolean(
+      roleContext?.isStaff ||
+        roleContext?.isAdmin ||
+        roleContext?.isMainAdmin ||
+        (userId && item.user_id === userId)
+    );
+  }
+  return true;
+}
+
+export function useUserNotifications(userId?: string, roleContext?: NotificationRoleContext) {
   const firebaseAuthUid = useFirebaseAuthUid();
   // Only run user-scoped Firestore listeners when real Firebase Auth UID matches userId
   const effectiveAuthUid = userId && firebaseAuthUid === userId ? firebaseAuthUid : null;
+  const isMainAdmin = Boolean(roleContext?.isMainAdmin);
+  const isAdmin = Boolean(roleContext?.isAdmin);
+  const isStaff = Boolean(roleContext?.isStaff);
 
   const [globalItems, setGlobalItems] = useState<UserNotificationItem[]>([]);
   const [userItems, setUserItems] = useState<UserNotificationItem[]>([]);
@@ -1085,7 +1250,7 @@ export function useUserNotifications(userId?: string) {
     const qGlobal = query(
       collection(db, "user_notifications"),
       where("is_global", "==", true),
-      limit(30)
+      limit(60)
     );
     const unsubGlobal = onSnapshot(
       qGlobal,
@@ -1095,17 +1260,7 @@ export function useUserNotifications(userId?: string) {
           const data = d.data();
           const readBy: string[] = Array.isArray(data.read_by) ? data.read_by : [];
           const isReadLegacy = Boolean(data.read) || (userId ? readBy.includes(userId) : false);
-          list.push({
-            id: d.id,
-            user_id: data.user_id,
-            is_global: true,
-            title: String(data.title || ""),
-            message: String(data.message || ""),
-            type: data.type || "info",
-            link: data.link,
-            read: isReadLegacy,
-            created_at: String(data.created_at || new Date().toISOString()),
-          });
+          list.push(mapDocToNotificationItem(d.id, data, isReadLegacy));
         });
         setGlobalItems(list);
         setLoadingGlobal(false);
@@ -1124,25 +1279,14 @@ export function useUserNotifications(userId?: string) {
       const qUser = query(
         collection(db, "user_notifications"),
         where("user_id", "==", effectiveAuthUid),
-        limit(40)
+        limit(60)
       );
       unsubUser = onSnapshot(
         qUser,
         (snap) => {
           const list: UserNotificationItem[] = [];
           snap.forEach((d) => {
-            const data = d.data();
-            list.push({
-              id: d.id,
-              user_id: data.user_id,
-              is_global: Boolean(data.is_global),
-              title: String(data.title || ""),
-              message: String(data.message || ""),
-              type: data.type || "info",
-              link: data.link,
-              read: Boolean(data.read),
-              created_at: String(data.created_at || new Date().toISOString()),
-            });
+            list.push(mapDocToNotificationItem(d.id, d.data()));
           });
           setUserItems(list);
           setLoadingUser(false);
@@ -1156,7 +1300,7 @@ export function useUserNotifications(userId?: string) {
       // Per-user read receipts for global notifications (/users/{uid}/notification_reads)
       const qReceipts = query(
         collection(db, "users", effectiveAuthUid, "notification_reads"),
-        limit(100)
+        limit(120)
       );
       unsubReceipts = onSnapshot(
         qReceipts,
@@ -1182,7 +1326,9 @@ export function useUserNotifications(userId?: string) {
 
   const notifications = useMemo(() => {
     const merged = new Map<string, UserNotificationItem>();
+    const ctx: NotificationRoleContext = { isMainAdmin, isAdmin, isStaff };
     for (const item of [...globalItems, ...userItems]) {
+      if (!matchesNotificationAudience(item, userId, ctx)) continue;
       const effectiveRead =
         item.read ||
         cloudReadIds.includes(item.id) ||
@@ -1192,7 +1338,7 @@ export function useUserNotifications(userId?: string) {
     return Array.from(merged.values()).sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
-  }, [globalItems, userItems, cloudReadIds, localReadIds]);
+  }, [globalItems, userItems, cloudReadIds, localReadIds, userId, isMainAdmin, isAdmin, isStaff]);
 
   const unreadCount = useMemo(
     () => notifications.filter((n) => !n.read).length,
@@ -1265,7 +1411,230 @@ export function useUserNotifications(userId?: string) {
   };
 }
 
-// --- MAIN ADMIN NOTIFICATIONS MANAGEMENT ---
+// --- NOTIFICATION PREFERENCES & DEVICE PUSH TOKENS ---
+const DEFAULT_PREFERENCES: NotificationPreferences = {
+  in_app: true,
+  web_push: false,
+  email: false,
+  muted_categories: [],
+};
+
+function getPrefStorageKey(userId?: string): string {
+  return `sn_notif_prefs_${userId || "guest"}`;
+}
+
+function readLocalPrefs(userId?: string): NotificationPreferences {
+  try {
+    const raw = localStorage.getItem(getPrefStorageKey(userId));
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<NotificationPreferences>;
+      const muted = Array.isArray(parsed.muted_categories)
+        ? parsed.muted_categories.filter(
+            (c): c is NotificationCategory =>
+              (NOTIFICATION_CATEGORIES as readonly string[]).includes(c) &&
+              !ESSENTIAL_NOTIFICATION_CATEGORIES.includes(c as NotificationCategory)
+          )
+        : [];
+      return {
+        in_app: parsed.in_app !== false,
+        web_push: Boolean(parsed.web_push),
+        email: Boolean(parsed.email),
+        muted_categories: muted,
+        email_address: typeof parsed.email_address === "string" ? parsed.email_address : undefined,
+        updated_at: parsed.updated_at,
+      };
+    }
+  } catch {}
+  return { ...DEFAULT_PREFERENCES };
+}
+
+export function useNotificationPreferences(userId?: string) {
+  const firebaseAuthUid = useFirebaseAuthUid();
+  const effectiveAuthUid = userId && firebaseAuthUid === userId ? firebaseAuthUid : null;
+  const [preferences, setPreferences] = useState<NotificationPreferences>(() => readLocalPrefs(userId));
+  const [loading, setLoading] = useState(Boolean(effectiveAuthUid));
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setPreferences(readLocalPrefs(userId));
+  }, [userId]);
+
+  useEffect(() => {
+    if (!effectiveAuthUid) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const ref = doc(db, "users", effectiveAuthUid, "notification_preferences", "default");
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (snap.exists()) {
+          const d = snap.data();
+          const muted = Array.isArray(d.muted_categories)
+            ? d.muted_categories.filter(
+                (c: unknown): c is NotificationCategory =>
+                  typeof c === "string" &&
+                  (NOTIFICATION_CATEGORIES as readonly string[]).includes(c) &&
+                  !ESSENTIAL_NOTIFICATION_CATEGORIES.includes(c as NotificationCategory)
+              )
+            : [];
+          const next: NotificationPreferences = {
+            in_app: d.in_app !== false,
+            web_push: Boolean(d.web_push),
+            email: Boolean(d.email),
+            muted_categories: muted,
+            email_address: typeof d.email_address === "string" ? d.email_address : undefined,
+            updated_at: typeof d.updated_at === "string" ? d.updated_at : undefined,
+          };
+          setPreferences(next);
+          try {
+            localStorage.setItem(getPrefStorageKey(userId), JSON.stringify(next));
+          } catch {}
+        }
+        setLoading(false);
+      },
+      () => setLoading(false)
+    );
+    return () => unsub();
+  }, [effectiveAuthUid, userId]);
+
+  const updatePreferences = useCallback(
+    async (patch: Partial<NotificationPreferences>) => {
+      setSaving(true);
+      try {
+        const cleanMuted = Array.isArray(patch.muted_categories ?? preferences.muted_categories)
+          ? (patch.muted_categories ?? preferences.muted_categories).filter(
+              (c) => !ESSENTIAL_NOTIFICATION_CATEGORIES.includes(c)
+            )
+          : [];
+        const next: NotificationPreferences = {
+          ...preferences,
+          ...patch,
+          in_app: true, // In-app essential delivery always enabled
+          muted_categories: cleanMuted,
+          updated_at: new Date().toISOString(),
+        };
+        setPreferences(next);
+        try {
+          localStorage.setItem(getPrefStorageKey(userId), JSON.stringify(next));
+        } catch {}
+
+        if (effectiveAuthUid) {
+          await setDoc(
+            doc(db, "users", effectiveAuthUid, "notification_preferences", "default"),
+            sanitizeFirestorePayload({
+              user_id: effectiveAuthUid,
+              in_app: next.in_app,
+              web_push: next.web_push,
+              email: next.email,
+              muted_categories: next.muted_categories,
+              ...(next.email_address ? { email_address: next.email_address } : {}),
+              updated_at: next.updated_at,
+            }),
+            { merge: true }
+          );
+        }
+      } finally {
+        setSaving(false);
+      }
+    },
+    [effectiveAuthUid, preferences, userId]
+  );
+
+  return { preferences, loading, saving, updatePreferences };
+}
+
+const DEVICE_TOKEN_ID_KEY = "sn_device_push_token_id_v1";
+
+function getOrCreateDeviceTokenId(): string {
+  try {
+    const existing = localStorage.getItem(DEVICE_TOKEN_ID_KEY);
+    if (existing && /^[a-zA-Z0-9_\-]+$/.test(existing)) return existing;
+    const created = `dev_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    localStorage.setItem(DEVICE_TOKEN_ID_KEY, created);
+    return created;
+  } catch {
+    return `dev_${Date.now()}`;
+  }
+}
+
+export async function registerDevicePushToken(
+  uid: string,
+  vapidPublicKey?: string
+): Promise<{ ok: boolean; tokenId: string; hasPushSubscription: boolean; reason?: string }> {
+  const tokenId = getOrCreateDeviceTokenId();
+  if (typeof window === "undefined" || !("Notification" in window)) {
+    return { ok: false, tokenId, hasPushSubscription: false, reason: "এই ব্রাউজারে Notification API সাপোর্ট করে না।" };
+  }
+  if (Notification.permission !== "granted") {
+    return { ok: false, tokenId, hasPushSubscription: false, reason: "নোটিফিকেশন অনুমতি (Permission) দেওয়া হয়নি।" };
+  }
+
+  let subscriptionJson: Record<string, unknown> | null = null;
+  if ("serviceWorker" in navigator && "PushManager" in window) {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub && vapidPublicKey && vapidPublicKey.trim()) {
+        sub = await reg.pushManager
+          .subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: vapidPublicKey.trim(),
+          })
+          .catch(() => null);
+      }
+      if (sub) {
+        subscriptionJson = sub.toJSON() as Record<string, unknown>;
+      }
+    } catch {
+      // Service worker push subscription unavailable (e.g. without VAPID public key)
+    }
+  }
+
+  const liveUid = auth.currentUser?.uid;
+  if (liveUid && liveUid === uid) {
+    await setDoc(
+      doc(db, "users", uid, "device_tokens", tokenId),
+      sanitizeFirestorePayload({
+        id: tokenId,
+        user_id: uid,
+        platform: "web",
+        permission: Notification.permission,
+        endpoint: subscriptionJson?.endpoint ? String(subscriptionJson.endpoint).slice(0, 500) : "",
+        subscription_json: subscriptionJson ? JSON.stringify(subscriptionJson).slice(0, 1500) : "",
+        user_agent: (navigator.userAgent || "").slice(0, 200),
+        active: true,
+        updated_at: new Date().toISOString(),
+      }),
+      { merge: true }
+    ).catch(() => {});
+  }
+
+  return {
+    ok: true,
+    tokenId,
+    hasPushSubscription: Boolean(subscriptionJson?.endpoint),
+  };
+}
+
+export async function unregisterDevicePushToken(uid: string): Promise<void> {
+  if (!uid) return;
+  let tokenId = "";
+  try {
+    tokenId = localStorage.getItem(DEVICE_TOKEN_ID_KEY) || "";
+  } catch {
+    return;
+  }
+  if (!tokenId || !/^[a-zA-Z0-9_\-]+$/.test(tokenId)) return;
+
+  const liveUid = auth.currentUser?.uid;
+  if (liveUid && liveUid === uid) {
+    await deleteDoc(doc(db, "users", uid, "device_tokens", tokenId)).catch(() => {});
+  }
+}
+
+// --- MAIN ADMIN NOTIFICATIONS & MULTI-CHANNEL DISPATCH ---
 export function useAdminNotifications(enabled: boolean) {
   const firebaseAuthUid = useFirebaseAuthUid();
   const [items, setItems] = useState<UserNotificationItem[]>([]);
@@ -1281,24 +1650,13 @@ export function useAdminNotifications(enabled: boolean) {
 
     setLoading(true);
     setError(null);
-    const q = query(collection(db, "user_notifications"), limit(80));
+    const q = query(collection(db, "user_notifications"), limit(120));
     const unsub = onSnapshot(
       q,
       (snap) => {
-        const list: UserNotificationItem[] = snap.docs.map((d) => {
-          const data = d.data();
-          return {
-            id: d.id,
-            user_id: data.user_id ? String(data.user_id) : undefined,
-            is_global: Boolean(data.is_global),
-            title: String(data.title || ""),
-            message: String(data.message || ""),
-            type: (data.type as UserNotificationItem["type"]) || "info",
-            link: data.link ? String(data.link) : undefined,
-            read: Boolean(data.read),
-            created_at: String(data.created_at || new Date().toISOString()),
-          };
-        });
+        const list: UserNotificationItem[] = snap.docs.map((d) =>
+          mapDocToNotificationItem(d.id, d.data())
+        );
         list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
         setItems(list);
         setLoading(false);
@@ -1315,14 +1673,112 @@ export function useAdminNotifications(enabled: boolean) {
   return { items, loading, error };
 }
 
-export async function createAdminNotification(input: {
+const LOCAL_DELIVERIES_CACHE = "sn_notif_deliveries_v1";
+
+function readLocalDeliveries(): NotificationDeliveryRecord[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_DELIVERIES_CACHE);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+function writeLocalDeliveries(list: NotificationDeliveryRecord[]) {
+  try {
+    localStorage.setItem(LOCAL_DELIVERIES_CACHE, JSON.stringify(list.slice(0, 120)));
+  } catch {}
+}
+
+export function useNotificationDeliveries(enabled: boolean) {
+  const firebaseAuthUid = useFirebaseAuthUid();
+  const [deliveries, setDeliveries] = useState<NotificationDeliveryRecord[]>(() =>
+    readLocalDeliveries()
+  );
+  const [loading, setLoading] = useState(Boolean(enabled));
+
+  useEffect(() => {
+    if (!enabled || !firebaseAuthUid) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const q = query(collection(db, "notification_deliveries"), limit(120));
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const list: NotificationDeliveryRecord[] = snap.docs.map((d) => {
+          const x = d.data();
+          return {
+            id: d.id,
+            notification_id: String(x.notification_id || ""),
+            title: String(x.title || ""),
+            category: normalizeNotificationCategory(x.category),
+            priority: normalizeNotificationPriority(x.priority),
+            audience: normalizeNotificationAudience(x.audience, true),
+            channel:
+              x.channel === "web_push" || x.channel === "email" ? x.channel : "in_app",
+            recipient: String(x.recipient || ""),
+            status:
+              x.status === "sent" || x.status === "failed" ? x.status : "queued",
+            error_message: typeof x.error_message === "string" ? x.error_message : undefined,
+            idempotency_key: typeof x.idempotency_key === "string" ? x.idempotency_key : undefined,
+            scheduled_at: typeof x.scheduled_at === "string" ? x.scheduled_at : undefined,
+            created_at: String(x.created_at || new Date().toISOString()),
+            updated_at: typeof x.updated_at === "string" ? x.updated_at : undefined,
+          };
+        });
+        list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        setDeliveries(list);
+        writeLocalDeliveries(list);
+        setLoading(false);
+      },
+      () => {
+        setLoading(false);
+      }
+    );
+    return () => unsub();
+  }, [enabled, firebaseAuthUid]);
+
+  return { deliveries, loading };
+}
+
+async function logNotificationDelivery(rec: NotificationDeliveryRecord) {
+  const local = readLocalDeliveries();
+  writeLocalDeliveries([rec, ...local.filter((x) => x.id !== rec.id)]);
+  if (auth.currentUser) {
+    await setDoc(
+      doc(db, "notification_deliveries", rec.id),
+      sanitizeFirestorePayload(rec)
+    ).catch(() => {});
+  }
+}
+
+export async function dispatchNotification(input: {
   title: string;
   message: string;
   type: UserNotificationItem["type"];
-  is_global: boolean;
+  category?: NotificationCategory;
+  priority?: NotificationPriority;
+  audience?: NotificationAudience;
   user_id?: string;
+  target_user_ids?: string[];
+  target_email?: string;
   link?: string;
-}) {
+  scheduled_at?: string;
+  channels?: {
+    in_app?: boolean;
+    web_push?: boolean;
+    email?: boolean;
+  };
+  idempotency_key?: string;
+}): Promise<{
+  notifId: string;
+  deliveries: NotificationDeliveryRecord[];
+  duplicate?: boolean;
+}> {
   if (!auth.currentUser) {
     throw new Error("অনুগ্রহ করে প্রধান এডমিন হিসেবে Firebase Auth সেশনে লগইন করুন।");
   }
@@ -1331,25 +1787,333 @@ export async function createAdminNotification(input: {
   if (!title || !message) {
     throw new Error("বিজ্ঞপ্তির শিরোনাম ও বিস্তারিত বার্তা আবশ্যক।");
   }
-  if (!input.is_global && !input.user_id?.trim()) {
-    throw new Error("ব্যক্তিগত বিজ্ঞপ্তির জন্য ব্যবহারকারীর UID আবশ্যক।");
+
+  const category = normalizeNotificationCategory(input.category);
+  const priority = normalizeNotificationPriority(input.priority);
+  const audience: NotificationAudience = input.audience || (input.user_id ? "specific_users" : "all_users");
+
+  // Idempotency guard against accidental double-submission
+  const idemKey = (input.idempotency_key || "").trim();
+  if (idemKey) {
+    try {
+      const seenRaw = localStorage.getItem("sn_notif_idem_keys");
+      const seen: Record<string, string> = seenRaw ? JSON.parse(seenRaw) : {};
+      if (seen[idemKey]) {
+        return { notifId: seen[idemKey], deliveries: [], duplicate: true };
+      }
+    } catch {}
   }
 
-  const notifId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  const cleanPayload = sanitizeFirestorePayload({
-    id: notifId,
-    is_global: Boolean(input.is_global),
-    ...(input.is_global ? {} : { user_id: input.user_id!.trim() }),
-    title: title.slice(0, 200),
-    message: message.slice(0, 1500),
-    type: input.type || "info",
-    ...(input.link?.trim() ? { link: input.link.trim().slice(0, 500) } : {}),
-    read: false,
-    created_at: new Date().toISOString(),
-  });
+  const specificTargets = Array.from(
+    new Set(
+      [
+        ...(input.target_user_ids || []),
+        ...(input.user_id ? input.user_id.split(/[\s,]+/) : []),
+      ]
+        .map((x) => x.trim())
+        .filter(Boolean)
+    )
+  );
 
-  await setDoc(doc(db, "user_notifications", notifId), cleanPayload);
-  return notifId;
+  if (audience === "specific_users" && specificTargets.length === 0) {
+    throw new Error("নির্দিষ্ট ব্যবহারকারীর কমপক্ষে একটি UID লিখুন।");
+  }
+
+  const useInApp = input.channels?.in_app !== false;
+  const useWebPush = Boolean(input.channels?.web_push);
+  const useEmail = Boolean(input.channels?.email);
+
+  const nowIso = new Date().toISOString();
+  const isFutureScheduled = Boolean(
+    input.scheduled_at && new Date(input.scheduled_at).getTime() > Date.now()
+  );
+  const status: NotificationStatus = isFutureScheduled ? "queued" : "sent";
+  const selectedChannels: Array<"in_app" | "web_push" | "email"> = [
+    ...(useInApp ? (["in_app"] as const) : []),
+    ...(useWebPush ? (["web_push"] as const) : []),
+    ...(useEmail ? (["email"] as const) : []),
+  ];
+
+  const baseId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const isGlobalBroadcast = audience !== "specific_users";
+
+  const createdDeliveries: NotificationDeliveryRecord[] = [];
+
+  if (useInApp) {
+    if (isGlobalBroadcast) {
+      const cleanPayload = sanitizeFirestorePayload({
+        id: baseId,
+        is_global: true,
+        title: title.slice(0, 200),
+        message: message.slice(0, 1500),
+        type: input.type || "info",
+        category,
+        priority,
+        audience,
+        ...(input.scheduled_at ? { scheduled_at: input.scheduled_at } : {}),
+        status,
+        ...(idemKey ? { idempotency_key: idemKey.slice(0, 100) } : {}),
+        channels: selectedChannels,
+        created_by: auth.currentUser.email || auth.currentUser.uid,
+        ...(input.link?.trim() ? { link: input.link.trim().slice(0, 500) } : {}),
+        read: false,
+        created_at: nowIso,
+      });
+      await setDoc(doc(db, "user_notifications", baseId), cleanPayload);
+      const rec: NotificationDeliveryRecord = {
+        id: `del_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        notification_id: baseId,
+        title: title.slice(0, 150),
+        category,
+        priority,
+        audience,
+        channel: "in_app",
+        recipient: audience,
+        status: isFutureScheduled ? "queued" : "sent",
+        ...(idemKey ? { idempotency_key: idemKey } : {}),
+        ...(input.scheduled_at ? { scheduled_at: input.scheduled_at } : {}),
+        created_at: nowIso,
+      };
+      await logNotificationDelivery(rec);
+      createdDeliveries.push(rec);
+    } else {
+      for (const uid of specificTargets) {
+        const safeSub = uid.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 32);
+        const docId = specificTargets.length === 1 ? baseId : `${baseId}_${safeSub}`;
+        const cleanPayload = sanitizeFirestorePayload({
+          id: docId,
+          is_global: false,
+          user_id: uid,
+          title: title.slice(0, 200),
+          message: message.slice(0, 1500),
+          type: input.type || "info",
+          category,
+          priority,
+          audience: "specific_users",
+          ...(input.scheduled_at ? { scheduled_at: input.scheduled_at } : {}),
+          status,
+          ...(idemKey ? { idempotency_key: idemKey.slice(0, 100) } : {}),
+          channels: selectedChannels,
+          created_by: auth.currentUser.email || auth.currentUser.uid,
+          ...(input.link?.trim() ? { link: input.link.trim().slice(0, 500) } : {}),
+          read: false,
+          created_at: nowIso,
+        });
+        await setDoc(doc(db, "user_notifications", docId), cleanPayload);
+        const rec: NotificationDeliveryRecord = {
+          id: `del_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          notification_id: docId,
+          title: title.slice(0, 150),
+          category,
+          priority,
+          audience: "specific_users",
+          channel: "in_app",
+          recipient: uid,
+          status: isFutureScheduled ? "queued" : "sent",
+          ...(idemKey ? { idempotency_key: idemKey } : {}),
+          ...(input.scheduled_at ? { scheduled_at: input.scheduled_at } : {}),
+          created_at: nowIso,
+        };
+        await logNotificationDelivery(rec);
+        createdDeliveries.push(rec);
+      }
+    }
+  }
+
+  // Honest Web Push logging (client browser cannot push to remote sleeping browsers without a VAPID server push key)
+  if (useWebPush) {
+    const pushRec: NotificationDeliveryRecord = {
+      id: `del_push_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      notification_id: baseId,
+      title: title.slice(0, 150),
+      category,
+      priority,
+      audience,
+      channel: "web_push",
+      recipient: audience === "specific_users" ? specificTargets.join(", ") : audience,
+      status: isFutureScheduled ? "queued" : "failed",
+      error_message: isFutureScheduled
+        ? undefined
+        : "সার্ভার Web Push (VAPID Private Key) কনফিগার করা নেই — শুধুমাত্র সক্রিয় ইন-অ্যাপ ব্রাউজার সেশনে নোটিফিকেশন পৌঁছাবে।",
+      ...(idemKey ? { idempotency_key: idemKey } : {}),
+      ...(input.scheduled_at ? { scheduled_at: input.scheduled_at } : {}),
+      created_at: nowIso,
+    };
+    await logNotificationDelivery(pushRec);
+    createdDeliveries.push(pushRec);
+  }
+
+  // Honest Email delivery via /api/notifications/send-email
+  if (useEmail) {
+    const emailTargets = (input.target_email || "")
+      .split(/[\s,;]+/)
+      .map((e) => e.trim())
+      .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+
+    if (emailTargets.length === 0) {
+      const failRec: NotificationDeliveryRecord = {
+        id: `del_mail_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        notification_id: baseId,
+        title: title.slice(0, 150),
+        category,
+        priority,
+        audience,
+        channel: "email",
+        recipient: "উল্লেখ করা হয়নি",
+        status: "failed",
+        error_message: "ইমেইল পাঠানোর জন্য সঠিক প্রাপক ইমেইল ঠিকানা দেওয়া হয়নি।",
+        created_at: nowIso,
+      };
+      await logNotificationDelivery(failRec);
+      createdDeliveries.push(failRec);
+    } else if (isFutureScheduled) {
+      for (const toEmail of emailTargets) {
+        const qRec: NotificationDeliveryRecord = {
+          id: `del_mail_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          notification_id: baseId,
+          title: title.slice(0, 150),
+          category,
+          priority,
+          audience,
+          channel: "email",
+          recipient: toEmail,
+          status: "queued",
+          scheduled_at: input.scheduled_at,
+          created_at: nowIso,
+        };
+        await logNotificationDelivery(qRec);
+        createdDeliveries.push(qRec);
+      }
+    } else {
+      for (const toEmail of emailTargets) {
+        let emailStatus: "sent" | "failed" = "failed";
+        let emailErr: string | undefined;
+        try {
+          const resp = await fetch("/api/notifications/send-email", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              to: toEmail,
+              subject: `[${category}] ${title}`,
+              text: `${message}${input.link ? `\n\nবিস্তারিত: ${input.link}` : ""}`,
+              category,
+              priority,
+              link: input.link,
+            }),
+          });
+          const data = (await resp.json().catch(() => ({}))) as {
+            ok?: boolean;
+            delivered?: boolean;
+            reason?: string;
+            error?: string;
+          };
+          if (resp.ok && data.ok && data.delivered) {
+            emailStatus = "sent";
+          } else {
+            emailErr =
+              data.reason ||
+              data.error ||
+              "ইমেইল গেটওয়ে (SMTP/Resend API) কনফিগার করা নেই";
+          }
+        } catch (err: any) {
+          emailErr = err?.message || "ইমেইল সার্ভার সংযোগ ব্যর্থ হয়েছে";
+        }
+        const mRec: NotificationDeliveryRecord = {
+          id: `del_mail_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          notification_id: baseId,
+          title: title.slice(0, 150),
+          category,
+          priority,
+          audience,
+          channel: "email",
+          recipient: toEmail,
+          status: emailStatus,
+          ...(emailErr ? { error_message: emailErr } : {}),
+          created_at: nowIso,
+        };
+        await logNotificationDelivery(mRec);
+        createdDeliveries.push(mRec);
+      }
+    }
+  }
+
+  if (idemKey) {
+    try {
+      const seenRaw = localStorage.getItem("sn_notif_idem_keys");
+      const seen: Record<string, string> = seenRaw ? JSON.parse(seenRaw) : {};
+      seen[idemKey] = baseId;
+      localStorage.setItem("sn_notif_idem_keys", JSON.stringify(seen));
+    } catch {}
+  }
+
+  return { notifId: baseId, deliveries: createdDeliveries };
+}
+
+export async function retryNotificationDelivery(
+  rec: NotificationDeliveryRecord,
+  messageBody?: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (rec.channel !== "email") {
+    return {
+      ok: false,
+      error: "শুধুমাত্র ইমেইল ডেলিভারি পুনরায় চেষ্টা (Retry) করা সম্ভব।",
+    };
+  }
+  const resp = await fetch("/api/notifications/send-email", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      to: rec.recipient,
+      subject: `[${rec.category}] ${rec.title}`,
+      text: messageBody || rec.title,
+      category: rec.category,
+      priority: rec.priority,
+    }),
+  });
+  const data = (await resp.json().catch(() => ({}))) as {
+    ok?: boolean;
+    delivered?: boolean;
+    reason?: string;
+    error?: string;
+  };
+  const updated: NotificationDeliveryRecord = {
+    ...rec,
+    status: resp.ok && data.ok && data.delivered ? "sent" : "failed",
+    error_message:
+      resp.ok && data.ok && data.delivered
+        ? undefined
+        : data.reason || data.error || "ইমেইল গেটওয়ে কনফিগার করা নেই",
+    updated_at: new Date().toISOString(),
+  };
+  await logNotificationDelivery(updated);
+  return {
+    ok: updated.status === "sent",
+    error: updated.error_message,
+  };
+}
+
+export async function createAdminNotification(input: {
+  title: string;
+  message: string;
+  type: UserNotificationItem["type"];
+  is_global: boolean;
+  user_id?: string;
+  link?: string;
+  category?: NotificationCategory;
+  priority?: NotificationPriority;
+}) {
+  const res = await dispatchNotification({
+    title: input.title,
+    message: input.message,
+    type: input.type,
+    category: input.category,
+    priority: input.priority,
+    audience: input.is_global ? "all_users" : "specific_users",
+    user_id: input.user_id,
+    link: input.link,
+    channels: { in_app: true },
+  });
+  return res.notifId;
 }
 
 export async function deleteAdminNotification(notifId: string) {

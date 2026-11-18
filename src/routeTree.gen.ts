@@ -28,6 +28,7 @@ import { Route as DirectoryRouteImport } from './routes/directory'
 import { Route as CareerRouteImport } from './routes/career'
 import { Route as MapRouteImport } from './routes/map'
 import { Route as ComplaintTrackingRouteImport } from './routes/complaint-tracking'
+import { Route as NotificationsRouteImport } from './routes/notifications'
 
 const DirectoryRoute = DirectoryRouteImport.update({
   id: '/directory',
@@ -56,6 +57,12 @@ const ComplaintTrackingRoute = ComplaintTrackingRouteImport.update({
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+
+const NotificationsRoute = NotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -146,6 +153,7 @@ export interface FileRoutesByFullPath {
   '/submit-info': typeof SubmitInfoRoute
   '/category/$slug': typeof CategorySlugRoute
   '/profile': typeof ProfileRoute
+  '/notifications': typeof NotificationsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -162,6 +170,7 @@ export interface FileRoutesByTo {
   '/submit-info': typeof SubmitInfoRoute
   '/category/$slug': typeof CategorySlugRoute
   '/profile': typeof ProfileRoute
+  '/notifications': typeof NotificationsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -179,6 +188,7 @@ export interface FileRoutesById {
   '/submit-info': typeof SubmitInfoRoute
   '/category/$slug': typeof CategorySlugRoute
   '/profile': typeof ProfileRoute
+  '/notifications': typeof NotificationsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -197,6 +207,7 @@ export interface FileRouteTypes {
     | '/submit-info'
     | '/category/$slug'
     | '/profile'
+    | '/notifications'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -213,6 +224,7 @@ export interface FileRouteTypes {
     | '/submit-info'
     | '/category/$slug'
     | '/profile'
+    | '/notifications'
   id:
     | '__root__'
     | '/'
@@ -229,6 +241,7 @@ export interface FileRouteTypes {
     | '/submit-info'
     | '/category/$slug'
     | '/profile'
+    | '/notifications'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -246,6 +259,7 @@ export interface RootRouteChildren {
   SubmitInfoRoute: typeof SubmitInfoRoute
   CategorySlugRoute: typeof CategorySlugRoute
   ProfileRoute: typeof ProfileRoute
+  NotificationsRoute: typeof NotificationsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -383,6 +397,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ComplaintTrackingRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/notifications': {
+      id: '/notifications'
+      path: '/notifications'
+      fullPath: '/notifications'
+      preLoaderRoute: typeof NotificationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -401,6 +422,7 @@ const rootRouteChildren: RootRouteChildren = {
   SubmitInfoRoute: SubmitInfoRoute,
   CategorySlugRoute: CategorySlugRoute,
   ProfileRoute: ProfileRoute,
+  NotificationsRoute: NotificationsRoute,
   AdminRoute: AdminRoute,
   DirectoryRoute: DirectoryRoute,
   CareerRoute: CareerRoute,

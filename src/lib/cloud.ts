@@ -26,6 +26,7 @@ import {
   ensureFirebaseAuthUser,
 } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth";
+import { useRolePermissions } from "@/lib/permissions";
 import { recordStaffActivity } from "@/lib/staff-audit";
 import { uploadImageToFirebaseStorage, type ImageUploadCategory } from "@/lib/imageUpload";
 
@@ -286,6 +287,9 @@ export interface CategoryAccessRow {
   created_at: string;
 }
 
+export type ChatThreadStatus = "new" | "in_progress" | "waiting_customer" | "resolved" | "closed";
+export type ChatThreadPriority = "normal" | "high" | "urgent";
+
 export interface ChatThreadRow {
   id: string;
   user_id: string;
@@ -295,6 +299,15 @@ export interface ChatThreadRow {
   last_message_preview: string | null;
   user_unread: number;
   staff_unread: number;
+  status?: ChatThreadStatus;
+  priority?: ChatThreadPriority;
+  assigned_to_uid?: string | null;
+  assigned_to_name?: string | null;
+  assigned_role?: string | null;
+  source?: "direct" | "ai_handoff";
+  handoff_summary?: string | null;
+  staff_uids?: string[];
+  reopened_at?: string | null;
   created_at: string;
 }
 
@@ -308,6 +321,8 @@ export interface PrivateMessageRow {
   sender_role_label?: string;
   body: string | null;
   attachment_url: string | null;
+  staff_uids?: string[];
+  assigned_to_uid?: string | null;
   created_at: string;
   status?: "sending" | "sent" | "failed";
 }
@@ -3240,24 +3255,120 @@ export async function purgeDeletedFirestoreThread(threadId: string) {
   }
 }
 
+const CHAT_OPERATORS_CONFIG_ID = "chat_operators_config";
+const LOCAL_CHAT_OPERATOR_UIDS_KEY = "sn_chat_operator_uids_v1";
+
+export function getCachedChatOperatorUids(extraUids: Array<string | null | undefined> = []): string[] {
+  const uids = new Set<string>(["super_admin_mahmudul"]);
+  try {
+    const raw = localStorage.getItem(LOCAL_CHAT_OPERATOR_UIDS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (typeof item === "string" && item.trim()) {
+            uids.add(item.trim());
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  const actor = getCurrentActorInfo();
+  if (actor.isStaff && actor.uid) {
+    uids.add(actor.uid);
+  }
+  for (const extra of extraUids) {
+    if (typeof extra === "string" && extra.trim()) {
+      uids.add(extra.trim());
+    }
+  }
+  return Array.from(uids).slice(0, 24);
+}
+
+let lastOpUidFetchAt = 0;
+async function refreshChatOperatorUidsCache(force = false): Promise<string[]> {
+  const now = Date.now();
+  if (!force && now - lastOpUidFetchAt < 60000) {
+    return getCachedChatOperatorUids();
+  }
+  lastOpUidFetchAt = now;
+  const collected = new Set<string>(getCachedChatOperatorUids());
+  try {
+    const resp = await fetch("/api/chat/operators");
+    if (resp.ok && (resp.headers.get("content-type") || "").includes("application/json")) {
+      const data = await resp.json();
+      if (Array.isArray(data.uids)) {
+        data.uids.forEach((u: unknown) => {
+          if (typeof u === "string" && u.trim()) collected.add(u.trim());
+        });
+      }
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    const snap = await getDoc(doc(db, "settings", CHAT_OPERATORS_CONFIG_ID));
+    if (snap.exists()) {
+      const raw = snap.data()?.logo_url;
+      if (typeof raw === "string" && raw.trim()) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed?.uids)) {
+          parsed.uids.forEach((u: unknown) => {
+            if (typeof u === "string" && u.trim()) collected.add(u.trim());
+          });
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  const list = Array.from(collected).slice(0, 24);
+  try {
+    localStorage.setItem(LOCAL_CHAT_OPERATOR_UIDS_KEY, JSON.stringify(list));
+  } catch {
+    // ignore
+  }
+  return list;
+}
+
 // ---------- Private chat: threads ----------
 export function useChatThreads() {
-  const { user, isStaff } = useAuth();
+  const { user, isStaff, isMainAdmin } = useAuth();
+  const { hasPermission } = useRolePermissions();
+  const canViewAllChats = isMainAdmin || hasPermission("chat_view_all");
+  const canAccessOperatorInbox =
+    isStaff || canViewAllChats || hasPermission("chat_view_assigned") || hasPermission("chat_reply");
+
   const [fsItems, setFsItems] = useState<ChatThreadRow[]>([]);
   const [fsLoading, setFsLoading] = useState(true);
   const [serverItems, setServerItems] = useState<ChatThreadRow[]>([]);
   const [delState, setDelState] = useState<ChatDeletionState>(() => readLocalChatDeletions());
   const [serverLoading, setServerLoading] = useState(true);
 
-  // Authoritative real-time Firestore listener for live chat threads
+  useEffect(() => {
+    void refreshChatOperatorUidsCache();
+  }, []);
+
+  // Authoritative real-time Firestore listener for live chat threads (properly unsubscribes on unmount)
   useEffect(() => {
     let active = true;
+    let unsub: (() => void) | null = null;
+
     void ensureFirebaseAuthUser().then((fbUser) => {
       if (!active) return;
       const threadsCol = collection(db, "chat_threads");
-      const currentUid = fbUser?.uid || user?.id;
-      const q = isStaff
+      const currentUid = fbUser?.uid || user?.id || "";
+      const isFullSuper =
+        isMainAdmin ||
+        isSuperAdminEmail(fbUser?.email) ||
+        isBootstrappedAdminEmail(fbUser?.email);
+
+      const q = isFullSuper
         ? query(threadsCol)
+        : canAccessOperatorInbox && currentUid
+        ? query(threadsCol, where("staff_uids", "array-contains", currentUid))
         : currentUid
         ? query(threadsCol, where("user_id", "==", currentUid))
         : null;
@@ -3268,7 +3379,7 @@ export function useChatThreads() {
         return;
       }
 
-      const unsub = onSnapshot(
+      unsub = onSnapshot(
         q,
         (snap) => {
           if (!active) return;
@@ -3282,14 +3393,16 @@ export function useChatThreads() {
           if (active) setFsLoading(false);
         }
       );
-
-      return () => unsub();
     });
 
     return () => {
       active = false;
+      if (unsub) {
+        unsub();
+        unsub = null;
+      }
     };
-  }, [isStaff, user?.id]);
+  }, [isMainAdmin, canAccessOperatorInbox, user?.id]);
 
   useEffect(() => {
     let active = true;
@@ -3307,14 +3420,29 @@ export function useChatThreads() {
           if (active) setDelState(nextDel);
           if (active && Array.isArray(data.threads)) {
             const mapped: ChatThreadRow[] = data.threads
-              .filter((t: any) => isStaff || (user && t.user_id === user.id))
+              .filter((t: any) => {
+                if (canViewAllChats || isStaff) return true;
+                if (canAccessOperatorInbox && user?.id && t.assigned_to_uid === user.id) return true;
+                return Boolean(user && t.user_id === user.id);
+              })
               .map((t: any) => ({
                 id: String(t.id),
                 user_id: String(t.user_id || t.id),
+                user_name: t.user_name ?? null,
+                user_email: t.user_email ?? null,
                 last_message_at: String(t.last_message_at || new Date().toISOString()),
                 last_message_preview: t.last_message_preview ?? null,
                 user_unread: Number(t.user_unread ?? 0),
                 staff_unread: Number(t.staff_unread ?? 0),
+                status: t.status ?? "new",
+                priority: t.priority ?? "normal",
+                assigned_to_uid: t.assigned_to_uid ?? null,
+                assigned_to_name: t.assigned_to_name ?? null,
+                assigned_role: t.assigned_role ?? null,
+                source: t.source ?? "direct",
+                handoff_summary: t.handoff_summary ?? null,
+                staff_uids: Array.isArray(t.staff_uids) ? t.staff_uids : undefined,
+                reopened_at: t.reopened_at ?? null,
                 created_at: String(t.created_at || new Date().toISOString()),
               }))
               .filter(
@@ -3339,7 +3467,7 @@ export function useChatThreads() {
       active = false;
       clearInterval(timer);
     };
-  }, [user?.id, isStaff]);
+  }, [user?.id, isStaff, canViewAllChats, canAccessOperatorInbox]);
 
   // Automatically purge any tombstoned or empty Firestore chat_threads when signed in as admin
   useEffect(() => {
@@ -3547,7 +3675,7 @@ export function useThreadMessages(threadId: string | null) {
     };
   }, [threadId]);
 
-  // Authoritative real-time Firestore messages subscription
+  // Authoritative real-time Firestore messages subscription (properly cleans up on unmount/thread switch)
   useEffect(() => {
     if (!threadId) {
       setFsItems([]);
@@ -3556,10 +3684,11 @@ export function useThreadMessages(threadId: string | null) {
     }
 
     let active = true;
+    let unsub: (() => void) | null = null;
     void ensureFirebaseAuthUser().then(() => {
       if (!active) return;
       const msgsRef = collection(db, "chat_threads", threadId, "messages");
-      const unsub = onSnapshot(
+      unsub = onSnapshot(
         msgsRef,
         (snap) => {
           if (!active) return;
@@ -3573,12 +3702,14 @@ export function useThreadMessages(threadId: string | null) {
           if (active) setLoading(false);
         }
       );
-
-      return () => unsub();
     });
 
     return () => {
       active = false;
+      if (unsub) {
+        unsub();
+        unsub = null;
+      }
     };
   }, [threadId]);
 
@@ -3623,6 +3754,12 @@ export function useThreadMessages(threadId: string | null) {
       user_name?: string;
       user_email?: string;
       user_phone?: string;
+      source?: "direct" | "ai_handoff";
+      handoff_summary?: string;
+      status?: ChatThreadStatus;
+      assigned_to_uid?: string;
+      assigned_to_name?: string;
+      assigned_role?: string;
     }
   ) => {
     if (!threadId) return { error: { message: "No thread selected" } };
@@ -3632,6 +3769,14 @@ export function useThreadMessages(threadId: string | null) {
     const msgId = genId();
     const nowIso = new Date().toISOString();
     const preview = sanitizeString(body || (attachment_url ? "📎 সংযুক্তি" : ""), 300, "");
+    const knownOperatorUids = await refreshChatOperatorUidsCache().catch(() => getCachedChatOperatorUids());
+    const initialStaffUids = Array.from(
+      new Set([
+        ...knownOperatorUids,
+        ...(sender_role === "staff" && activeUid ? [activeUid] : []),
+        ...(meta?.assigned_to_uid ? [meta.assigned_to_uid] : []),
+      ].filter(Boolean))
+    ).slice(0, 24);
 
     // 1. Instant optimistic message in local state
     const optimisticMsg: PrivateMessageRow = {
@@ -3645,13 +3790,16 @@ export function useThreadMessages(threadId: string | null) {
         (sender_role === "staff" ? "সাপোর্ট টিম" : "গ্রাহক"),
       sender_photo: meta?.sender_photo || user?.photoURL || "",
       sender_role_label:
-        meta?.sender_role_label || (sender_role === "staff" ? "এডমিন" : "গ্রাহক"),
+        meta?.sender_role_label || (sender_role === "staff" ? "অ্যাডমিন" : "গ্রাহক"),
       body: body || "",
       attachment_url: attachment_url || null,
       created_at: nowIso,
       status: "sending",
     };
     setFsItems((prev) => [...prev, optimisticMsg]);
+
+    let finalStatus: ChatThreadStatus = meta?.status || (sender_role === "staff" ? "in_progress" : "new");
+    let reopenedAt: string | undefined;
 
     // 2. Direct authoritative Firestore write
     try {
@@ -3669,12 +3817,37 @@ export function useThreadMessages(threadId: string | null) {
           last_message_preview: preview,
           user_unread: sender_role === "staff" ? 1 : 0,
           staff_unread: sender_role === "user" ? 1 : 0,
+          status: finalStatus,
+          priority: "normal",
+          assigned_to_uid: meta?.assigned_to_uid || "",
+          assigned_to_name: meta?.assigned_to_name || "",
+          assigned_role: meta?.assigned_role || "",
+          source: meta?.source || "direct",
+          handoff_summary: sanitizeString(meta?.handoff_summary || "", 1000, ""),
+          staff_uids: initialStaffUids,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
       } else {
         const tData = threadSnap.data();
-        await updateDoc(threadRef, {
+        const currentStatus = String(tData.status || "new") as ChatThreadStatus;
+        if (sender_role === "user" && (currentStatus === "closed" || currentStatus === "resolved")) {
+          finalStatus = "in_progress";
+          reopenedAt = nowIso;
+        } else if (sender_role === "staff" && currentStatus === "new") {
+          finalStatus = "in_progress";
+        } else {
+          finalStatus = meta?.status || currentStatus;
+        }
+        const mergedStaffUids = Array.from(
+          new Set([
+            ...(Array.isArray(tData.staff_uids) ? (tData.staff_uids as string[]) : []),
+            ...initialStaffUids,
+            ...(tData.assigned_to_uid ? [String(tData.assigned_to_uid)] : []),
+          ].filter(Boolean))
+        ).slice(0, 24);
+
+        const updatePayload: Record<string, unknown> = {
           last_message_at: nowIso,
           last_message_preview: preview,
           user_name:
@@ -3693,8 +3866,20 @@ export function useThreadMessages(threadId: string | null) {
             sender_role === "user"
               ? Math.min((Number(tData.staff_unread) || 0) + 1, 10000)
               : 0,
+          status: finalStatus,
+          staff_uids: mergedStaffUids,
           updatedAt: serverTimestamp(),
-        });
+        };
+        if (reopenedAt) {
+          updatePayload.reopened_at = reopenedAt;
+        }
+        if (meta?.source) {
+          updatePayload.source = meta.source;
+        }
+        if (meta?.handoff_summary) {
+          updatePayload.handoff_summary = sanitizeString(meta.handoff_summary, 1000, "");
+        }
+        await updateDoc(threadRef, updatePayload);
       }
 
       await setDoc(doc(db, "chat_threads", threadId, "messages", msgId), {
@@ -3707,13 +3892,13 @@ export function useThreadMessages(threadId: string | null) {
           (sender_role === "staff" ? "সাপোর্ট টিম" : "গ্রাহক"),
         sender_photo: meta?.sender_photo || user?.photoURL || "",
         sender_role_label:
-          meta?.sender_role_label || (sender_role === "staff" ? "এডমিন" : "গ্রাহক"),
+          meta?.sender_role_label || (sender_role === "staff" ? "অ্যাডমিন" : "গ্রাহক"),
         body: sanitizeString(body || "", 2000, ""),
         attachment_url: sanitizeString(attachment_url ?? "", 300000, ""),
+        staff_uids: initialStaffUids,
         createdAt: serverTimestamp(),
       });
 
-      // Update optimistic message status to sent
       setFsItems((prev) =>
         prev.map((m) => (m.id === msgId ? { ...m, status: "sent" } : m))
       );
@@ -3724,7 +3909,7 @@ export function useThreadMessages(threadId: string | null) {
       );
     }
 
-    // 3. Optional background server notification (non-blocking)
+    // 3. Authoritative Express /api/chat/send mirror
     fetch("/api/chat/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3746,9 +3931,14 @@ export function useThreadMessages(threadId: string | null) {
           (sender_role === "staff" ? "সাপোর্ট টিম" : "গ্রাহক"),
         sender_photo: meta?.sender_photo || user?.photoURL || "",
         sender_role_label:
-          meta?.sender_role_label || (sender_role === "staff" ? "এডমিন" : "গ্রাহক"),
+          meta?.sender_role_label || (sender_role === "staff" ? "অ্যাডমিন" : "গ্রাহক"),
         body: body || "",
         attachment_url: attachment_url || "",
+        status: finalStatus,
+        source: meta?.source,
+        handoff_summary: meta?.handoff_summary,
+        staff_uids: initialStaffUids,
+        reopened_at: reopenedAt,
       }),
     }).catch(() => {});
 
@@ -3841,6 +4031,181 @@ export async function markThreadRead(threadId: string, side: "user" | "staff") {
     });
   } catch {
     // Ignore read receipt error
+  }
+}
+
+export async function updateChatThreadMeta(
+  threadId: string,
+  patch: {
+    status?: ChatThreadStatus;
+    priority?: ChatThreadPriority;
+    assigned_to_uid?: string | null;
+    assigned_to_name?: string | null;
+    assigned_role?: string | null;
+    source?: "direct" | "ai_handoff";
+    handoff_summary?: string | null;
+    reopened_at?: string | null;
+  }
+): Promise<{ ok: boolean; error?: string }> {
+  if (!threadId) return { ok: false, error: "Invalid thread ID" };
+  try {
+    const cleanPatch: Record<string, unknown> = {
+      updatedAt: serverTimestamp(),
+    };
+    if (patch.status !== undefined) cleanPatch.status = patch.status;
+    if (patch.priority !== undefined) cleanPatch.priority = patch.priority;
+    if (patch.assigned_to_uid !== undefined) cleanPatch.assigned_to_uid = patch.assigned_to_uid || "";
+    if (patch.assigned_to_name !== undefined) cleanPatch.assigned_to_name = patch.assigned_to_name || "";
+    if (patch.assigned_role !== undefined) cleanPatch.assigned_role = patch.assigned_role || "";
+    if (patch.source !== undefined) cleanPatch.source = patch.source;
+    if (patch.handoff_summary !== undefined) {
+      cleanPatch.handoff_summary = sanitizeString(patch.handoff_summary || "", 1000, "");
+    }
+    if (patch.reopened_at !== undefined) cleanPatch.reopened_at = patch.reopened_at || "";
+
+    if (isWriterAuthed()) {
+      const ref = doc(db, "chat_threads", threadId);
+      const snap = await getDoc(ref).catch(() => null);
+      if (snap && snap.exists()) {
+        const existingData = snap.data();
+        const existingUids = Array.isArray(existingData.staff_uids)
+          ? (existingData.staff_uids as string[])
+          : [];
+        const mergedUids = getCachedChatOperatorUids([
+          ...existingUids,
+          patch.assigned_to_uid || undefined,
+        ]);
+        cleanPatch.staff_uids = mergedUids;
+        await updateDoc(ref, cleanPatch).catch(() => {});
+      }
+    }
+
+    await fetch("/api/chat/update-meta", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ thread_id: threadId, ...patch }),
+    }).catch(() => {});
+
+    void recordStaffActivity({
+      action_type: "edit",
+      action_label: patch.assigned_to_name
+        ? `চ্যাট অ্যাসাইন/ট্রান্সফার করেছে (${patch.assigned_to_name})`
+        : `চ্যাটের স্ট্যাটাস পরিবর্তন করেছে (${patch.status || "আপডেট"})`,
+      module: "chat",
+      module_label: "লাইভ চ্যাট",
+      target_id: threadId,
+      target_title: `থ্রেড (${threadId.slice(0, 12)})`,
+      target_detail: JSON.stringify(patch),
+    });
+
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+export async function handoffAiToLiveChat(params: {
+  threadId: string;
+  userId: string;
+  summary: string;
+  userName?: string;
+  userEmail?: string;
+  userPhone?: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const { threadId, userId, summary, userName, userEmail, userPhone } = params;
+  if (!threadId) return { ok: false, error: "Invalid thread" };
+  try {
+    const fbUser = await ensureFirebaseAuthUser();
+    const activeUid = fbUser?.uid || auth.currentUser?.uid || userId || threadId;
+    const msgId = genId();
+    const nowIso = new Date().toISOString();
+    const cleanSummary = sanitizeString(summary, 950, "এআই চ্যাট থেকে লাইভ সাপোর্টে যুক্ত হতে চান।");
+    const staffUids = await refreshChatOperatorUidsCache().catch(() => getCachedChatOperatorUids());
+
+    const handoffMessage = `🤖 এআই চ্যাট সারসংক্ষেপসহ সরাসরি সাপোর্টে যুক্ত হয়েছি:\n${cleanSummary}`;
+
+    try {
+      const threadRef = doc(db, "chat_threads", threadId);
+      const tSnap = await getDoc(threadRef).catch(() => null);
+      if (!tSnap || !tSnap.exists()) {
+        await setDoc(threadRef, {
+          user_id: threadId,
+          user_name: userName || "গ্রাহক",
+          user_email: userEmail || "",
+          last_message_at: nowIso,
+          last_message_preview: sanitizeString(handoffMessage, 300, ""),
+          user_unread: 0,
+          staff_unread: 1,
+          status: "new",
+          priority: "high",
+          source: "ai_handoff",
+          handoff_summary: cleanSummary,
+          staff_uids: staffUids,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        const tData = tSnap.data();
+        const mergedUids = Array.from(
+          new Set([...(Array.isArray(tData.staff_uids) ? tData.staff_uids : []), ...staffUids])
+        ).slice(0, 24);
+        await updateDoc(threadRef, {
+          last_message_at: nowIso,
+          last_message_preview: sanitizeString(handoffMessage, 300, ""),
+          user_name: userName || tData.user_name || "গ্রাহক",
+          user_email: userEmail || tData.user_email || "",
+          staff_unread: Math.min((Number(tData.staff_unread) || 0) + 1, 10000),
+          status: "new",
+          priority: "high",
+          source: "ai_handoff",
+          handoff_summary: cleanSummary,
+          staff_uids: mergedUids,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      await setDoc(doc(db, "chat_threads", threadId, "messages", msgId), {
+        thread_id: threadId,
+        sender_id: activeUid,
+        sender_role: "user",
+        sender_name: userName || "গ্রাহক",
+        sender_photo: "",
+        sender_role_label: "গ্রাহক",
+        body: handoffMessage,
+        attachment_url: "",
+        staff_uids: staffUids,
+        createdAt: serverTimestamp(),
+      });
+    } catch {
+      // ignore if offline; Express fallback handles
+    }
+
+    await fetch("/api/chat/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        thread_id: threadId,
+        user_id: userId || threadId,
+        user_name: userName || "গ্রাহক",
+        user_email: userEmail || "",
+        user_phone: userPhone || "",
+        sender_id: activeUid,
+        sender_role: "user",
+        sender_name: userName || "গ্রাহক",
+        sender_role_label: "গ্রাহক",
+        body: handoffMessage,
+        attachment_url: "",
+        status: "new",
+        priority: "high",
+        source: "ai_handoff",
+        handoff_summary: cleanSummary,
+        staff_uids: staffUids,
+      }),
+    }).catch(() => {});
+
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
   }
 }
 

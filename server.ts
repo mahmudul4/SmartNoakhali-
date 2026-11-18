@@ -78,6 +78,16 @@ export interface ServerChatMessage {
   created_at: string;
 }
 
+export type ServerChatStatus =
+  | "new"
+  | "assigned"
+  | "in_progress"
+  | "waiting_customer"
+  | "resolved"
+  | "closed";
+
+export type ServerChatPriority = "normal" | "urgent";
+
 export interface ServerChatThread {
   id: string;
   user_id: string;
@@ -89,6 +99,15 @@ export interface ServerChatThread {
   user_unread: number;
   staff_unread: number;
   created_at: string;
+  status?: ServerChatStatus;
+  priority?: ServerChatPriority;
+  assigned_to_uid?: string | null;
+  assigned_to_name?: string | null;
+  assigned_role?: string | null;
+  source?: "direct" | "ai_handoff";
+  handoff_summary?: string | null;
+  staff_uids?: string[];
+  reopened_at?: string | null;
 }
 
 interface ChatStoreData {
@@ -824,6 +843,114 @@ async function startServer() {
     }
   });
 
+  app.post("/api/notifications/send-email", async (req, res) => {
+    try {
+      const { to, subject, text, html, category, priority } = (req.body || {}) as {
+        to?: string;
+        subject?: string;
+        text?: string;
+        html?: string;
+        category?: string;
+        priority?: string;
+      };
+
+      const cleanTo = String(to || "").trim();
+      const cleanSubject = String(subject || "").trim() || "স্মার্ট নোয়াখালী বিজ্ঞপ্তি";
+      const cleanText = String(text || "").trim();
+
+      if (!cleanTo || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanTo)) {
+        res.status(400).json({
+          ok: false,
+          delivered: false,
+          reason: "সঠিক প্রাপক ইমেইল ঠিকানা দেওয়া হয়নি।",
+        });
+        return;
+      }
+      if (!cleanText && !html) {
+        res.status(400).json({
+          ok: false,
+          delivered: false,
+          reason: "ইমেইলের বার্তা খালি।",
+        });
+        return;
+      }
+
+      const cfg = readOtpGatewayConfig();
+      const safeHtml =
+        html ||
+        `<div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 16px; background: #ffffff;">
+          <div style="font-size: 12px; font-weight: bold; color: #047857; margin-bottom: 6px;">${category || "স্মার্ট নোয়াখালী"}${priority === "urgent" ? " • জরুরি" : ""}</div>
+          <h2 style="color: #064e3b; margin: 0 0 12px 0;">${cleanSubject}</h2>
+          <p style="color: #334155; font-size: 14px; line-height: 1.6; white-space: pre-line;">${cleanText}</p>
+          <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+          <p style="color: #64748b; font-size: 11px;">স্মার্ট নোয়াখালী — <a href="https://smartnoakhali.com">smartnoakhali.com</a></p>
+        </div>`;
+
+      if (cfg.smtpUser && cfg.smtpPass) {
+        const transporter = nodemailer.createTransport({
+          host: cfg.smtpHost || "smtp.gmail.com",
+          port: Number(cfg.smtpPort) || 465,
+          secure: (Number(cfg.smtpPort) || 465) === 465,
+          auth: {
+            user: cfg.smtpUser,
+            pass: cfg.smtpPass,
+          },
+        });
+        await transporter.sendMail({
+          from: `"${cfg.smtpFromName}" <${cfg.smtpUser}>`,
+          to: cleanTo,
+          subject: cleanSubject,
+          text: cleanText,
+          html: safeHtml,
+        });
+        res.json({ ok: true, delivered: true, provider: "smtp", to: cleanTo });
+        return;
+      }
+
+      if (cfg.resendApiKey) {
+        const r = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${cfg.resendApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            from: process.env.RESEND_FROM_EMAIL || "Smart Noakhali <onboarding@resend.dev>",
+            to: [cleanTo],
+            subject: cleanSubject,
+            text: cleanText,
+            html: safeHtml,
+          }),
+        });
+        if (r.ok) {
+          res.json({ ok: true, delivered: true, provider: "resend", to: cleanTo });
+          return;
+        }
+        const errBody = await r.text().catch(() => "");
+        res.status(502).json({
+          ok: false,
+          delivered: false,
+          configured: true,
+          reason: `Resend API ত্রুটি (${r.status}): ${errBody.slice(0, 180)}`,
+        });
+        return;
+      }
+
+      res.json({
+        ok: false,
+        delivered: false,
+        configured: false,
+        reason: "ইমেইল গেটওয়ে (SMTP অথবা Resend API Key) কনফিগার করা নেই।",
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        delivered: false,
+        reason: err instanceof Error ? err.message : "ইমেইল পাঠাতে ব্যর্থ হয়েছে",
+      });
+    }
+  });
+
   app.post("/api/auth/sync-user", (req, res) => {
     try {
       const body = req.body as Partial<VerifiedUserRecord>;
@@ -1219,6 +1346,14 @@ async function startServer() {
         sender_role_label,
         body,
         attachment_url,
+        status,
+        priority,
+        assigned_to_uid,
+        assigned_to_name,
+        assigned_role,
+        source,
+        handoff_summary,
+        staff_uids,
       } = req.body as {
         thread_id?: string;
         user_id?: string;
@@ -1232,6 +1367,14 @@ async function startServer() {
         sender_role_label?: string;
         body?: string;
         attachment_url?: string;
+        status?: ServerChatStatus;
+        priority?: ServerChatPriority;
+        assigned_to_uid?: string | null;
+        assigned_to_name?: string | null;
+        assigned_role?: string | null;
+        source?: "direct" | "ai_handoff";
+        handoff_summary?: string | null;
+        staff_uids?: string[];
       };
 
       const tid = String(thread_id || user_id || "").trim();
@@ -1248,6 +1391,25 @@ async function startServer() {
       const cleanBody = String(body || "").trim();
       const cleanAttach = String(attachment_url || "").trim();
       const preview = cleanBody || (cleanAttach ? "📎 ফাইল / ভয়েস সংযুক্তি" : "");
+
+      const nextStatus: ServerChatStatus =
+        status ||
+        (role === "staff"
+          ? existingThread?.status === "new" || !existingThread?.status
+            ? "in_progress"
+            : existingThread.status
+          : existingThread?.status === "closed" || existingThread?.status === "resolved"
+            ? "new"
+            : existingThread?.status || "new");
+
+      const mergedStaffUids = Array.from(
+        new Set([
+          ...(Array.isArray(existingThread?.staff_uids) ? existingThread.staff_uids : []),
+          ...(Array.isArray(staff_uids) ? staff_uids : []),
+          ...(assigned_to_uid ? [assigned_to_uid] : []),
+          ...(role === "staff" && sender_id ? [String(sender_id)] : []),
+        ].filter(Boolean))
+      ).slice(0, 50);
 
       const updatedThread: ServerChatThread = {
         id: tid,
@@ -1273,8 +1435,24 @@ async function startServer() {
         staff_unread:
           role === "user"
             ? (existingThread?.staff_unread || 0) + 1
-            : 0, // When staff replies, staff_unread automatically resets to 0
+            : 0,
         created_at: existingThread?.created_at || now,
+        status: nextStatus,
+        priority: priority || existingThread?.priority || "normal",
+        assigned_to_uid:
+          assigned_to_uid !== undefined ? assigned_to_uid : existingThread?.assigned_to_uid || null,
+        assigned_to_name:
+          assigned_to_name !== undefined ? assigned_to_name : existingThread?.assigned_to_name || null,
+        assigned_role:
+          assigned_role !== undefined ? assigned_role : existingThread?.assigned_role || null,
+        source: source || existingThread?.source || "direct",
+        handoff_summary:
+          handoff_summary !== undefined ? handoff_summary : existingThread?.handoff_summary || null,
+        staff_uids: mergedStaffUids,
+        reopened_at:
+          role === "user" && (existingThread?.status === "closed" || existingThread?.status === "resolved")
+            ? now
+            : existingThread?.reopened_at || null,
       };
 
       const msg: ServerChatMessage = {
@@ -1282,9 +1460,10 @@ async function startServer() {
         thread_id: tid,
         sender_id: String(sender_id || tid),
         sender_role: role,
-        sender_name: sender_name || (role === "staff" ? "সাপোর্ট টিম" : updatedThread.user_name),
+        sender_name: sender_name || (role === "staff" ? "সাপোর্ট অ্যাডমিন" : updatedThread.user_name),
         sender_photo: sender_photo || "",
-        sender_role_label: sender_role_label || (role === "staff" ? "এডমিন" : "গ্রাহক"),
+        sender_role_label:
+          sender_role_label || (role === "staff" ? "সাপোর্ট অ্যাডমিন" : "গ্রাহক"),
         body: cleanBody || null,
         attachment_url: cleanAttach || null,
         created_at: now,
@@ -1382,6 +1561,94 @@ async function startServer() {
       deletedMessages: store.deletedMessages || [],
     });
     res.json({ ok: true, deletedAllBefore: now });
+  });
+
+  app.post("/api/chat/update-meta", (req, res) => {
+    try {
+      const {
+        thread_id,
+        status,
+        priority,
+        assigned_to_uid,
+        assigned_to_name,
+        assigned_role,
+        source,
+        handoff_summary,
+        reopened_at,
+        staff_uids,
+      } = req.body as {
+        thread_id?: string;
+        status?: ServerChatStatus;
+        priority?: ServerChatPriority;
+        assigned_to_uid?: string | null;
+        assigned_to_name?: string | null;
+        assigned_role?: string | null;
+        source?: "direct" | "ai_handoff";
+        handoff_summary?: string | null;
+        reopened_at?: string | null;
+        staff_uids?: string[];
+      };
+      const tid = String(thread_id || "").trim();
+      if (!tid) {
+        res.status(400).json({ error: "Missing thread_id" });
+        return;
+      }
+      const store = readChatStore();
+      const existing = store.threads[tid];
+      if (!existing) {
+        res.status(404).json({ error: "Thread not found" });
+        return;
+      }
+      const updated: ServerChatThread = {
+        ...existing,
+        status: status ?? existing.status ?? "new",
+        priority: priority ?? existing.priority ?? "normal",
+        assigned_to_uid:
+          assigned_to_uid !== undefined ? assigned_to_uid || null : existing.assigned_to_uid,
+        assigned_to_name:
+          assigned_to_name !== undefined ? assigned_to_name || null : existing.assigned_to_name,
+        assigned_role:
+          assigned_role !== undefined ? assigned_role || null : existing.assigned_role,
+        source: source ?? existing.source ?? "direct",
+        handoff_summary:
+          handoff_summary !== undefined ? handoff_summary || null : existing.handoff_summary,
+        reopened_at:
+          reopened_at !== undefined ? reopened_at || null : existing.reopened_at,
+        staff_uids: Array.from(
+          new Set([
+            ...(Array.isArray(existing.staff_uids) ? existing.staff_uids : []),
+            ...(Array.isArray(staff_uids) ? staff_uids : []),
+            ...(assigned_to_uid ? [assigned_to_uid] : []),
+          ].filter(Boolean))
+        ).slice(0, 50),
+      };
+      store.threads[tid] = updated;
+      writeChatStore(store);
+      res.json({ ok: true, thread: updated });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "Update failed" });
+    }
+  });
+
+  app.get("/api/chat/operators", (_req, res) => {
+    const store = readVerifiedUsers();
+    const deletedSet = new Set(readDeletedUsers().map((x) => x.toLowerCase()));
+    const operators = Object.values(store)
+      .filter((u) => {
+        if (u.suspended) return false;
+        const emLow = (u.email || "").toLowerCase();
+        const uidLow = (u.uid || "").toLowerCase();
+        if (deletedSet.has(emLow) || deletedSet.has(uidLow)) return false;
+        const roles = Array.isArray(u.roles) ? u.roles : [];
+        return (
+          roles.includes("admin") ||
+          roles.includes("editor") ||
+          roles.includes("moderator") ||
+          Boolean((u as VerifiedUserRecord & { custom_role_id?: string }).custom_role_id)
+        );
+      })
+      .map((u) => stripSensitiveUserFields(u));
+    res.json({ ok: true, operators });
   });
 
   // ============================================================================
@@ -2156,10 +2423,74 @@ async function startServer() {
   // ============================================================================
   // 2. Server-Side Gemini AI Search & Live Chat Assistant (/api/ai/chat)
   // ============================================================================
+  const aiRateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+  function expandNoakhaliTransliteration(rawQuery: string): string {
+    const lower = rawQuery.toLowerCase();
+    const synonyms: Array<[RegExp, string]> = [
+      [/\b(noyakhali|noakhali|noakhaly|nowakhali)\b/g, "নোয়াখালী নোয়াখালী"],
+      [/\b(haspatal|hospital|hosp|clinic|klilik)\b/g, "হাসপাতাল ক্লিনিক জেনারেল হাসপাতাল"],
+      [/\b(daktar|doctor|dr|chikitsha|chikitsa)\b/g, "ডাক্তার চিকিৎসা মেডিসিন"],
+      [/\b(roktodata|rokto|roktopani|blood|donor|blod)\b/g, "রক্তদাতা রক্ত ব্লাড ডোনার"],
+      [/\b(ambulance|embulance|ambulens)\b/g, "অ্যাম্বুলেন্স রোগী পরিবহন"],
+      [/\b(police|pulish|thana|thanay|gd)\b/g, "পুলিশ থানা সুধারাম জিডি"],
+      [/\b(fire|agun|domkol)\b/g, "ফায়ার সার্ভিস দমকল আগুন"],
+      [/\b(maijdee|maijdi|sadar)\b/g, "মাইজদী সদর"],
+      [/\b(chowmuhani|chaumuhani|choumuhani|begumganj)\b/g, "চৌমুহনী বেগমগঞ্জ"],
+      [/\b(senbag|senbagh)\b/g, "সেনবাগ"],
+      [/\b(hatiya|hatia|nijhum)\b/g, "হাতিয়া নিঝুম দ্বীপ"],
+      [/\b(sonaimuri|sonaimury)\b/g, "সোনাইমুড়ী"],
+      [/\b(chatkhil)\b/g, "চাটখিল"],
+      [/\b(companiganj|basurhat)\b/g, "কোম্পানীগঞ্জ বসুরহাট"],
+      [/\b(subarnachar|charjabbar)\b/g, "সুবর্ণচর"],
+      [/\b(kabirhat)\b/g, "কবিরহাট"],
+      [/\b(bkash|bikash|nagad|nogod|rocket|donate|donation|onudan)\b/g, "অনুদান বিকাশ নগদ ডোনেশন"],
+      [/\b(train|bus|gari|ticket)\b/g, "ট্রেন বাস পরিবহন"],
+    ];
+    let expanded = lower;
+    for (const [pattern, replacement] of synonyms) {
+      if (pattern.test(expanded)) {
+        expanded += ` ${replacement}`;
+      }
+    }
+    return expanded;
+  }
+
   app.post("/api/ai/chat", async (req, res) => {
     try {
-      const { query, directoryContext, history } = req.body as {
+      const clientIp =
+        String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "local")
+          .split(",")[0]
+          .trim() || "local";
+      const nowMs = Date.now();
+      const rateRec = aiRateLimitMap.get(clientIp);
+      if (rateRec && rateRec.resetAt > nowMs) {
+        if (rateRec.count >= 30) {
+          res.status(429).json({
+            error: "অল্প সময়ে অনেক বেশি প্রশ্ন পাঠানো হয়েছে। অনুগ্রহ করে ১ মিনিট পর আবার চেষ্টা করুন।",
+            suggestHandoff: true,
+          });
+          return;
+        }
+        rateRec.count += 1;
+      } else {
+        aiRateLimitMap.set(clientIp, { count: 1, resetAt: nowMs + 60_000 });
+      }
+
+      const { query, directoryContext, history, aiConfig } = req.body as {
         query?: string;
+        aiConfig?: {
+          botName?: string;
+          systemInstructions?: string;
+          tone?: "helpful_bn" | "concise_bn" | "bilingual";
+          faqs?: Array<{
+            id?: string;
+            question: string;
+            answer: string;
+            keywords?: string;
+            visible?: boolean;
+          }>;
+        };
         directoryContext?: {
           categories?: Array<{ slug: string; bn: string; en: string; description: string }>;
           submissions?: Array<{
@@ -2188,7 +2519,7 @@ async function startServer() {
           }>;
           donationNumbers?: Array<{ label: string; number: string; method: string }>;
         };
-        history?: Array<{ role: "user" | "assistant"; text: string }>;
+        history?: Array<{ role: "user" | "assistant" | "model"; text: string }>;
       };
 
       const userQuery = String(query || "").trim();
@@ -2196,25 +2527,98 @@ async function startServer() {
         res.status(400).json({ error: "প্রশ্ন লিখুন" });
         return;
       }
+      if (userQuery.length > 1200) {
+        res.status(400).json({ error: "প্রশ্নটি অত্যন্ত বড় (সর্বোচ্চ ১২০০ অক্ষর)" });
+        return;
+      }
 
-      const qLower = userQuery.toLowerCase();
-      const qTokens = qLower
+      const expandedQuery = expandNoakhaliTransliteration(userQuery);
+      const qTokens = expandedQuery
         .split(/[\s,।?!-]+/)
         .map((t) => t.trim())
         .filter((t) => t.length >= 2);
 
       const defaultNoakhaliDirectory = [
-        { title: "২৫০ শয্যা বিশিষ্ট নোয়াখালী জেনারেল হাসপাতাল", category_slug: "hospital", contact: "01730-324794", address: "মাইজদী কোর্ট, নোয়াখালী", designation: "সরকারি হাসপাতাল ও জরুরি বিভাগ" },
-        { title: "নোয়াখালী জেলা পুলিশ কন্ট্রোল রুম", category_slug: "police", contact: "01320-115998", address: "পুলিশ সুপারের কার্যালয়, মাইজদী", designation: "পুলিশ সেবা (২৪/৭)" },
-        { title: "সুধারাম মডেল থানা (নোয়াখালী সদর)", category_slug: "police", contact: "01320-116035", address: "মাইজদী, নোয়াখালী", designation: "থানা ডিউটি অফিসার" },
-        { title: "বেগমগঞ্জ মডেল থানা", category_slug: "police", contact: "01320-116065", address: "চৌমুহনী, নোয়াখালী", designation: "থানা পুলিশ" },
-        { title: "নোয়াখালী ফায়ার সার্ভিস ও সিভিল ডিফেন্স স্টেশন", category_slug: "fire-service", contact: "01730-002444", address: "মাইজদী কোর্ট, নোয়াখালী", designation: "অগ্নি নির্বাপণ ও উদ্ধার সেবা" },
-        { title: "চৌমুহনী ফায়ার সার্ভিস স্টেশন", category_slug: "fire-service", contact: "01730-002445", address: "চৌমুহনী, বেগমগঞ্জ", designation: "জরুরি ফায়ার সার্ভিস" },
-        { title: "নোয়াখালী জেনারেল হাসপাতাল সরকারি অ্যাম্বুলেন্স", category_slug: "ambulance", contact: "01730-324794", address: "হাসপাতাল চত্বর, মাইজদী", designation: "অ্যাম্বুলেন্স সার্ভিস" },
-        { title: "রেড ক্রিসেন্ট সোসাইটি নোয়াখালী রক্তদান কেন্দ্র ও অ্যাম্বুলেন্স", category_slug: "ambulance", contact: "01819-880099", address: "মাইজদী বাজার রোড", designation: "রক্তদান ও অ্যাম্বুলেন্স" },
-        { title: "নোয়াখালী সিভিল সার্জন কার্যালয়", category_slug: "hospital", contact: "02334432244", address: "মাইজদী, নোয়াখালী", designation: "স্বাস্থ্য প্রশাসন" },
-        { title: "জাতীয় জরুরি সেবা হটলাইন", category_slug: "police", contact: "999", address: "সারাদেশ", designation: "পুলিশ, অ্যাম্বুলেন্স, ফায়ার সার্ভিস" },
-        { title: "সরকারি তথ্য ও সেবা হটলাইন", category_slug: "administration", contact: "333", address: "সারাদেশ", designation: "সরকারি সেবা ও তথ্য" },
+        {
+          id: "hosp_general_noakhali",
+          title: "২৫০ শয্যা বিশিষ্ট নোয়াখালী জেনারেল হাসপাতাল",
+          category_slug: "hospital",
+          contact: "01730-324794",
+          address: "মাইজদী কোর্ট, নোয়াখালী",
+          designation: "সরকারি হাসপাতাল ও জরুরি বিভাগ",
+        },
+        {
+          id: "police_control_noakhali",
+          title: "নোয়াখালী জেলা পুলিশ কন্ট্রোল রুম",
+          category_slug: "police",
+          contact: "01320-115998",
+          address: "পুলিশ সুপারের কার্যালয়, মাইজদী",
+          designation: "পুলিশ সেবা (২৪/৭)",
+        },
+        {
+          id: "police_sudharam",
+          title: "সুধারাম মডেল থানা (নোয়াখালী সদর)",
+          category_slug: "police",
+          contact: "01320-116035",
+          address: "মাইজদী, নোয়াখালী",
+          designation: "থানা ডিউটি অফিসার",
+        },
+        {
+          id: "police_begumganj",
+          title: "বেগমগঞ্জ মডেল থানা",
+          category_slug: "police",
+          contact: "01320-116065",
+          address: "চৌমুহনী, নোয়াখালী",
+          designation: "থানা পুলিশ",
+        },
+        {
+          id: "fire_maijdee",
+          title: "নোয়াখালী ফায়ার সার্ভিস ও সিভিল ডিফেন্স স্টেশন",
+          category_slug: "fire-service",
+          contact: "01730-002444",
+          address: "মাইজদী কোর্ট, নোয়াখালী",
+          designation: "অগ্নি নির্বাপণ ও উদ্ধার সেবা",
+        },
+        {
+          id: "fire_chowmuhani",
+          title: "চৌমুহনী ফায়ার সার্ভিস স্টেশন",
+          category_slug: "fire-service",
+          contact: "01730-002445",
+          address: "চৌমুহনী, বেগমগঞ্জ",
+          designation: "জরুরি ফায়ার সার্ভিস",
+        },
+        {
+          id: "amb_general",
+          title: "নোয়াখালী জেনারেল হাসপাতাল সরকারি অ্যাম্বুলেন্স",
+          category_slug: "ambulance",
+          contact: "01730-324794",
+          address: "হাসপাতাল চত্বর, মাইজদী",
+          designation: "অ্যাম্বুলেন্স সার্ভিস",
+        },
+        {
+          id: "amb_red_crescent",
+          title: "রেড ক্রিসেন্ট সোসাইটি নোয়াখালী রক্তদান কেন্দ্র ও অ্যাম্বুলেন্স",
+          category_slug: "ambulance",
+          contact: "01819-880099",
+          address: "মাইজদী বাজার রোড",
+          designation: "রক্তদান ও অ্যাম্বুলেন্স",
+        },
+        {
+          id: "hotline_999",
+          title: "জাতীয় জরুরি সেবা হটলাইন",
+          category_slug: "police",
+          contact: "999",
+          address: "সারাদেশ",
+          designation: "পুলিশ, অ্যাম্বুলেন্স, ফায়ার সার্ভিস",
+        },
+        {
+          id: "hotline_333",
+          title: "সরকারি তথ্য ও সেবা হটলাইন",
+          category_slug: "administration",
+          contact: "333",
+          address: "সারাদেশ",
+          designation: "সরকারি সেবা ও তথ্য",
+        },
       ];
 
       const allSubmissions = [
@@ -2224,8 +2628,8 @@ async function startServer() {
 
       const matchedSubmissions = allSubmissions
         .filter((s) => {
-          const hay = `${s.title} ${s.contact || ""} ${s.address || ""} ${s.designation || ""} ${s.body || ""} ${s.category_slug}`.toLowerCase();
-          if (hay.includes(qLower)) return true;
+          const hay = `${s.title} ${s.contact || ""} ${s.address || ""} ${s.designation || ""} ${(s as { body?: string | null }).body || ""} ${s.category_slug}`.toLowerCase();
+          if (expandedQuery.includes(s.title.toLowerCase())) return true;
           return qTokens.some((tok) => hay.includes(tok));
         })
         .slice(0, 8);
@@ -2233,12 +2637,7 @@ async function startServer() {
       const matchedDonors = (directoryContext?.donors || [])
         .filter((d) => {
           const hay = `${d.full_name} ${d.phone} ${d.blood_group} ${d.address || ""} রক্ত ব্লাড ডোনার রক্তদাতা`.toLowerCase();
-          if (
-            qLower.includes(d.blood_group.toLowerCase()) ||
-            (qLower.includes("রক্ত") && hay.includes(qLower))
-          ) {
-            return true;
-          }
+          if (expandedQuery.includes(d.blood_group.toLowerCase())) return true;
           return qTokens.some((tok) => hay.includes(tok));
         })
         .slice(0, 8);
@@ -2246,13 +2645,21 @@ async function startServer() {
       const matchedCategories = (directoryContext?.categories || [])
         .filter((c) => {
           const hay = `${c.bn} ${c.en} ${c.slug} ${c.description}`.toLowerCase();
-          if (hay.includes(qLower)) return true;
           return qTokens.some((tok) => hay.includes(tok));
         })
         .slice(0, 6);
 
+      const matchedFaqs = (aiConfig?.faqs || [])
+        .filter((f) => f && f.visible !== false)
+        .filter((f) => {
+          const hay = `${f.question} ${f.answer} ${f.keywords || ""}`.toLowerCase();
+          return qTokens.some((tok) => hay.includes(tok));
+        })
+        .slice(0, 5);
+
       const apiKey = process.env.GEMINI_API_KEY;
       let replyText = "";
+      let aiErrorStatus: string | null = null;
 
       if (apiKey) {
         try {
@@ -2265,34 +2672,45 @@ async function startServer() {
             },
           });
 
+          const botName = (aiConfig?.botName || "Smart Noakhali AI").trim();
+          const toneGuide =
+            aiConfig?.tone === "concise_bn"
+              ? "Answer concisely in clear natural Bengali (bullet points preferred)."
+              : aiConfig?.tone === "bilingual"
+                ? "Answer clearly in the user's language (Bengali or English) with key terms in both where helpful."
+                : "Answer warmly, politely, and accurately in natural Bengali ('আপনি / আপনার').";
+
           const contextSummary = JSON.stringify({
-            categories: (directoryContext?.categories || []).slice(0, 30),
+            adminFaqs: matchedFaqs.length > 0 ? matchedFaqs : (aiConfig?.faqs || []).slice(0, 8),
+            categories: (directoryContext?.categories || []).slice(0, 40),
             matchedListings: matchedSubmissions,
             allListingsSample: allSubmissions.slice(0, 40),
             matchedBloodDonors: matchedDonors,
-            allBloodDonorsSample: (directoryContext?.donors || []).slice(0, 25),
-            emergencyBloodRequests: (directoryContext?.emergencyRequests || []).slice(0, 10),
+            emergencyBloodRequests: (directoryContext?.emergencyRequests || []).slice(0, 8),
             donationNumbers: directoryContext?.donationNumbers || [],
-            emergencyHotlines: [
+            verifiedHotlines: [
               { name: "জাতীয় জরুরি সেবা", number: "999" },
+              { name: "সরকারি তথ্য ও সেবা", number: "333" },
               { name: "নোয়াখালী ফায়ার সার্ভিস", number: "01730-002444" },
               { name: "নোয়াখালী জেনারেল হাসপাতাল", number: "01730-324794" },
               { name: "সুধারাম মডেল থানা পুলিশ", number: "01320-116035" },
             ],
           });
 
-          const systemInstruction = `You are the official Smart AI Assistant of "Smart Noakhali (স্মার্ট নোয়াখালী)" — an intelligent, versatile, multi-purpose assistant for both local Noakhali civic assistance and general-purpose problem solving.
+          const systemInstruction = `You are "${botName}", the official digital citizen assistant for Smart Noakhali (স্মার্ট নোয়াখালী).
+${toneGuide}
+${aiConfig?.systemInstructions ? `Admin Instructions: ${aiConfig.systemInstructions}` : ""}
 
-PRIMARY CAPABILITIES:
-1. General-Purpose Problem Solver: You are an expert at programming, software development (provide clean, production-grade code with markdown code blocks like \`\`\`javascript, \`\`\`python, \`\`\`html and clear explanations), mathematics, science, logical reasoning, document translation (Bengali <-> English), and creative drafting.
-2. Smart Noakhali & Civic Assistance: When users ask about Noakhali district, local civic directory, hospitals, doctors, ambulances, fire stations, police stations, lawyers, blood donors, or emergency hotlines (999, 333), you ground your response accurately using the provided directory and emergency contacts.
-3. Multilingual Excellence: Answer fluently in the language the user asked in (Bengali বাংলা or English). Use warm, polite, and respectful tone ("আপনি / আপনার").
-4. Markdown Formatting: Use bold for key numbers or names, bullet points for lists, and code blocks for programming solutions. Always provide clear phone numbers with 📞 emoji for local contacts.
+STRICT GROUNDING & ACCURACY RULES:
+1. For Smart Noakhali listings, phone numbers, hospitals, police, fire stations, blood donors, categories, and donation numbers: ONLY state contacts/facts verified in the provided JSON context below. NEVER invent or guess any phone number, address, or service.
+2. Users often write Bengali in Roman/Banglish (e.g. "noyakhali haspatal", "maijdee daktar", "roktodata", "senbag fire", "bkash number"). Understand phonetic Bengali/Banglish seamlessly.
+3. Format phone numbers cleanly using 📞 emoji and Markdown bold for service names.
+4. If verified information for the user's exact local query is NOT present in the context, state honestly that it is not yet listed in the public directory and invite the user to tap Live Chat / হিউম্যান সাপোর্ট to talk to a Smart Noakhali operator.
 
-Local Smart Noakhali Directory Data:
+Verified Smart Noakhali Knowledge Base & Directory Context:
 ${contextSummary}`;
 
-          const contents: any[] = [];
+          const contents: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [];
           for (const h of (history || []).slice(-6)) {
             if (h.text && h.text.trim()) {
               contents.push({
@@ -2306,173 +2724,95 @@ ${contextSummary}`;
             parts: [{ text: userQuery }],
           });
 
-          // Cascade models with retry: gemini-3.8-flash primary, then fallback
-          const candidateModels = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-2.5-flash"];
-          for (const modelName of candidateModels) {
-            try {
-              const response = await ai.models.generateContent({
-                model: modelName,
-                contents,
-                config: {
-                  systemInstruction,
-                  temperature: 0.4,
-                },
-              });
-              const candText = response.text || "";
-              if (candText.trim()) {
-                replyText = candText.trim();
-                break;
-              }
-            } catch (err) {
-              console.warn(`Model ${modelName} call issue, trying next:`, err instanceof Error ? err.message : err);
-              // Small backoff before next model
-              await new Promise((r) => setTimeout(r, 200));
-            }
-          }
+          const response = await ai.models.generateContent({
+            model: "gemini-4-hydrogen",
+            contents,
+            config: {
+              systemInstruction,
+            },
+          });
+          replyText = (response.text || "").trim();
         } catch (aiErr) {
-          console.warn("Gemini API cascade error:", aiErr);
+          aiErrorStatus = aiErr instanceof Error ? aiErr.message : "Gemini request failed";
+          console.warn("Gemini API error:", aiErrorStatus);
         }
       }
 
-      // If Gemini succeeded, return reply
-      if (replyText.trim()) {
+      if (replyText) {
+        const wantsHandoff =
+          /(লাইভ চ্যাট|অপারেটর|প্রতিনিধি|জানা নেই|তালিকায় নেই|পাওয়া যায়নি)/i.test(replyText);
         res.json({
           ok: true,
-          reply: replyText.trim(),
+          text: replyText,
+          reply: replyText,
+          suggestHandoff: wantsHandoff,
           matches: {
             submissions: matchedSubmissions,
             donors: matchedDonors,
             categories: matchedCategories,
           },
+          sources: [],
         });
         return;
       }
 
-      // ========================================================================
-      // Robust Natural Language Bengali Directory Intelligence Engine Fallback
-      // Ensures 100% reliable, comprehensive, polite and accurate responses anytime
-      // ========================================================================
-      const isGreeting = /^(হাই|হ্যালো|সালাম|আসসালামু|নমস্কার|কেমন আছেন|hello|hi|hey|good morning|শুভ সকাল|শুভ সন্ধ্যা)/i.test(qLower);
-      const isBlood = /(রক্ত|ব্লাড|blood|রক্তদাতা|রক্তদান|ডোনার|a\+|b\+|o\+|ab\+|এ\+|বি\+|ও\+|এবি\+|পজেটিভ|নেগেটিভ)/i.test(qLower);
-      const isAmbulance = /(অ্যাম্বুলেন্স|এম্বুলেন্স|ambulance|রোগী পরিবহন|লাশবাহী)/i.test(qLower);
-      const isFire = /(আগুন|ফায়ার|fire|দমকল|উদ্ধার)/i.test(qLower);
-      const isPolice = /(পুলিশ|থানা|police|জিডি|মামলা|সুধারাম|বেগমগঞ্জ|ফাঁড়ি|নিরাপত্তা)/i.test(qLower);
-      const isHospitalDoctor = /(হাসপাতাল|ডাক্তার|doctor|hospital|ক্লিনিক|চিকিৎসা|মেডিসিন|শিশু|গাইনী|অপারেশন|জেনারেল হাসপাতাল|ফার্মেসি)/i.test(qLower);
-      const isHotline = /(হটলাইন|জরুরি সেবা|জরুরী সেবা|৯৯৯|৩৩৩|১০৯|helpline|emergency)/i.test(qLower);
-      const isDonation = /(অনুদান|বিকাশ|নগদ|ডোনেশন|সাহায্য|দান|donate|donation)/i.test(qLower);
-      const isTourism = /(দর্শনীয়|পর্যটন|ঘুরতে|নিঝুম দ্বীপ|গান্ধী আশ্রম|বজরা শাহী|ভ্রমণ|হোটেল|রিসোর্ট)/i.test(qLower);
-      const isLiveChatRequest = /(এডমিন|প্রতিনিধি|লাইভ চ্যাট|সাপোর্ট|মানুষের সাথে|কথা বলব|অভিযোগ|পরামর্শ)/i.test(qLower);
-
-      const parts: string[] = [];
-
-      if (isGreeting) {
-        parts.push("ওয়ালাইকুম আসসালাম! স্মার্ট নোয়াখালী প্ল্যাটফর্মে আপনাকে স্বাগতম। নোয়াখালী জেলার ডাক্তার, হাসপাতাল, অ্যাম্বুলেন্স, রক্তদাতা, ফায়ার সার্ভিস, পুলিশ বা যেকোনো প্রয়োজনীয় তথ্য পেতে আমাকে প্রশ্ন করুন অথবা নিচের তালিকাটি দেখুন:");
+      // Deterministic directory lookup response (used when GEMINI_API_KEY is unset or upstream fails)
+      const fallbackParts: string[] = [];
+      if (matchedFaqs.length > 0) {
+        matchedFaqs.forEach((f) => {
+          fallbackParts.push(`📌 **${f.question}**\n${f.answer}`);
+        });
       }
-
-      if (isBlood) {
-        parts.push("🩸 **জরুরি রক্তদাতা সেবা ও রক্তদান কেন্দ্র:**");
-        if (matchedDonors.length > 0) {
-          parts.push(`আপনার খোঁজের সাথে সম্পর্কিত ${matchedDonors.length} জন নিবন্ধিত রক্তদাতা পাওয়া গেছে:`);
-          matchedDonors.forEach((d, i) => {
-            parts.push(`${i + 1}. **${d.full_name}** (${d.blood_group}) — 📞 [${d.phone}](tel:${d.phone.replace(/\D/g, "")})${d.address ? ` • 📍 ${d.address}` : ""}`);
-          });
-        } else {
-          parts.push("নোয়াখালী জেলার যেকোনো গ্রুপের জরুরি রক্তের জন্য আমাদের রক্তদাতা ডিরেক্টরি দেখুন অথবা রেড ক্রিসেন্ট রক্তদান কেন্দ্রে যোগাযোগ করুন:");
-          parts.push("• **রেড ক্রিসেন্ট নোয়াখালী রক্তদান কেন্দ্র:** 📞 [01819-880099](tel:01819880099)");
-          parts.push("• **নোয়াখালী ব্লাড ডোনার্স হেল্পলাইন:** 📞 [01730-324794](tel:01730324794)");
-        }
-        parts.push("👉 আরও বিস্তারিত তালিকার জন্য মেনু থেকে 'রক্তদান' অপশনে যান বা রক্তের আবেদন পোস্ট করুন।");
+      if (matchedDonors.length > 0) {
+        fallbackParts.push(`🩸 **রক্তদাতা তথ্য (${matchedDonors.length} জন):**`);
+        matchedDonors.slice(0, 5).forEach((d, i) => {
+          fallbackParts.push(
+            `${i + 1}. **${d.full_name}** (${d.blood_group}) — 📞 [${d.phone}](tel:${d.phone.replace(/\D/g, "")})${d.address ? ` • 📍 ${d.address}` : ""}`
+          );
+        });
       }
-
-      if (isAmbulance) {
-        parts.push("🚑 **নোয়াখালী জরুরি অ্যাম্বুলেন্স সার্ভিস:**");
-        parts.push("১. **নোয়াখালী জেনারেল হাসপাতাল সরকারি অ্যাম্বুলেন্স:** 📞 [01730-324794](tel:01730324794) (মাইজদী)");
-        parts.push("২. **রেড ক্রিসেন্ট জরুরি অ্যাম্বুলেন্স:** 📞 [01819-880099](tel:01819880099) (মাইজদী বাজার)");
-        parts.push("৩. **চৌমুহনী সেন্ট্রাল অ্যাম্বুলেন্স সার্ভিস:** 📞 [01814-387080](tel:01814387080) (বেগমগঞ্জ)");
-        parts.push("৪. **জাতীয় জরুরি সেবা (সারাদেশ):** 📞 [999](tel:999)");
-      }
-
-      if (isFire) {
-        parts.push("🚒 **নোয়াখালী ফায়ার সার্ভিস ও সিভিল ডিফেন্স:**");
-        parts.push("১. **মাইজদী সদর ফায়ার স্টেশন:** 📞 [01730-002444](tel:01730002444) / 02334432222");
-        parts.push("২. **চৌমুহনী ফায়ার স্টেশন:** 📞 [01730-002445](tel:01730002445)");
-        parts.push("৩. **কোম্পানীগঞ্জ ফায়ার স্টেশন:** 📞 [01730-002446](tel:01730002446)");
-        parts.push("৪. **চাটখিল ফায়ার স্টেশন:** 📞 [01730-002447](tel:01730002447)");
-        parts.push("🚨 জরুরি অগ্নিকাণ্ডে অবিলম্বে **৯৯৯** নম্বরে ডায়াল করুন।");
-      }
-
-      if (isPolice) {
-        parts.push("👮 **নোয়াখালী জেলা পুলিশ ও থানা হটলাইন:**");
-        parts.push("১. **জেলা পুলিশ কন্ট্রোল রুম (মাইজদী):** 📞 [01320-115998](tel:01320115998)");
-        parts.push("২. **সুধারাম মডেল থানা (সদর):** 📞 [01320-116035](tel:01320116035)");
-        parts.push("৩. **বেগমগঞ্জ মডেল থানা (চৌমুহনী):** 📞 [01320-116065](tel:01320116065)");
-        parts.push("৪. **কোম্পানীগঞ্জ থানা:** 📞 [01320-116095](tel:01320116095)");
-        parts.push("৫. **সেনবাগ থানা:** 📞 [01320-116125](tel:01320116125)");
-        parts.push("🚨 যেকোনো জরুরি পুলিশি সহায়তায় কল করুন: 📞 [999](tel:999)");
-      }
-
-      if (isHospitalDoctor) {
-        parts.push("🏥 **নোয়াখালী হাসপাতাল ও চিকিৎসা সেবা:**");
-        parts.push("১. **২৫০ শয্যা বিশিষ্ট নোয়াখালী জেনারেল হাসপাতাল:** 📞 [01730-324794](tel:01730324794) (মাইজদী কোর্ট)");
-        parts.push("২. **নোয়াখালী সিভিল সার্জন কার্যালয়:** 📞 [02334432244](tel:02334432244)");
-        parts.push("৩. **মা ও শিশু কল্যাণ কেন্দ্র নোয়াখালী:** 📞 [01712-456789](tel:01712456789)");
-        parts.push("৪. **ল্যাবএইড ডায়াগনস্টিক নোয়াখালী:** 📞 [01766-662244](tel:01766662244) (মাইজদী)");
-      }
-
-      if (isDonation) {
-        parts.push("🤝 **স্মার্ট নোয়াখালী অনুদান ও বিকাশ/নগদ নাম্বার:**");
-        if (directoryContext?.donationNumbers?.length) {
-          directoryContext.donationNumbers.forEach((n, i) => {
-            parts.push(`${i + 1}. **${n.label}** (${n.method}): 📞 [${n.number}](tel:${n.number.replace(/\D/g, "")})`);
-          });
-        } else {
-          parts.push("• **বিকাশ (পার্সোনাল):** 01860-264639");
-          parts.push("• **নগদ (পার্সোনাল):** 01860-264639");
-        }
-        parts.push("আপনার দান নোয়াখালীর অসহায় মানুষের চিকিৎসা ও রক্তদান কার্যক্রমে ব্যবহৃত হয়।");
-      }
-
-      if (isTourism) {
-        parts.push("🌴 **নোয়াখালী জেলার দর্শনীয় পর্যটন স্থানসমূহ:**");
-        parts.push("১. **নিঝুম দ্বীপ (হাতিয়া):** হরিণের অভয়ারণ্য, সুবিশাল সৈকত ও ম্যানগ্রোভ বন।");
-        parts.push("২. **মহাত্মা গান্ধী আশ্রম ট্রাস্ট (জয়গোপালপুর, জয়াগ):** শান্তি ও ঐতিহাসিক স্মৃতিবিজড়িত স্থান।");
-        parts.push("৩. **বজরা শাহী মসজিদ (সোনাইমুড়ী):** মোগল স্থাপত্যকলার অনুপম নিদর্শন।");
-        parts.push("৪. **নোয়াখালী বিজ্ঞান ও প্রযুক্তি বিশ্ববিদ্যালয় (নোবিপ্রবি) ক্যাম্পাস:** মনোরম লেক ও সবুজ চত্বর।");
-      }
-
-      // Add directory listing matches if any
-      if (matchedSubmissions.length > 0 && !isBlood) {
-        parts.push(`\n📋 **নোয়াখালী ডিরেক্টরি থেকে সম্পর্কিত তথ্য (${matchedSubmissions.length}টি):**`);
+      if (matchedSubmissions.length > 0) {
+        fallbackParts.push(`📋 **যাচাইকৃত ডিরেক্টরি তথ্য (${matchedSubmissions.length} টি):**`);
         matchedSubmissions.slice(0, 5).forEach((s, i) => {
-          parts.push(
+          fallbackParts.push(
             `${i + 1}. **${s.title}**${s.designation ? ` (${s.designation})` : ""}${
               s.contact ? ` — 📞 [${s.contact}](tel:${s.contact.replace(/\D/g, "")})` : ""
             }${s.address ? ` • 📍 ${s.address}` : ""}`
           );
         });
       }
-
-      if (isLiveChatRequest || parts.length === 0) {
-        if (parts.length === 0) {
-          parts.push(`স্মার্ট নোয়াখালী এআই সহকারী: "${userQuery}" সংক্রান্ত তথ্যের জন্য নিচের জরুরি নাম্বারসমূহে যোগাযোগ করতে পারেন:\n• **জাতীয় জরুরি সেবা:** 📞 [999](tel:999)\n• **নোয়াখালী জেনারেল হাসপাতাল:** 📞 [01730-324794](tel:01730324794)\n• **নোয়াখালী ফায়ার সার্ভিস:** 📞 [01730-002444](tel:01730002444)\n• **সুধারাম মডেল থানা পুলিশ:** 📞 [01320-116035](tel:01320116035)`);
-        }
-        parts.push("\n💬 **সরাসরি প্রতিনিধির সাথে কথা বলতে চান?**\nউপরের **'লাইভ প্রতিনিধি'** ট্যাবে ক্লিক করে সরাসরি আমাদের সাপোর্ট টিমের সাথে চ্যাট করুন। আমরা সার্বক্ষণিক সহযোগিতায় প্রস্তুত আছি।");
+      if (fallbackParts.length === 0) {
+        fallbackParts.push(
+          `স্মার্ট নোয়াখালী ডিরেক্টরি তথ্য: আপনার প্রশ্নের ("${userQuery}") জন্য যাচাইকৃত জরুরি যোগাযোগ নম্বরসমূহ:`
+        );
+        fallbackParts.push("• **জাতীয় জরুরি সেবা:** 📞 [999](tel:999)");
+        fallbackParts.push("• **সরকারি তথ্য সেবা:** 📞 [333](tel:333)");
+        fallbackParts.push("• **নোয়াখালী জেনারেল হাসপাতাল:** 📞 [01730-324794](tel:01730324794)");
+        fallbackParts.push("• **নোয়াখালী ফায়ার সার্ভিস:** 📞 [01730-002444](tel:01730002444)");
+        fallbackParts.push("• **সুধারাম মডেল থানা পুলিশ:** 📞 [01320-116035](tel:01320116035)");
       }
+      fallbackParts.push(
+        "\n💬 সরাসরি অপারেটরের সহায়তা পেতে নিচের **'লাইভ চ্যাট'** / হিউম্যান সাপোর্ট বাটনে ট্যাপ করুন।"
+      );
 
+      const finalText = fallbackParts.join("\n");
       res.json({
         ok: true,
-        reply: parts.join("\n"),
+        mode: apiKey ? "upstream_fallback" : "directory_lookup",
+        text: finalText,
+        reply: finalText,
+        suggestHandoff: true,
         matches: {
           submissions: matchedSubmissions,
           donors: matchedDonors,
           categories: matchedCategories,
         },
+        sources: [],
       });
     } catch (err) {
-      res.json({
-        ok: true,
-        reply: `স্মার্ট নোয়াখালী এআই সহকারী: আপনার অনুসন্ধানের জন্য জরুরি যোগাযোগ:\n• জাতীয় জরুরি সেবা: 📞 999\n• নোয়াখালী জেনারেল হাসপাতাল: 📞 01730-324794\n• নোয়াখালী ফায়ার সার্ভিস: 📞 01730-002444\n• সুধারাম মডেল থানা: 📞 01320-116035\n\nলাইভ চ্যাট ট্যাবে মেসেজ দিয়ে সরাসরি এডমিনের সাথে কথা বলতে পারেন।`,
-        matches: { submissions: [], donors: [], categories: [] },
+      res.status(500).json({
+        error: err instanceof Error ? err.message : "AI chat processing error",
+        suggestHandoff: true,
       });
     }
   });

@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
+import { resolveUserRoleDisplay, useRolePermissions } from "@/lib/permissions";
 import { listMySecurityEvents } from "@/lib/security";
 import { useCloudSubmissions } from "@/lib/cloud";
 import { isSuperAdminEmail, REGULAR_ADMIN_EMAIL } from "@/lib/firebase";
@@ -111,10 +112,28 @@ function ProfilePage() {
     loading: authLoading,
     isAdmin,
     isStaff,
+    isMainAdmin,
+    roles,
+    customRoleId,
+    customRoleName,
     username,
     signOut,
     updateProfileInfo,
   } = useAuth();
+  const { customRoles } = useRolePermissions();
+
+  const resolvedRole = useMemo(
+    () =>
+      resolveUserRoleDisplay({
+        email: user?.email,
+        roles,
+        isMainAdmin,
+        customRoleId: customRoleId || user?.customRoleId,
+        customRoleName: customRoleName || user?.customRoleName,
+        customRoles,
+      }),
+    [user?.email, user?.customRoleId, user?.customRoleName, roles, isMainAdmin, customRoleId, customRoleName, customRoles]
+  );
 
   const { items: submissions } = useCloudSubmissions();
   const { complaints } = useComplaints();
@@ -327,22 +346,24 @@ function ProfilePage() {
               </h1>
               {isSuper && (
                 <span className="rounded-full bg-gradient-hero px-3 py-0.5 text-xs font-bold text-primary-foreground shadow-sm">
-                  প্রধান সুপার এডমিন
+                  সুপার অ্যাডমিন
                 </span>
               )}
-              {isRegularAdmin && !isSuper && (
-                <span className="rounded-full bg-gold/20 px-3 py-0.5 text-xs font-bold text-gold border border-gold/40">
-                  এডমিন
-                </span>
-              )}
-              {!isSuper && !isRegularAdmin && isStaff && (
-                <span className="rounded-full bg-primary/15 px-3 py-0.5 text-xs font-bold text-primary border border-primary/30">
-                  স্টাফ মেম্বার
+              {!isSuper && isStaff && (
+                <span
+                  className="rounded-full px-3 py-0.5 text-xs font-bold border shadow-2xs"
+                  style={{
+                    color: resolvedRole.badgeColor,
+                    borderColor: `${resolvedRole.badgeColor}45`,
+                    backgroundColor: `${resolvedRole.badgeColor}14`,
+                  }}
+                >
+                  {resolvedRole.labelBn}
                 </span>
               )}
               {!isStaff && (
                 <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground border border-border">
-                  নাগরিক অ্যাকাউন্ট
+                  সাধারণ ব্যবহারকারী
                 </span>
               )}
             </div>
@@ -919,22 +940,30 @@ function ProfilePage() {
       {/* Tab 5: In-App Notifications */}
       {activeTab === "notifications" && (
         <div className="mt-5 space-y-4 animate-in fade-in duration-200">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="font-display text-sm font-bold text-foreground">
               নোটিফিকেশন সেন্টার ({notifications.length} টি)
             </h3>
-            {unreadCount > 0 && (
-              <button
-                type="button"
-                onClick={async () => {
-                  await markAllAsRead();
-                  toast.success("সকল নোটিফিকেশন পঠিত হিসেবে চিহ্নিত হয়েছে");
-                }}
-                className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline"
+            <div className="flex flex-wrap items-center gap-2">
+              <Link
+                to="/notifications"
+                className="inline-flex items-center gap-1 rounded-lg border border-primary/25 bg-primary/10 px-2.5 py-1 text-xs font-bold text-primary hover:bg-primary/15"
               >
-                <CheckCheck className="h-3.5 w-3.5" /> সকল পঠিত চিহ্নিত করুন
-              </button>
-            )}
+                <ExternalLink className="h-3.5 w-3.5" /> পূর্ণ ইনবক্স ও সেটিংস
+              </Link>
+              {unreadCount > 0 && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await markAllAsRead();
+                    toast.success("সকল নোটিফিকেশন পঠিত হিসেবে চিহ্নিত হয়েছে");
+                  }}
+                  className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline"
+                >
+                  <CheckCheck className="h-3.5 w-3.5" /> সকল পঠিত চিহ্নিত করুন
+                </button>
+              )}
+            </div>
           </div>
 
           {notificationsError && (
@@ -1053,12 +1082,10 @@ function ProfilePage() {
                   <ShieldCheck className="h-3.5 w-3.5 text-primary" />
                   <span>
                     {isSuper
-                      ? "প্রধান সুপার এডমিন (সর্বোচ্চ ক্ষমতা)"
-                      : isRegularAdmin
-                      ? "এডমিন"
+                      ? "সুপার অ্যাডমিন (সর্বোচ্চ ক্ষমতা)"
                       : isStaff
-                      ? "স্টাফ"
-                      : "সাধারণ নাগরিক"}
+                      ? `${resolvedRole.labelBn} (${resolvedRole.labelEn})`
+                      : "সাধারণ ব্যবহারকারী (নাগরিক অ্যাকাউন্ট)"}
                   </span>
                 </div>
               </div>

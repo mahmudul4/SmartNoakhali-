@@ -1,5 +1,12 @@
-import { initializeApp } from "firebase/app";
-import { getAuth, signInAnonymously, type User } from "firebase/auth";
+import { initializeApp, getApps } from "firebase/app";
+import {
+  getAuth,
+  signInAnonymously,
+  createUserWithEmailAndPassword,
+  updateProfile,
+  signOut as firebaseSignOut,
+  type User,
+} from "firebase/auth";
 import {
   initializeFirestore,
   persistentLocalCache,
@@ -369,4 +376,34 @@ export async function ensureCurrentUserProfileDoc(
     ensuringUserByUid.delete(u.uid);
   }
 }
+
+/**
+ * Creates a Firebase Email/Password account using an isolated secondary Firebase App
+ * so the currently signed-in Super Admin session stays untouched.
+ * Returns the real Firebase UID if creation succeeds, or null if the email already exists / cannot be created.
+ */
+export async function provisionFirebaseEmailUser(params: {
+  email: string;
+  password: string;
+  displayName?: string;
+}): Promise<{ uid: string } | null> {
+  const cleanEmail = (params.email || "").trim().toLowerCase();
+  if (!cleanEmail || !params.password || params.password.length < 6) return null;
+  try {
+    const existingApp = getApps().find((a) => a.name === "sn_staff_provisioner");
+    const secApp = existingApp || initializeApp(envConfig, "sn_staff_provisioner");
+    const secAuth = getAuth(secApp);
+    const cred = await createUserWithEmailAndPassword(secAuth, cleanEmail, params.password);
+    if (params.displayName) {
+      await updateProfile(cred.user, { displayName: params.displayName }).catch(() => {});
+    }
+    const createdUid = cred.user.uid;
+    await firebaseSignOut(secAuth).catch(() => {});
+    return { uid: createdUid };
+  } catch (err) {
+    console.warn("[Auth Provisioner] Firebase Auth email creation note:", err);
+    return null;
+  }
+}
+
 

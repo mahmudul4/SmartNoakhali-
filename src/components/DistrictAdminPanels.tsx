@@ -84,8 +84,16 @@ export function InstitutionsAdminPanel() {
     }
   };
 
+  const [confirmDeleteInst, setConfirmDeleteInst] = useState<Institution | null>(null);
+
   const handleDelete = async (inst: Institution) => {
-    if (!window.confirm(`আপনি কি নিশ্চিত যে "${inst.name}" স্থায়ীভাবে মুছে ফেলতে চান?`)) return;
+    setConfirmDeleteInst(inst);
+  };
+
+  const confirmDeleteInstitution = async () => {
+    if (!confirmDeleteInst) return;
+    const inst = confirmDeleteInst;
+    setConfirmDeleteInst(null);
     setProcessingId(inst.id);
     try {
       await deleteInstitution(inst.id);
@@ -280,6 +288,41 @@ export function InstitutionsAdminPanel() {
           })}
         </div>
       )}
+
+      {confirmDeleteInst && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setConfirmDeleteInst(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-5 shadow-elevated space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="font-display text-sm font-bold text-destructive">
+              প্রতিষ্ঠান মুছে ফেলার নিশ্চিতকরণ
+            </h3>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              আপনি কি নিশ্চিত যে <strong className="text-foreground">“{confirmDeleteInst.name}”</strong> স্থায়ীভাবে মুছে ফেলতে চান?
+            </p>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteInst(null)}
+                className="rounded-xl border border-border bg-muted px-3.5 py-1.5 text-xs font-semibold"
+              >
+                বাতিল
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeleteInstitution()}
+                className="rounded-xl bg-destructive px-3.5 py-1.5 text-xs font-bold text-white shadow-sm hover:opacity-95"
+              >
+                হ্যাঁ, মুছে ফেলুন
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -326,8 +369,16 @@ export function JobsAdminPanel() {
     }
   };
 
+  const [confirmDeleteJob, setConfirmDeleteJob] = useState<JobCircular | null>(null);
+
   const handleDelete = async (circ: JobCircular) => {
-    if (!window.confirm(`আপনি কি "${circ.title}" বিজ্ঞপ্তিটি মুছে ফেলতে চান?`)) return;
+    setConfirmDeleteJob(circ);
+  };
+
+  const confirmDeleteJobCircular = async () => {
+    if (!confirmDeleteJob) return;
+    const circ = confirmDeleteJob;
+    setConfirmDeleteJob(null);
     setProcessingId(circ.id);
     try {
       await deleteJobCircular(circ.id);
@@ -500,6 +551,41 @@ export function JobsAdminPanel() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {confirmDeleteJob && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setConfirmDeleteJob(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-5 shadow-elevated space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="font-display text-sm font-bold text-destructive">
+              বিজ্ঞপ্তি মুছে ফেলার নিশ্চিতকরণ
+            </h3>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              আপনি কি নিশ্চিত যে <strong className="text-foreground">“{confirmDeleteJob.title}”</strong> বিজ্ঞপ্তিটি স্থায়ীভাবে মুছে ফেলতে চান?
+            </p>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteJob(null)}
+                className="rounded-xl border border-border bg-muted px-3.5 py-1.5 text-xs font-semibold"
+              >
+                বাতিল
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeleteJobCircular()}
+                className="rounded-xl bg-destructive px-3.5 py-1.5 text-xs font-bold text-white shadow-sm hover:opacity-95"
+              >
+                হ্যাঁ, মুছে ফেলুন
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

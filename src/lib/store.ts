@@ -46,6 +46,7 @@ export const HERO_BANNER_CONFIG_ID = "hero_banner_config";
 export const HOMEPAGE_CONFIG_ID = "homepage_config";
 export const WEBSITE_CONTENT_CONFIG_ID = "website_content_config";
 export const MEDIA_LIBRARY_CONFIG_ID = "media_library_config";
+export const AI_CHAT_CONFIG_ID = "ai_chat_config";
 
 export const LOCAL_LOGO_KEY = "sn_site_logo_v3";
 export const LOCAL_DIVISIONS_KEY = "sn_divisions_config_v1";
@@ -59,6 +60,7 @@ export const LOCAL_HERO_BANNER_KEY = "sn_hero_banner_config_v1";
 export const LOCAL_HOMEPAGE_KEY = "sn_homepage_config_v1";
 export const LOCAL_WEBSITE_CONTENT_KEY = "sn_website_content_config_v1";
 export const LOCAL_MEDIA_LIBRARY_KEY = "sn_media_library_v1";
+export const LOCAL_AI_CHAT_CONFIG_KEY = "sn_ai_chat_config_v1";
 
 /**
  * Strips any undefined fields recursively so Firestore setDoc/updateDoc never fails.
@@ -3130,6 +3132,13 @@ export type HeroImageFocalPosition =
   | "right center";
 
 export interface HeroBannerConfig {
+  id?: string;
+  name?: string;
+  status?: "published" | "draft";
+  order?: number;
+  startDate?: string;
+  endDate?: string;
+  textAlign?: "left" | "center" | "right";
   visible: boolean;
   badgeText: string;
   headingLine1: string;
@@ -3139,6 +3148,8 @@ export interface HeroBannerConfig {
   primaryButtonLink: string;
   secondaryButtonText: string;
   secondaryButtonLink: string;
+  optionalButtonText?: string;
+  optionalButtonLink?: string;
   backgroundMode: "gradient" | "solid" | "image";
   desktopImageUrl: string;
   mobileImageUrl: string;
@@ -3152,12 +3163,73 @@ export interface HeroBannerConfig {
   gradientTo: string;
   textColor: string;
   subtextColor: string;
+  badgeColor?: string;
+  badgeBgColor?: string;
+  headingColor?: string;
+  descriptionColor?: string;
+  primaryButtonColor?: string;
+  primaryButtonBgColor?: string;
+  secondaryButtonColor?: string;
+  secondaryButtonBgColor?: string;
+  optionalButtonColor?: string;
+  optionalButtonBgColor?: string;
   borderRadius: "rounded-2xl" | "rounded-[26px]" | "rounded-3xl" | "rounded-[32px]";
   showDecorativeGlow: boolean;
   updatedAt?: string;
 }
 
-export const DEFAULT_HERO_BANNER_CONFIG: HeroBannerConfig = {
+export interface HeroBannerItem extends HeroBannerConfig {
+  id: string;
+  name: string;
+  status: "published" | "draft";
+  order: number;
+  startDate: string;
+  endDate: string;
+  textAlign: "left" | "center" | "right";
+  badgeColor: string;
+  badgeBgColor: string;
+  headingColor: string;
+  descriptionColor: string;
+  primaryButtonColor: string;
+  primaryButtonBgColor: string;
+  secondaryButtonColor: string;
+  secondaryButtonBgColor: string;
+  optionalButtonText: string;
+  optionalButtonLink: string;
+  optionalButtonColor: string;
+  optionalButtonBgColor: string;
+}
+
+export interface HeroCarouselSettings {
+  autoRotate: boolean;
+  intervalSeconds: number;
+  showArrows: boolean;
+  showDots: boolean;
+  pauseOnHover: boolean;
+}
+
+export interface HeroBannersStorePayload {
+  banners: HeroBannerItem[];
+  carousel: HeroCarouselSettings;
+  updatedAt?: string;
+}
+
+export const DEFAULT_HERO_CAROUSEL_SETTINGS: HeroCarouselSettings = {
+  autoRotate: true,
+  intervalSeconds: 5,
+  showArrows: true,
+  showDots: true,
+  pauseOnHover: true,
+};
+
+export const DEFAULT_HERO_BANNER_ITEM: HeroBannerItem = {
+  id: "hero_main_1",
+  name: "প্রধান ডিজিটাল সেবা ব্যানার",
+  status: "published",
+  order: 0,
+  startDate: "",
+  endDate: "",
+  textAlign: "center",
   visible: true,
   badgeText: "নোয়াখালীর ডিজিটাল সিটিজেন প্ল্যাটফর্ম",
   headingLine1: "এক ক্লিকে নোয়াখালীর",
@@ -3168,6 +3240,8 @@ export const DEFAULT_HERO_BANNER_CONFIG: HeroBannerConfig = {
   primaryButtonLink: "tel:999",
   secondaryButtonText: "নতুন তথ্য দিন",
   secondaryButtonLink: "/submit-info",
+  optionalButtonText: "",
+  optionalButtonLink: "",
   backgroundMode: "gradient",
   desktopImageUrl: "",
   mobileImageUrl: "",
@@ -3181,26 +3255,97 @@ export const DEFAULT_HERO_BANNER_CONFIG: HeroBannerConfig = {
   gradientTo: "#146842",
   textColor: "#ffffff",
   subtextColor: "#ecfdf5",
+  badgeColor: "#ffffff",
+  badgeBgColor: "rgba(255,255,255,0.14)",
+  headingColor: "#ffffff",
+  descriptionColor: "#ecfdf5",
+  primaryButtonColor: "#ffffff",
+  primaryButtonBgColor: "#dc2626",
+  secondaryButtonColor: "#064e3b",
+  secondaryButtonBgColor: "#ffffff",
+  optionalButtonColor: "#ffffff",
+  optionalButtonBgColor: "rgba(255,255,255,0.16)",
   borderRadius: "rounded-[26px]",
   showDecorativeGlow: true,
 };
 
-function parseHeroBannerConfig(raw: string | null | undefined): HeroBannerConfig | null {
+export const DEFAULT_HERO_BANNER_CONFIG: HeroBannerConfig = DEFAULT_HERO_BANNER_ITEM;
+
+function normalizeHeroBannerItem(
+  rawItem: Partial<HeroBannerItem>,
+  idx: number
+): HeroBannerItem {
+  const merged: HeroBannerItem = {
+    ...DEFAULT_HERO_BANNER_ITEM,
+    ...rawItem,
+    id: String(rawItem.id || `hero_banner_${idx + 1}`).trim(),
+    name: String(rawItem.name || `হিরো ব্যানার #${idx + 1}`).trim(),
+    status: rawItem.status === "draft" ? "draft" : "published",
+    order: typeof rawItem.order === "number" ? rawItem.order : idx,
+    startDate: String(rawItem.startDate || ""),
+    endDate: String(rawItem.endDate || ""),
+    textAlign:
+      rawItem.textAlign === "left" || rawItem.textAlign === "right"
+        ? rawItem.textAlign
+        : "center",
+    visible: rawItem.visible !== false,
+    showDecorativeGlow: rawItem.showDecorativeGlow !== false,
+    overlayOpacity:
+      typeof rawItem.overlayOpacity === "number"
+        ? Math.min(90, Math.max(0, rawItem.overlayOpacity))
+        : DEFAULT_HERO_BANNER_ITEM.overlayOpacity,
+    headingColor: rawItem.headingColor || rawItem.textColor || DEFAULT_HERO_BANNER_ITEM.headingColor,
+    descriptionColor:
+      rawItem.descriptionColor || rawItem.subtextColor || DEFAULT_HERO_BANNER_ITEM.descriptionColor,
+    badgeColor: rawItem.badgeColor || rawItem.textColor || DEFAULT_HERO_BANNER_ITEM.badgeColor,
+    badgeBgColor: rawItem.badgeBgColor || DEFAULT_HERO_BANNER_ITEM.badgeBgColor,
+    primaryButtonColor: rawItem.primaryButtonColor || DEFAULT_HERO_BANNER_ITEM.primaryButtonColor,
+    primaryButtonBgColor:
+      rawItem.primaryButtonBgColor || DEFAULT_HERO_BANNER_ITEM.primaryButtonBgColor,
+    secondaryButtonColor:
+      rawItem.secondaryButtonColor || DEFAULT_HERO_BANNER_ITEM.secondaryButtonColor,
+    secondaryButtonBgColor:
+      rawItem.secondaryButtonBgColor || DEFAULT_HERO_BANNER_ITEM.secondaryButtonBgColor,
+    optionalButtonText: rawItem.optionalButtonText || "",
+    optionalButtonLink: rawItem.optionalButtonLink || "",
+    optionalButtonColor:
+      rawItem.optionalButtonColor || DEFAULT_HERO_BANNER_ITEM.optionalButtonColor,
+    optionalButtonBgColor:
+      rawItem.optionalButtonBgColor || DEFAULT_HERO_BANNER_ITEM.optionalButtonBgColor,
+  };
+  return merged;
+}
+
+function parseHeroBannersPayload(raw: string | null | undefined): HeroBannersStorePayload | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object") {
-      const merged: HeroBannerConfig = {
-        ...DEFAULT_HERO_BANNER_CONFIG,
-        ...parsed,
-        overlayOpacity:
-          typeof parsed.overlayOpacity === "number"
-            ? Math.min(90, Math.max(0, parsed.overlayOpacity))
-            : DEFAULT_HERO_BANNER_CONFIG.overlayOpacity,
-        visible: parsed.visible !== false,
-        showDecorativeGlow: parsed.showDecorativeGlow !== false,
+      if (Array.isArray(parsed.banners)) {
+        const list = parsed.banners
+          .filter((x: unknown) => Boolean(x && typeof x === "object"))
+          .map((item: Partial<HeroBannerItem>, idx: number) => normalizeHeroBannerItem(item, idx))
+          .sort((a: HeroBannerItem, b: HeroBannerItem) => a.order - b.order);
+        return {
+          banners: list.length > 0 ? list : [DEFAULT_HERO_BANNER_ITEM],
+          carousel: {
+            ...DEFAULT_HERO_CAROUSEL_SETTINGS,
+            ...(parsed.carousel && typeof parsed.carousel === "object" ? parsed.carousel : {}),
+            intervalSeconds: Math.min(
+              20,
+              Math.max(2, Number(parsed?.carousel?.intervalSeconds ?? 5))
+            ),
+          },
+          updatedAt: parsed.updatedAt,
+        };
+      }
+      // Migrate legacy single-banner config cleanly
+      const single = normalizeHeroBannerItem(parsed as Partial<HeroBannerItem>, 0);
+      return {
+        banners: [single],
+        carousel: DEFAULT_HERO_CAROUSEL_SETTINGS,
+        updatedAt: single.updatedAt,
       };
-      return merged;
     }
   } catch {
     // ignore malformed json
@@ -3208,13 +3353,34 @@ function parseHeroBannerConfig(raw: string | null | undefined): HeroBannerConfig
   return null;
 }
 
+export function isBannerWithinSchedule(b: HeroBannerItem, nowMs = Date.now()): boolean {
+  if (!b.visible || b.status === "draft") return false;
+  if (b.startDate) {
+    const startMs = Date.parse(b.startDate);
+    if (!Number.isNaN(startMs) && nowMs < startMs) return false;
+  }
+  if (b.endDate) {
+    const endMs = Date.parse(b.endDate);
+    if (!Number.isNaN(endMs) && nowMs > endMs) return false;
+  }
+  return true;
+}
+
 export function useHeroBannerConfig() {
-  const [banner, setBanner] = useState<HeroBannerConfig>(() => {
+  const [payload, setPayload] = useState<HeroBannersStorePayload>(() => {
     try {
       const cached = localStorage.getItem(LOCAL_HERO_BANNER_KEY);
-      return parseHeroBannerConfig(cached) ?? DEFAULT_HERO_BANNER_CONFIG;
+      return (
+        parseHeroBannersPayload(cached) ?? {
+          banners: [DEFAULT_HERO_BANNER_ITEM],
+          carousel: DEFAULT_HERO_CAROUSEL_SETTINGS,
+        }
+      );
     } catch {
-      return DEFAULT_HERO_BANNER_CONFIG;
+      return {
+        banners: [DEFAULT_HERO_BANNER_ITEM],
+        carousel: DEFAULT_HERO_CAROUSEL_SETTINGS,
+      };
     }
   });
   const [loading, setLoading] = useState(true);
@@ -3222,14 +3388,13 @@ export function useHeroBannerConfig() {
   useEffect(() => {
     let active = true;
 
-    // 1. Direct read from Firestore
     getDoc(doc(db, "settings", HERO_BANNER_CONFIG_ID))
       .then((snap) => {
         if (!active) return;
         if (snap.exists()) {
-          const parsed = parseHeroBannerConfig(snap.data()?.logo_url);
+          const parsed = parseHeroBannersPayload(snap.data()?.logo_url);
           if (parsed) {
-            setBanner(parsed);
+            setPayload(parsed);
             try {
               localStorage.setItem(LOCAL_HERO_BANNER_KEY, JSON.stringify(parsed));
             } catch {}
@@ -3241,15 +3406,14 @@ export function useHeroBannerConfig() {
         if (active) setLoading(false);
       });
 
-    // 2. Fallback read from /api/content
     fetch(`/api/content?collection=settings&id=${HERO_BANNER_CONFIG_ID}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (!active) return;
         if (d?.item?.logo_url) {
-          const parsed = parseHeroBannerConfig(d.item.logo_url);
+          const parsed = parseHeroBannersPayload(d.item.logo_url);
           if (parsed) {
-            setBanner(parsed);
+            setPayload(parsed);
             try {
               localStorage.setItem(LOCAL_HERO_BANNER_KEY, JSON.stringify(parsed));
             } catch {}
@@ -3258,15 +3422,14 @@ export function useHeroBannerConfig() {
       })
       .catch(() => {});
 
-    // 3. Real-time Firestore listener
     const unsubDirect = onSnapshot(
       doc(db, "settings", HERO_BANNER_CONFIG_ID),
       (snap) => {
         if (!active) return;
         if (snap.exists()) {
-          const parsed = parseHeroBannerConfig(snap.data()?.logo_url);
+          const parsed = parseHeroBannersPayload(snap.data()?.logo_url);
           if (parsed) {
-            setBanner(parsed);
+            setPayload(parsed);
             try {
               localStorage.setItem(LOCAL_HERO_BANNER_KEY, JSON.stringify(parsed));
             } catch {}
@@ -3285,32 +3448,159 @@ export function useHeroBannerConfig() {
     };
   }, []);
 
-  const saveHeroBannerConfig = useCallback(async (next: HeroBannerConfig) => {
-    const cleanNext: HeroBannerConfig = {
-      ...DEFAULT_HERO_BANNER_CONFIG,
-      ...next,
-      overlayOpacity: Math.min(90, Math.max(0, Number(next.overlayOpacity ?? 55))),
+  const persistBannersPayload = useCallback(async (nextPayload: HeroBannersStorePayload) => {
+    const cleanPayload: HeroBannersStorePayload = {
+      banners: nextPayload.banners.map((b, idx) =>
+        normalizeHeroBannerItem({ ...b, order: idx, updatedAt: new Date().toISOString() }, idx)
+      ),
+      carousel: {
+        ...DEFAULT_HERO_CAROUSEL_SETTINGS,
+        ...nextPayload.carousel,
+        intervalSeconds: Math.min(20, Math.max(2, Number(nextPayload.carousel?.intervalSeconds ?? 5))),
+      },
       updatedAt: new Date().toISOString(),
     };
-    const serialized = JSON.stringify(cleanNext);
+    const serialized = JSON.stringify(cleanPayload);
     try {
       localStorage.setItem(LOCAL_HERO_BANNER_KEY, serialized);
     } catch {}
-    setBanner(cleanNext);
+    setPayload(cleanPayload);
     await upsertSettingDoc(HERO_BANNER_CONFIG_ID, serialized, { visible: true });
-    return cleanNext;
+    return cleanPayload;
   }, []);
 
+  const activeBanners = useMemo(
+    () =>
+      [...payload.banners]
+        .sort((a, b) => a.order - b.order)
+        .filter((b) => isBannerWithinSchedule(b)),
+    [payload.banners]
+  );
+
+  const primaryBanner = activeBanners[0] ?? payload.banners[0] ?? DEFAULT_HERO_BANNER_ITEM;
+
+  const saveBanner = useCallback(
+    async (item: HeroBannerItem) => {
+      const idx = payload.banners.findIndex((b) => b.id === item.id);
+      const nextList =
+        idx >= 0
+          ? payload.banners.map((b, i) => (i === idx ? item : b))
+          : [...payload.banners, { ...item, order: payload.banners.length }];
+      return persistBannersPayload({ ...payload, banners: nextList });
+    },
+    [payload, persistBannersPayload]
+  );
+
+  const addBanner = useCallback(
+    async (partial?: Partial<HeroBannerItem>) => {
+      const nextIndex = payload.banners.length + 1;
+      const newBanner = normalizeHeroBannerItem(
+        {
+          ...DEFAULT_HERO_BANNER_ITEM,
+          ...partial,
+          id: `hero_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+          name: partial?.name || `নতুন হিরো ব্যানার #${nextIndex}`,
+          order: payload.banners.length,
+        },
+        payload.banners.length
+      );
+      await persistBannersPayload({
+        ...payload,
+        banners: [...payload.banners, newBanner],
+      });
+      return newBanner;
+    },
+    [payload, persistBannersPayload]
+  );
+
+  const duplicateBanner = useCallback(
+    async (bannerId: string) => {
+      const src = payload.banners.find((b) => b.id === bannerId);
+      if (!src) return null;
+      const copyItem = normalizeHeroBannerItem(
+        {
+          ...src,
+          id: `hero_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+          name: `${src.name} (কপি)`,
+          status: "draft",
+          order: payload.banners.length,
+        },
+        payload.banners.length
+      );
+      await persistBannersPayload({
+        ...payload,
+        banners: [...payload.banners, copyItem],
+      });
+      return copyItem;
+    },
+    [payload, persistBannersPayload]
+  );
+
+  const deleteBanner = useCallback(
+    async (bannerId: string) => {
+      if (payload.banners.length <= 1) {
+        throw new Error("অন্তত একটি প্রধান হিরো ব্যানার রাখা আবশ্যক।");
+      }
+      const nextList = payload.banners.filter((b) => b.id !== bannerId);
+      return persistBannersPayload({ ...payload, banners: nextList });
+    },
+    [payload, persistBannersPayload]
+  );
+
+  const reorderBanners = useCallback(
+    async (bannerId: string, direction: "up" | "down") => {
+      const sorted = [...payload.banners].sort((a, b) => a.order - b.order);
+      const idx = sorted.findIndex((b) => b.id === bannerId);
+      if (idx < 0) return payload;
+      const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= sorted.length) return payload;
+      const [moved] = sorted.splice(idx, 1);
+      sorted.splice(targetIdx, 0, moved);
+      return persistBannersPayload({ ...payload, banners: sorted });
+    },
+    [payload, persistBannersPayload]
+  );
+
+  const saveCarouselSettings = useCallback(
+    async (carousel: HeroCarouselSettings) => {
+      return persistBannersPayload({ ...payload, carousel });
+    },
+    [payload, persistBannersPayload]
+  );
+
+  const saveHeroBannerConfig = useCallback(
+    async (next: HeroBannerConfig) => {
+      const targetId = next.id || primaryBanner.id;
+      const normalized = normalizeHeroBannerItem({ ...next, id: targetId }, 0);
+      await saveBanner(normalized);
+      return normalized;
+    },
+    [primaryBanner.id, saveBanner]
+  );
+
   const resetHeroBannerConfig = useCallback(async () => {
-    return saveHeroBannerConfig(DEFAULT_HERO_BANNER_CONFIG);
-  }, [saveHeroBannerConfig]);
+    return persistBannersPayload({
+      banners: [DEFAULT_HERO_BANNER_ITEM],
+      carousel: DEFAULT_HERO_CAROUSEL_SETTINGS,
+    });
+  }, [persistBannersPayload]);
 
   return {
-    banner,
+    banner: primaryBanner,
+    banners: payload.banners,
+    activeBanners,
+    carousel: payload.carousel,
     loading,
+    saveBanner,
+    addBanner,
+    duplicateBanner,
+    deleteBanner,
+    reorderBanners,
+    saveCarouselSettings,
+    saveAllHeroBanners: persistBannersPayload,
     saveHeroBannerConfig,
     resetHeroBannerConfig,
-    defaultBanner: DEFAULT_HERO_BANNER_CONFIG,
+    defaultBanner: DEFAULT_HERO_BANNER_ITEM,
   };
 }
 
@@ -3693,5 +3983,163 @@ export function useWebsiteContentConfig() {
     contentConfig,
     saveWebsiteContentConfig,
     resetWebsiteContentConfig: () => saveWebsiteContentConfig(DEFAULT_WEBSITE_CONTENT_CONFIG),
+  };
+}
+
+// ============================================================================
+// 11. Dynamic AI Chat Configuration & Knowledge Base (/settings/ai_chat_config)
+// (Zero API keys stored here — GEMINI_API_KEY stays strictly server-side)
+// ============================================================================
+export interface AiChatFaqItem {
+  id: string;
+  question: string;
+  answer: string;
+  keywords: string;
+  visible: boolean;
+}
+
+export interface AiChatConfig {
+  enabled: boolean;
+  botName: string;
+  welcomeMessage: string;
+  systemInstructions: string;
+  tone: "helpful_bn" | "concise_bn" | "bilingual";
+  quickPrompts: string[];
+  faqs: AiChatFaqItem[];
+  autoSuggestHandoff: boolean;
+  handoffNotice: string;
+  updatedAt?: string;
+}
+
+export const DEFAULT_AI_CHAT_CONFIG: AiChatConfig = {
+  enabled: true,
+  botName: "Smart Noakhali AI",
+  welcomeMessage:
+    "আসসালামু আলাইকুম! আমি স্মার্ট নোয়াখালী এআই সহকারী। জরুরি নম্বর, রক্তদাতা, ডাক্তার, হাসপাতাল, ট্রেন বা যেকোনো নাগরিক সেবা সম্পর্কে বাংলায় বা বাংলিশে প্রশ্ন করুন।",
+  systemInstructions:
+    "সর্বদা বাংলায় ভদ্র, স্পষ্ট ও তথ্যনির্ভর উত্তর দিন। শুধু ওয়েবসাইটের যাচাইকৃত পাবলিক তথ্য ব্যবহার করুন এবং কোনো তথ্য না থাকলে অনুমান না করে লাইভ চ্যাটে অপারেটরের সাথে যুক্ত হওয়ার পরামর্শ দিন।",
+  tone: "helpful_bn",
+  quickPrompts: [
+    "মাইজদীতে কোন কোন হাসপাতাল আছে?",
+    "জরুরি রক্তের প্রয়োজনে কী করবো?",
+    "অ্যাডমিন অনুদান ও বিকাশ/নগদ নম্বর কী?",
+    "নোয়াখালী ফায়ার সার্ভিস ও পুলিশ হেল্পলাইন নম্বর দিন",
+  ],
+  faqs: [
+    {
+      id: "ai_faq_1",
+      question: "নোয়াখালী সদর / জেনারেল হাসপাতাল কোথায় ও যোগাযোগ নম্বর কী?",
+      answer:
+        "২৫০ শয্যা বিশিষ্ট নোয়াখালী জেনারেল হাসপাতাল মাইজদী কোর্টে অবস্থিত। ওয়েবসাইটের 'স্বাস্থ্য ও চিকিৎসা' বিভাগের 'হাসপাতাল ও ক্লিনিক' ক্যাটাগরিতে অনুমোদিত সকল হাসপাতাল ও জরুরি নম্বর দেখতে পারবেন। জরুরি অ্যাম্বুলেন্স বা পুলিশের জন্য 999 কল করুন।",
+      keywords: "হাসপাতাল,haspatal,hospital,maijdee,মাইজদী,জেনারেল হাসপাতাল",
+      visible: true,
+    },
+    {
+      id: "ai_faq_2",
+      question: "জরুরি রক্তদাতা কীভাবে পাবো?",
+      answer:
+        "হোমপেজের 'রক্তদাতা' বা '/blood-donor' পেজে গিয়ে রক্তের গ্রুপ (A+, B+, O+, AB+ ইত্যাদি) দিয়ে যাচাইকৃত রক্তদাতা খুঁজতে পারেন। এছাড়া '/emergency-request' পেজ থেকে জরুরি রক্তের অনুরোধ পোস্ট করতে পারেন।",
+      keywords: "রক্ত,রক্তদাতা,blood,rokto,roktodata,donor,emergency blood",
+      visible: true,
+    },
+  ],
+  autoSuggestHandoff: true,
+  handoffNotice: "সরাসরি হিউম্যান অপারেটরের সহায়তা দরকার হলে নিচের বাটনে ট্যাপ করে লাইভ চ্যাটে যুক্ত হোন।",
+};
+
+function parseAiChatConfig(raw: string | null | undefined): AiChatConfig | null {
+  if (!raw) return null;
+  try {
+    const p = JSON.parse(raw);
+    if (p && typeof p === "object") {
+      return {
+        ...DEFAULT_AI_CHAT_CONFIG,
+        ...p,
+        enabled: p.enabled !== false,
+        autoSuggestHandoff: p.autoSuggestHandoff !== false,
+        quickPrompts:
+          Array.isArray(p.quickPrompts) && p.quickPrompts.length > 0
+            ? p.quickPrompts.map((x: unknown) => String(x)).filter(Boolean)
+            : DEFAULT_AI_CHAT_CONFIG.quickPrompts,
+        faqs: Array.isArray(p.faqs) ? p.faqs : DEFAULT_AI_CHAT_CONFIG.faqs,
+      };
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+export function useAiChatConfig() {
+  const [aiConfig, setAiConfig] = useState<AiChatConfig>(() => {
+    try {
+      return (
+        parseAiChatConfig(localStorage.getItem(LOCAL_AI_CHAT_CONFIG_KEY)) ??
+        DEFAULT_AI_CHAT_CONFIG
+      );
+    } catch {
+      return DEFAULT_AI_CHAT_CONFIG;
+    }
+  });
+
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/content?collection=settings&id=${AI_CHAT_CONFIG_ID}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!active) return;
+        if (d?.item?.logo_url) {
+          const parsed = parseAiChatConfig(d.item.logo_url);
+          if (parsed) {
+            setAiConfig(parsed);
+            try {
+              localStorage.setItem(LOCAL_AI_CHAT_CONFIG_KEY, JSON.stringify(parsed));
+            } catch {}
+          }
+        }
+      })
+      .catch(() => {});
+
+    const unsub = onSnapshot(
+      doc(db, "settings", AI_CHAT_CONFIG_ID),
+      (snap) => {
+        if (!active) return;
+        if (snap.exists()) {
+          const parsed = parseAiChatConfig(snap.data()?.logo_url);
+          if (parsed) {
+            setAiConfig(parsed);
+            try {
+              localStorage.setItem(LOCAL_AI_CHAT_CONFIG_KEY, JSON.stringify(parsed));
+            } catch {}
+          }
+        }
+      },
+      () => {}
+    );
+    return () => {
+      active = false;
+      unsub();
+    };
+  }, []);
+
+  const saveAiChatConfig = useCallback(async (next: AiChatConfig) => {
+    const cleanNext: AiChatConfig = {
+      ...DEFAULT_AI_CHAT_CONFIG,
+      ...next,
+      updatedAt: new Date().toISOString(),
+    };
+    const serialized = JSON.stringify(cleanNext);
+    try {
+      localStorage.setItem(LOCAL_AI_CHAT_CONFIG_KEY, serialized);
+    } catch {}
+    setAiConfig(cleanNext);
+    await upsertSettingDoc(AI_CHAT_CONFIG_ID, serialized, { visible: true });
+    return cleanNext;
+  }, []);
+
+  return {
+    aiConfig,
+    saveAiChatConfig,
+    resetAiChatConfig: () => saveAiChatConfig(DEFAULT_AI_CHAT_CONFIG),
   };
 }

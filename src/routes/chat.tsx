@@ -22,6 +22,7 @@ import {
   ChevronRight,
   ShieldCheck,
   Sparkles,
+  Headphones,
 } from "lucide-react";
 import {
   ensureMyThread,
@@ -32,6 +33,7 @@ import {
   useCloudSubmissions,
   useCloudDonors,
   useEmergencyRequests,
+  handoffAiToLiveChat,
 } from "@/lib/cloud";
 import {
   useStaffProfiles,
@@ -39,6 +41,7 @@ import {
   useCategories,
   useDonationConfig,
   useSiteMetaConfig,
+  useAiChatConfig,
 } from "@/lib/store";
 import { useAuth } from "@/lib/auth";
 import { auth, ensureFirebaseAuthUser } from "@/lib/firebase";
@@ -46,6 +49,7 @@ import { toast } from "sonner";
 import type { AiChatMessage } from "@/components/FloatingLiveChat";
 import { FormattedChatMessage } from "@/lib/chat-formatter";
 import { resolveStaffMessageRole } from "@/lib/chat-roles";
+import { useRolePermissions, resolveUserRoleDisplay } from "@/lib/permissions";
 
 export const Route = createFileRoute("/chat")({
   head: () => ({ meta: [{ title: "লাইভ চ্যাট ও এআই সহকারী — স্মার্ট নোয়াখালী" }] }),
@@ -105,10 +109,12 @@ const QUICK_PROMPTS = [
 ];
 
 function ChatPage() {
-  const { user, isAuthed, isStaff, isMainAdmin, isAdmin, isEditor, isModerator } = useAuth();
+  const { user, isAuthed, isStaff, isMainAdmin, roles } = useAuth();
+  const { customRoles } = useRolePermissions();
   const { getStaffProfile } = useStaffProfiles();
   const { logo } = useLogo();
   const { meta } = useSiteMetaConfig();
+  const { aiConfig } = useAiChatConfig();
   const { categories } = useCategories();
   const { activeNumbers } = useDonationConfig();
   const subs = useCloudSubmissions();
@@ -116,9 +122,10 @@ function ChatPage() {
   const emerg = useEmergencyRequests();
   const threadsHook = useChatThreads();
 
-  const [mode, setMode] = useState<"ai" | "live">("ai");
+  const [mode, setMode] = useState<"ai" | "live">(() => (aiConfig.enabled ? "ai" : "live"));
   const [threadId, setThreadId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [handoffBusy, setHandoffBusy] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -132,11 +139,12 @@ function ChatPage() {
   const [showGuestMetaEdit, setShowGuestMetaEdit] = useState(false);
 
   // AI State
-  const [aiMessages, setAiMessages] = useState<AiChatMessage[]>(() => [
+  const [aiMessages, setAiMessages] = useState<Array<AiChatMessage & { suggestHandoff?: boolean }>>(() => [
     {
       id: "welcome_ai_page",
       role: "assistant",
       text:
+        aiConfig.welcomeMessage ||
         meta.aiWelcomeMessage ||
         "আসসালামু আলাইকুম! আমি স্মার্ট নোয়াখালী এআই সহকারী। ডাক্তার, হাসপাতাল, অ্যাম্বুলেন্স, ফায়ার সার্ভিস, রক্তদাতা বা যেকোনো জরুরি নাম্বার খুঁজতে আমাকে প্রশ্ন করুন!",
       created_at: new Date().toISOString(),
@@ -175,12 +183,43 @@ function ChatPage() {
         id: "welcome_ai_page",
         role: "assistant",
         text:
+          aiConfig.welcomeMessage ||
           meta.aiWelcomeMessage ||
-          "আসসালামু আলাইকুম! আমি স্মার্ট নোয়াখালী এআই সহকারী। ডাক্তার, হাসপাতাল, জরুরি সেবা, সাধারণ জ্ঞান, কোডিং বা গণিতসহ যেকোনো বিষয়ে আমাকে প্রশ্ন করতে পারেন!",
+          "আসসালামু আলাইকুম! আমি স্মার্ট নোয়াখালী এআই সহকারী। ডাক্তার, হাসপাতাল, জরুরি সেবা বা নাগরিক তথ্য জানতে আমাকে প্রশ্ন করুন!",
         created_at: new Date().toISOString(),
       },
     ]);
     toast.success("নতুন এআই চ্যাট শুরু হয়েছে!");
+  }
+
+  async function handleHandoffToLiveChat() {
+    const targetThread = effectiveThreadId;
+    if (!targetThread || handoffBusy) return;
+    setHandoffBusy(true);
+    try {
+      const recentQueries = aiMessages
+        .filter((m) => m.id !== "welcome_ai_page")
+        .slice(-4)
+        .map((m) => `${m.role === "user" ? "গ্রাহক" : "AI"}: ${m.text.slice(0, 140)}`)
+        .join("\n");
+      const summary = recentQueries || "গ্রাহক সরাসরি হিউম্যান সাপোর্টের সাথে কথা বলতে চান।";
+      const res = await handoffAiToLiveChat({
+        threadId: targetThread,
+        userId: user?.id || targetThread,
+        summary,
+        userName: user?.displayName || guestName || "অতিথি গ্রাহক",
+        userEmail: user?.email || undefined,
+        userPhone: user?.phone || guestPhone || undefined,
+      });
+      if (!res.ok) {
+        toast.error(res.error || "হ্যান্ডঅফ করতে সমস্যা হয়েছে");
+        return;
+      }
+      setMode("live");
+      toast.success("আপনার এআই আলোচনার সারসংক্ষেপসহ সরাসরি লাইভ সাপোর্টে যুক্ত করা হয়েছে!");
+    } finally {
+      setHandoffBusy(false);
+    }
   }
 
   useEffect(() => {
@@ -228,6 +267,12 @@ function ChatPage() {
         body: JSON.stringify({
           query: clean,
           history: aiMessages.slice(-6).map((m) => ({ role: m.role, text: m.text })),
+          aiConfig: {
+            botName: aiConfig.botName,
+            systemInstructions: aiConfig.systemInstructions,
+            tone: aiConfig.tone,
+            faqs: aiConfig.faqs.filter((f) => f.visible !== false),
+          },
           directoryContext: {
             categories: categories.map((c) => ({
               slug: c.slug,
@@ -246,7 +291,7 @@ function ChatPage() {
       const replyText =
         data.text ||
         data.reply ||
-        `স্মার্ট নোয়াখালী এআই সহকারী: আপনার অনুসন্ধানের জন্য নিচের জরুরি যোগাযোগ:\n• জাতীয় জরুরি সেবা: 📞 [999](tel:999)\n• নোয়াখালী জেনারেল হাসপাতাল: 📞 [01730-324794](tel:01730324794)\n• নোয়াখালী ফায়ার সার্ভিস: 📞 [01730-002444](tel:01730002444)\n• সুধারাম মডেল থানা: 📞 [01320-116035](tel:01320116035)\n\nসরাসরি এডমিনের সাথে কথা বলতে উপরের 'লাইভ প্রতিনিধি' ট্যাবে মেসেজ দিন।`;
+        `স্মার্ট নোয়াখালী এআই সহকারী: আপনার অনুসন্ধানের জন্য নিচের জরুরি যোগাযোগ:\n• জাতীয় জরুরি সেবা: 📞 [999](tel:999)\n• নোয়াখালী জেনারেল হাসপাতাল: 📞 [01730-324794](tel:01730324794)\n• নোয়াখালী ফায়ার সার্ভিস: 📞 [01730-002444](tel:01730002444)\n• সুধারাম মডেল থানা: 📞 [01320-116035](tel:01320116035)\n\nসরাসরি সাপোর্টের সাথে কথা বলতে উপরের 'হিউম্যান সাপোর্ট' বাটনে ট্যাপ করুন।`;
 
       setAiMessages((prev) => [
         ...prev,
@@ -256,6 +301,7 @@ function ChatPage() {
           text: replyText,
           created_at: new Date().toISOString(),
           matches: data.matches,
+          suggestHandoff: Boolean(data.suggestHandoff || aiConfig.autoSuggestHandoff),
         },
       ]);
       if (soundEnabled) playChatChime("receive");
@@ -265,8 +311,9 @@ function ChatPage() {
         {
           id: `fallback_${Date.now()}`,
           role: "assistant",
-          text: `স্মার্ট নোয়াখালী এআই সহকারী: জরুরি যোগাযোগের জন্য:\n• জরুরি হটলাইন: 📞 [999](tel:999)\n• নোয়াখালী জেনারেল হাসপাতাল: 📞 [01730-324794](tel:01730324794)\n• নোয়াখালী ফায়ার সার্ভিস: 📞 [01730-002444](tel:01730002444)\n\nঅথবা 'লাইভ প্রতিনিধি' অপশনে ক্লিক করে সরাসরি সাপোর্ট টিমের সাথে কথা বলুন।`,
+          text: `স্মার্ট নোয়াখালী এআই সহকারী: জরুরি যোগাযোগের জন্য:\n• জরুরি হটলাইন: 📞 [999](tel:999)\n• নোয়াখালী জেনারেল হাসপাতাল: 📞 [01730-324794](tel:01730324794)\n• নোয়াখালী ফায়ার সার্ভিস: 📞 [01730-002444](tel:01730002444)\n\nঅথবা 'সরাসরি হিউম্যান সাপোর্ট' বাটনে ক্লিক করে সাপোর্ট টিমের সাথে কথা বলুন।`,
           created_at: new Date().toISOString(),
+          suggestHandoff: true,
         },
       ]);
     } finally {
@@ -286,7 +333,7 @@ function ChatPage() {
       {
         id: `welcome_${Date.now()}`,
         role: "assistant",
-        text: "চ্যাট হিস্ট্রি রিসেট করা হয়েছে। নোয়াখালী জেলার যেকোনো তথ্য জানতে আমাকে প্রশ্ন করুন!",
+        text: aiConfig.welcomeMessage || "চ্যাট হিস্ট্রি রিসেট করা হয়েছে। নোয়াখালী জেলার যেকোনো তথ্য জানতে আমাকে প্রশ্ন করুন!",
         created_at: new Date().toISOString(),
       },
     ]);
@@ -296,23 +343,24 @@ function ChatPage() {
   const effectiveUserName = user?.displayName || guestName || "অতিথি গ্রাহক";
   const effectiveUserPhone = user?.phone || guestPhone || "";
 
-  const senderRoleLabel = isStaff
-    ? isMainAdmin
-      ? "সুপার অ্যাডমিন"
-      : isAdmin
-      ? "অ্যাডমিন"
-      : isEditor
-      ? "এডিটর"
-      : isModerator
-      ? "মডারেটর"
-      : "স্টাফ"
-    : "গ্রাহক";
+  const resolvedStaffRole = resolveUserRoleDisplay({
+    email: user?.email,
+    roles,
+    isMainAdmin,
+    customRoleId: user?.customRoleId,
+    customRoleName: user?.customRoleName,
+    customRoles,
+  });
+
+  const senderRoleLabel = isStaff ? resolvedStaffRole.labelBn : "গ্রাহক";
 
   const effectiveSenderName = isStaff
     ? isMainAdmin
       ? "সুপার অ্যাডমিন"
-      : user?.displayName || "অ্যাডমিন সাপোর্ট"
+      : user?.displayName || resolvedStaffRole.labelBn
     : effectiveUserName;
+
+  const activeThreadRow = threadsHook.items.find((t) => t.id === threadId);
 
   const userMeta = {
     user_name: effectiveUserName,
@@ -395,16 +443,20 @@ function ChatPage() {
       </div>
 
       {/* Main Switcher Card */}
-      <div className="mb-3 rounded-2xl bg-gradient-card p-3 shadow-card ring-1 ring-border/50">
+      <div className={`mb-3 rounded-2xl p-3 shadow-card ring-1 ring-border/50 ${
+        mode === "ai" ? "bg-gradient-to-r from-indigo-50 via-card to-teal-50/40" : "bg-gradient-card"
+      }`}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-hero text-primary-foreground shadow-sm">
-              {mode === "ai" ? <Sparkles className="h-5 w-5 text-gold" /> : <MessageCircle className="h-5 w-5" />}
+            <div className={`flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-sm ${
+              mode === "ai" ? "bg-gradient-to-br from-indigo-600 to-teal-600" : "bg-gradient-hero"
+            }`}>
+              {mode === "ai" ? <Sparkles className="h-5 w-5 text-amber-200" /> : <Headphones className="h-5 w-5" />}
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <p className="font-display font-bold text-primary-deep text-sm sm:text-base">
-                  {mode === "ai" ? "স্মার্ট এআই সহকারী" : "সরাসরি লাইভ চ্যাট"}
+                  {mode === "ai" ? aiConfig.botName || "স্মার্ট এআই সহকারী" : "সরাসরি লাইভ চ্যাট"}
                 </p>
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-700 ring-1 ring-emerald-500/30">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse" />
@@ -413,8 +465,8 @@ function ChatPage() {
               </div>
               <p className="text-[11px] text-muted-foreground">
                 {mode === "ai"
-                  ? "ডাক্তার, হাসপাতাল, অ্যাম্বুলেন্স ও সেবা সহজে খুঁজুন"
-                  : "এডমিন ও মডারেটরদের সাথে তাৎক্ষণিক যোগাযোগ করুন"}
+                  ? "তাৎক্ষণিক পাবলিক ডিরেক্টরি ও সেবা সহায়তা"
+                  : "দায়িত্বপ্রাপ্ত হিউম্যান অপারেটরের সাথে সরাসরি যোগাযোগ"}
               </p>
             </div>
           </div>
@@ -425,7 +477,7 @@ function ChatPage() {
               onClick={() => setMode("ai")}
               className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
                 mode === "ai"
-                  ? "bg-card text-primary-deep shadow-sm"
+                  ? "bg-indigo-600 text-white shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -436,7 +488,7 @@ function ChatPage() {
               onClick={() => setMode("live")}
               className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
                 mode === "live"
-                  ? "bg-card text-primary-deep shadow-sm"
+                  ? "bg-gradient-hero text-white shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -445,12 +497,12 @@ function ChatPage() {
           </div>
         </div>
 
-        {/* Staff mode banner or guest banner if live chat */}
+        {/* Operator mode banner */}
         {mode === "live" && isStaff && (
           <div className="mt-2.5 flex items-center justify-between gap-2 rounded-xl bg-primary/10 px-3 py-1.5 text-xs text-primary-deep">
             <div className="flex items-center gap-1.5 font-bold">
               <ShieldCheck className="h-4 w-4 text-primary" />
-              আপনি স্টাফ হিসেবে যুক্ত আছেন
+              আপনি {senderRoleLabel} হিসেবে যুক্ত আছেন
             </div>
             <div className="flex items-center gap-1">
               <button
@@ -461,6 +513,11 @@ function ChatPage() {
                 {staffTab === "inbox" ? "💬 চ্যাট উইন্ডো দেখুন" : "📥 ইউজার ইনবক্স খুলুন"}
               </button>
             </div>
+          </div>
+        )}
+        {mode === "live" && !isStaff && activeThreadRow && (activeThreadRow.status === "resolved" || activeThreadRow.status === "closed") && (
+          <div className="mt-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-1.5 text-[11px] font-semibold text-amber-900">
+            এই চ্যাটটি {activeThreadRow.status === "resolved" ? "সমাধানকৃত" : "বন্ধ"} অবস্থায় রয়েছে — নতুন মেসেজ পাঠালে স্বয়ংক্রিয়ভাবে পুনরায় চালু হবে।
           </div>
         )}
 
@@ -516,27 +573,37 @@ function ChatPage() {
 
       {mode === "ai" ? (
         <>
-          {/* Quick Prompts with Reset Button */}
+          {/* Quick Prompts with Reset + Handoff Button */}
           <div className="mb-1.5 flex items-center justify-between gap-2">
-            <span className="text-[11px] font-bold text-muted-foreground flex items-center gap-1">
-              <Sparkles className="h-3 w-3 text-gold" /> দ্রুত সেবা প্রশ্ন
+            <span className="text-[11px] font-bold text-indigo-900/75 flex items-center gap-1">
+              <Sparkles className="h-3 w-3 text-indigo-600" /> দ্রুত সেবা প্রশ্ন
             </span>
-            <button
-              type="button"
-              onClick={resetAiChat}
-              className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-muted hover:text-primary transition"
-              title="নতুন এআই চ্যাট শুরু করুন"
-            >
-              <RotateCcw className="h-3 w-3" /> নতুন চ্যাট
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={handoffBusy}
+                onClick={() => void handleHandoffToLiveChat()}
+                className="flex items-center gap-1 rounded-lg bg-emerald-600/15 px-2.5 py-1 text-[11px] font-bold text-emerald-800 hover:bg-emerald-600/25 transition"
+              >
+                <Headphones className="h-3 w-3" /> হিউম্যান সাপোর্ট
+              </button>
+              <button
+                type="button"
+                onClick={resetAiChat}
+                className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-muted hover:text-primary transition"
+                title="নতুন এআই চ্যাট শুরু করুন"
+              >
+                <RotateCcw className="h-3 w-3" /> নতুন চ্যাট
+              </button>
+            </div>
           </div>
           <div className="mb-2 flex flex-wrap gap-1.5 overflow-x-auto pb-1">
-            {QUICK_PROMPTS.map((qp) => (
+            {(aiConfig.quickPrompts.length > 0 ? aiConfig.quickPrompts : QUICK_PROMPTS).map((qp) => (
               <button
                 key={qp}
                 type="button"
                 onClick={() => void askAi(qp)}
-                className="rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-[11px] font-semibold text-primary-deep transition hover:bg-primary/15 active:scale-95 whitespace-nowrap"
+                className="rounded-full border border-indigo-200 bg-white px-3 py-1 text-[11px] font-semibold text-indigo-900 transition hover:bg-indigo-50 active:scale-95 whitespace-nowrap"
               >
                 {qp}
               </button>
@@ -544,7 +611,7 @@ function ChatPage() {
           </div>
 
           {/* AI Messages View */}
-          <div className="flex-1 space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/50 p-3.5 shadow-inner">
+          <div className="flex-1 space-y-3 overflow-y-auto rounded-2xl border border-indigo-100 bg-indigo-50/20 p-3.5 shadow-inner">
             {aiMessages.map((m) => {
               const isUser = m.role === "user";
               return (
@@ -552,15 +619,15 @@ function ChatPage() {
                   <div
                     className={`group relative max-w-[88%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
                       isUser
-                        ? "bg-gradient-hero text-primary-foreground"
-                        : "border border-border bg-card text-foreground"
+                        ? "bg-gradient-to-r from-indigo-600 to-teal-700 text-white"
+                        : "border border-indigo-100 bg-card text-foreground"
                     }`}
                   >
                     <div className="mb-1 flex items-center justify-between gap-3">
                       <div className="flex items-center gap-1.5">
-                        {!isUser && <Bot className="h-3.5 w-3.5 text-primary" />}
-                        <span className={`text-[10px] font-bold ${isUser ? "text-gold" : "text-primary"}`}>
-                          {isUser ? "আপনি" : "স্মার্ট এআই সহকারী"}
+                        {!isUser && <Bot className="h-3.5 w-3.5 text-indigo-600" />}
+                        <span className={`text-[10px] font-bold ${isUser ? "text-amber-200" : "text-indigo-700"}`}>
+                          {isUser ? "আপনি" : aiConfig.botName || "স্মার্ট এআই সহকারী"}
                         </span>
                       </div>
                       <button
@@ -646,6 +713,24 @@ function ChatPage() {
                             {c.bn} <ChevronRight className="h-3 w-3" />
                           </Link>
                         ))}
+                      </div>
+                    )}
+
+                    {/* AI -> Human Live Chat Handoff CTA */}
+                    {!isUser && m.suggestHandoff && (
+                      <div className="mt-2.5 border-t border-indigo-100 pt-2">
+                        <p className="text-[10px] text-muted-foreground mb-1">
+                          {aiConfig.handoffNotice}
+                        </p>
+                        <button
+                          type="button"
+                          disabled={handoffBusy}
+                          onClick={() => void handleHandoffToLiveChat()}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
+                        >
+                          <Headphones className="h-3.5 w-3.5" />
+                          {handoffBusy ? "যুক্ত হচ্ছে..." : "সরাসরি হিউম্যান সাপোর্টে কথা বলুন"}
+                        </button>
                       </div>
                     )}
                   </div>

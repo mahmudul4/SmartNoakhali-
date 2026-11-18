@@ -826,6 +826,7 @@
         "description": { "type": "string" },
         "formType": { "type": "string" },
         "customIconUrl": { "type": "string" },
+        "customRoute": { "type": "string", "maxLength": 200 },
         "sort_order": { "type": "number" },
         "displayOrder": { "type": "number" },
         "visible": { "type": "boolean" },
@@ -879,21 +880,55 @@
         "type": {
           "type": "string",
           "enum": ["info", "success", "warning", "status_update"],
-          "description": "Semantic notification category."
+          "description": "Semantic notification severity."
+        },
+        "category": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Notification category in Bengali."
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["normal", "high", "urgent"],
+          "description": "Delivery priority level."
+        },
+        "audience": {
+          "type": "string",
+          "enum": ["all_users", "specific_users", "all_admins", "ordinary_admins", "staff_editors"],
+          "description": "Target audience scope."
+        },
+        "scheduled_at": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Optional ISO timestamp for scheduled visibility."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["created", "queued", "sent", "failed", "partial"],
+          "description": "Dispatch lifecycle status."
+        },
+        "idempotency_key": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Duplicate-submission guard key."
+        },
+        "channels": {
+          "type": "array",
+          "description": "Selected delivery channels (in_app, web_push, email)."
         },
         "link": {
           "type": "string",
-          "maxLength": 300,
+          "maxLength": 500,
           "description": "Optional navigation route or external URL."
         },
         "read": {
           "type": "boolean",
           "description": "Read status flag for user-targeted notifications."
         },
-        "created_by_uid": {
+        "created_by": {
           "type": "string",
-          "maxLength": 128,
-          "description": "UID of Main Admin who created the notification."
+          "maxLength": 150,
+          "description": "Email or UID of Main Admin who dispatched the notification."
         },
         "created_at": {
           "type": "string",
@@ -916,6 +951,76 @@
         "read_at": { "type": "string", "minLength": 1, "maxLength": 64 }
       },
       "required": ["notif_id", "user_id", "read_at"]
+    },
+    "NotificationDelivery": {
+      "title": "NotificationDelivery",
+      "description": "Per-channel notification delivery audit record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "notification_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "category": { "type": "string", "maxLength": 100 },
+        "priority": { "type": "string", "enum": ["normal", "high", "urgent"] },
+        "audience": { "type": "string", "maxLength": 60 },
+        "channel": { "type": "string", "enum": ["in_app", "web_push", "email"] },
+        "recipient": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "status": { "type": "string", "enum": ["queued", "sent", "failed"] },
+        "error_message": { "type": "string", "maxLength": 1000 },
+        "created_at": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "updated_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["notification_id", "channel", "recipient", "status", "created_at"]
+    },
+    "DeviceToken": {
+      "title": "DeviceToken",
+      "description": "Owner-scoped Web Push / browser device registration token.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "user_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "platform": { "type": "string", "maxLength": 40 },
+        "permission": { "type": "string", "maxLength": 20 },
+        "endpoint": { "type": "string", "maxLength": 500 },
+        "subscription_json": { "type": "string", "maxLength": 2000 },
+        "active": { "type": "boolean" },
+        "updated_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["user_id", "platform", "active", "updated_at"]
+    },
+    "NotificationPreference": {
+      "title": "NotificationPreference",
+      "description": "User notification delivery channel and category mute preferences.",
+      "type": "object",
+      "properties": {
+        "user_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "in_app": { "type": "boolean" },
+        "web_push": { "type": "boolean" },
+        "email": { "type": "boolean" },
+        "muted_categories": { "type": "array" },
+        "email_address": { "type": "string", "maxLength": 254 },
+        "updated_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["user_id", "in_app", "web_push", "email", "muted_categories"]
+    },
+    "AdminAuditLog": {
+      "title": "AdminAuditLog",
+      "description": "Immutable Super Admin audit trail across platform controls.",
+      "type": "object",
+      "properties": {
+        "actor_uid": { "type": "string", "maxLength": 128 },
+        "actor_email": { "type": "string", "maxLength": 254 },
+        "actor_name": { "type": "string", "maxLength": 150 },
+        "actor_role": { "type": "string", "maxLength": 60 },
+        "action": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "module": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "target_id": { "type": "string", "maxLength": 150 },
+        "target_label": { "type": "string", "maxLength": 200 },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "metadata_json": { "type": "string", "maxLength": 5000 },
+        "created_at": { "type": "string" }
+      },
+      "required": ["actor_email", "action", "module", "summary"]
     },
     "UserFavorite": {
       "title": "UserFavorite",
@@ -1014,9 +1119,25 @@
       "schema": "NotificationReadReceipt",
       "description": "Owner-scoped read markers for global broadcast notifications."
     },
+    "/users/{userId}/device_tokens/{tokenId}": {
+      "schema": "DeviceToken",
+      "description": "Owner-scoped browser/Web Push registration tokens cleaned on signOut."
+    },
+    "/users/{userId}/notification_preferences/{prefId}": {
+      "schema": "NotificationPreference",
+      "description": "Owner-scoped notification channel and category mute preferences."
+    },
     "/user_notifications/{notifId}": {
       "schema": "UserNotification",
       "description": "Global broadcast and targeted user notifications."
+    },
+    "/notification_deliveries/{deliveryId}": {
+      "schema": "NotificationDelivery",
+      "description": "Multi-channel notification delivery audit and retry log."
+    },
+    "/admin_audit_logs/{logId}": {
+      "schema": "AdminAuditLog",
+      "description": "Immutable Super Admin audit history log."
     },
     "/user_favorites/{favId}": {
       "schema": "UserFavorite",

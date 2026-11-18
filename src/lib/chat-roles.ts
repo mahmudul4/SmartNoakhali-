@@ -1,21 +1,24 @@
 /**
- * Authoritative role mapping and normalization for Live Chat and Staff interfaces.
- * Adheres strictly to the required Bangla display labels:
+ * Authoritative role mapping and normalization for Live Chat and Admin/Operator interfaces.
+ * Adheres strictly to required display labels:
  * - Super Admin: "সুপার অ্যাডমিন"
  * - Admin: "অ্যাডমিন"
  * - Editor: "এডিটর"
- * - Moderator: "মডারেটর"
+ * - Moderator: "মোডারেটর"
+ * - Custom Role: exact custom role name (e.g., "লাইভ চ্যাট অপারেটর")
  * - Customer: "গ্রাহক"
+ * Never displays generic "Staff Member" / "স্টাফ মেম্বার".
  */
 
-export type StaffRoleType = "super_admin" | "admin" | "editor" | "moderator";
+export type StaffRoleType = "super_admin" | "admin" | "editor" | "moderator" | "custom";
 
 export function getChatRoleDisplayLabel(
   roleOrLabel?: string | null,
   isSuperAdmin = false
 ): string {
   if (isSuperAdmin) return "সুপার অ্যাডমিন";
-  const clean = (roleOrLabel || "").trim().toLowerCase();
+  const raw = (roleOrLabel || "").trim();
+  const clean = raw.toLowerCase();
   if (
     clean === "super_admin" ||
     clean === "superadmin" ||
@@ -29,24 +32,31 @@ export function getChatRoleDisplayLabel(
     clean === "admin" ||
     clean === "এডমিন" ||
     clean === "অ্যাডমিন" ||
-    clean.includes("এডমিন") ||
-    clean.includes("অ্যাডমিন")
+    clean === "শুধু এডমিন" ||
+    clean === "জেনারেল অ্যাডমিন"
   ) {
     return "অ্যাডমিন";
   }
-  if (clean === "editor" || clean === "এডিটর" || clean.includes("এডিটর")) {
+  if (clean === "editor" || clean === "এডিটর") {
     return "এডিটর";
   }
-  if (
-    clean === "moderator" ||
-    clean === "মোডারেটর" ||
-    clean === "মডারেটর" ||
-    clean.includes("মোডারেটর") ||
-    clean.includes("মডারেটর")
-  ) {
-    return "মডারেটর";
+  if (clean === "moderator" || clean === "মোডারেটর" || clean === "মডারেটর") {
+    return "মোডারেটর";
   }
-  return "অ্যাডমিন";
+  // Never emit generic "Staff" / "Staff Member" / "স্টাফ"
+  if (
+    !raw ||
+    clean === "staff" ||
+    clean === "staff member" ||
+    clean === "staff_member" ||
+    clean === "স্টাফ" ||
+    clean === "স্টাফ সদস্য" ||
+    clean === "স্টাফ মেম্বার"
+  ) {
+    return "সাপোর্ট অ্যাডমিন";
+  }
+  // Preserve custom role names verbatim (e.g., "লাইভ চ্যাট অপারেটর")
+  return raw;
 }
 
 export function resolveStaffMessageRole(m: {
@@ -57,7 +67,8 @@ export function resolveStaffMessageRole(m: {
 }): string {
   if (m.sender_role !== "staff") return "";
   const idLow = (m.sender_id || "").toLowerCase();
-  const labelLow = (m.sender_role_label || "").toLowerCase();
+  const rawLabel = (m.sender_role_label || "").trim();
+  const labelLow = rawLabel.toLowerCase();
   const nameLow = (m.sender_name || "").toLowerCase();
 
   // Super Admin detection
@@ -70,33 +81,45 @@ export function resolveStaffMessageRole(m: {
     return "সুপার অ্যাডমিন";
   }
 
-  // Admin detection (prevent Admin from being shown as Editor)
+  // Exact system role labels
   if (
-    labelLow.includes("অ্যাডমিন") ||
-    labelLow.includes("এডমিন") ||
     labelLow === "admin" ||
-    nameLow.includes("admin") ||
-    nameLow.includes("অ্যাডমিন") ||
-    nameLow.includes("এডমিন")
+    labelLow === "অ্যাডমিন" ||
+    labelLow === "এডমিন" ||
+    labelLow.includes("অ্যাডমিন") ||
+    labelLow.includes("এডমিন")
   ) {
     return "অ্যাডমিন";
   }
 
-  // Editor detection
-  if (labelLow.includes("এডিটর") || labelLow === "editor" || nameLow.includes("এডিটর")) {
+  if (labelLow === "editor" || labelLow === "এডিটর" || labelLow.includes("এডিটর")) {
     return "এডিটর";
   }
 
-  // Moderator detection
   if (
-    labelLow.includes("মডারেটর") ||
-    labelLow.includes("মোডারেটর") ||
     labelLow === "moderator" ||
-    nameLow.includes("মডারেটর") ||
-    nameLow.includes("মোডারেটর")
+    labelLow === "মোডারেটর" ||
+    labelLow === "মডারেটর" ||
+    labelLow.includes("মোডারেটর") ||
+    labelLow.includes("মডারেটর")
   ) {
-    return "মডারেটর";
+    return "মোডারেটর";
   }
+
+  // Custom role label (if provided and not generic "staff"/"স্টাফ")
+  if (
+    rawLabel &&
+    labelLow !== "staff" &&
+    labelLow !== "staff member" &&
+    labelLow !== "স্টাফ" &&
+    labelLow !== "স্টাফ সদস্য" &&
+    labelLow !== "স্টাফ মেম্বার"
+  ) {
+    return rawLabel;
+  }
+
+  if (nameLow.includes("এডিটর")) return "এডিটর";
+  if (nameLow.includes("মডারেটর") || nameLow.includes("মোডারেটর")) return "মোডারেটর";
 
   return "অ্যাডমিন";
 }

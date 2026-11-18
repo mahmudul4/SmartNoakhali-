@@ -1,5 +1,40 @@
+import { GoogleGenAI } from "@google/genai";
+
 interface Env {
   GEMINI_API_KEY?: string;
+}
+
+const rateLimitCache = new Map<string, { count: number; resetAt: number }>();
+
+function expandNoakhaliTransliteration(rawQuery: string): string {
+  const lower = rawQuery.toLowerCase();
+  const synonyms: Array<[RegExp, string]> = [
+    [/\b(noyakhali|noakhali|noakhaly|nowakhali)\b/g, "নোয়াখালী নোয়াখালী"],
+    [/\b(haspatal|hospital|hosp|clinic)\b/g, "হাসপাতাল ক্লিনিক জেনারেল হাসপাতাল"],
+    [/\b(daktar|doctor|dr|chikitsha)\b/g, "ডাক্তার চিকিৎসা মেডিসিন"],
+    [/\b(roktodata|rokto|blood|donor|blod)\b/g, "রক্তদাতা রক্ত ব্লাড ডোনার"],
+    [/\b(ambulance|embulance)\b/g, "অ্যাম্বুলেন্স রোগী পরিবহন"],
+    [/\b(police|pulish|thana|gd)\b/g, "পুলিশ থানা সুধারাম জিডি"],
+    [/\b(fire|agun|domkol)\b/g, "ফায়ার সার্ভিস দমকল আগুন"],
+    [/\b(maijdee|maijdi|sadar)\b/g, "মাইজদী সদর"],
+    [/\b(chowmuhani|chaumuhani|choumuhani|begumganj)\b/g, "চৌমুহনী বেগমগঞ্জ"],
+    [/\b(senbag|senbagh)\b/g, "সেনবাগ"],
+    [/\b(hatiya|hatia|nijhum)\b/g, "হাতিয়া নিঝুম দ্বীপ"],
+    [/\b(sonaimuri|sonaimury)\b/g, "সোনাইমুড়ী"],
+    [/\b(chatkhil)\b/g, "চাটখিল"],
+    [/\b(companiganj|basurhat)\b/g, "কোম্পানীগঞ্জ বসুরহাট"],
+    [/\b(subarnachar|charjabbar)\b/g, "সুবর্ণচর"],
+    [/\b(kabirhat)\b/g, "কবিরহাট"],
+    [/\b(bkash|bikash|nagad|nogod|rocket|donate|donation|onudan)\b/g, "অনুদান বিকাশ নগদ ডোনেশন"],
+    [/\b(train|bus|gari|ticket)\b/g, "ট্রেন বাস পরিবহন"],
+  ];
+  let expanded = lower;
+  for (const [pattern, replacement] of synonyms) {
+    if (pattern.test(expanded)) {
+      expanded += ` ${replacement}`;
+    }
+  }
+  return expanded;
 }
 
 export const onRequestPost = async (context: {
@@ -8,11 +43,79 @@ export const onRequestPost = async (context: {
 }) => {
   try {
     const { request, env } = context;
+    const clientIp =
+      request.headers.get("CF-Connecting-IP") ||
+      request.headers.get("X-Forwarded-For")?.split(",")[0]?.trim() ||
+      "edge";
+    const now = Date.now();
+    const rate = rateLimitCache.get(clientIp);
+    if (rate && rate.resetAt > now) {
+      if (rate.count >= 30) {
+        return new Response(
+          JSON.stringify({
+            error: "অল্প সময়ে অনেক বেশি প্রশ্ন পাঠানো হয়েছে। অনুগ্রহ করে ১ মিনিট পর আবার চেষ্টা করুন।",
+            suggestHandoff: true,
+          }),
+          {
+            status: 429,
+            headers: { "Content-Type": "application/json; charset=utf-8" },
+          }
+        );
+      }
+      rate.count += 1;
+    } else {
+      rateLimitCache.set(clientIp, { count: 1, resetAt: now + 60_000 });
+    }
+
     const apiKey = env.GEMINI_API_KEY;
-    const body = (await request.json().catch(() => ({}))) as any;
+    const body = (await request.json().catch(() => ({}))) as {
+      query?: string;
+      history?: Array<{ role: "user" | "assistant" | "model"; text: string }>;
+      aiConfig?: {
+        botName?: string;
+        systemInstructions?: string;
+        tone?: "helpful_bn" | "concise_bn" | "bilingual";
+        faqs?: Array<{
+          question: string;
+          answer: string;
+          keywords?: string;
+          visible?: boolean;
+        }>;
+      };
+      directoryContext?: {
+        categories?: Array<{ slug: string; bn: string; en: string; description: string }>;
+        submissions?: Array<{
+          id: string;
+          category_slug: string;
+          title: string;
+          contact: string | null;
+          address: string | null;
+          designation: string | null;
+          body: string | null;
+        }>;
+        donors?: Array<{
+          id: string;
+          full_name: string;
+          phone: string;
+          blood_group: string;
+          address: string | null;
+          total_donations: number;
+        }>;
+        emergencyRequests?: Array<{
+          patient_name: string;
+          phone: string;
+          blood_group: string;
+          hospital: string | null;
+          message: string | null;
+        }>;
+        donationNumbers?: Array<{ label: string; number: string; method: string }>;
+      };
+    };
+
     const userQuery = String(body.query || "").trim();
     const history = Array.isArray(body.history) ? body.history : [];
     const directoryContext = body.directoryContext || {};
+    const aiConfig = body.aiConfig;
 
     if (!userQuery) {
       return new Response(JSON.stringify({ error: "প্রশ্ন লিখুন" }), {
@@ -20,105 +123,158 @@ export const onRequestPost = async (context: {
         headers: { "Content-Type": "application/json; charset=utf-8" },
       });
     }
-
-    if (!apiKey) {
-      return new Response(
-        JSON.stringify({
-          text: "স্মার্ট নোয়াখালী এআই সহকারী: আপনার অনুসন্ধানের জন্য ধন্যবাদ। নোয়াখালীর যেকোনো সরকারি ও জরুরি সেবার জন্য আমাদের ৩৩৩ ও ৯৯৯ হটলাইন ব্যবহার করতে পারেন। (Cloudflare ড্যাশবোর্ডে GEMINI_API_KEY এনভায়রনমেন্ট ভেরিয়েবল সেট করলে এআই সম্পূর্ণ সক্রিয় হবে।)",
-          sources: [],
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json; charset=utf-8" },
-        }
-      );
+    if (userQuery.length > 1200) {
+      return new Response(JSON.stringify({ error: "প্রশ্নটি অত্যন্ত বড় (সর্বোচ্চ ১২০০ অক্ষর)" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+      });
     }
+
+    const expandedQuery = expandNoakhaliTransliteration(userQuery);
+    const qTokens = expandedQuery
+      .split(/[\s,।?!-]+/)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 2);
 
     const defaultNoakhaliDirectory = [
-      { title: "২৫০ শয্যা বিশিষ্ট নোয়াখালী জেনারেল হাসপাতাল", category: "হাসপাতাল", contact: "01730-324794", address: "মাইজদী কোর্ট, নোয়াখালী" },
-      { title: "নোয়াখালী জেলা পুলিশ কন্ট্রোল রুম", category: "পুলিশ", contact: "01320-115998", address: "পুলিশ সুপারের কার্যালয়, মাইজদী" },
-      { title: "সুধারাম মডেল থানা (নোয়াখালী সদর)", category: "পুলিশ", contact: "01320-116035", address: "মাইজদী, নোয়াখালী" },
-      { title: "বেগমগঞ্জ মডেল থানা", category: "পুলিশ", contact: "01320-116065", address: "চৌমুহনী, নোয়াখালী" },
-      { title: "নোয়াখালী ফায়ার সার্ভিস স্টেশন", category: "ফায়ার সার্ভিস", contact: "01730-002444", address: "মাইজদী কোর্ট, নোয়াখালী" },
-      { title: "চৌমুহনী ফায়ার সার্ভিস স্টেশন", category: "ফায়ার সার্ভিস", contact: "01730-002445", address: "চৌমুহনী, বেগমগঞ্জ" },
-      { title: "রেড ক্রিসেন্ট নোয়াখালী রক্তদান কেন্দ্র ও অ্যাম্বুলেন্স", category: "রক্তদান", contact: "01819-880099", address: "মাইজদী বাজার রোড" },
-      { title: "জাতীয় জরুরি সেবা হটলাইন", category: "জরুরি", contact: "999", address: "সারাদেশ (২৪ ঘণ্টা ফ্রি)" },
-      { title: "সরকারি তথ্য ও সেবা হটলাইন", category: "তথ্য", contact: "333", address: "সারাদেশ (২৪ ঘণ্টা ফ্রি)" },
+      { id: "hosp_general_noakhali", title: "২৫০ শয্যা বিশিষ্ট নোয়াখালী জেনারেল হাসপাতাল", category_slug: "hospital", contact: "01730-324794", address: "মাইজদী কোর্ট, নোয়াখালী", designation: "সরকারি হাসপাতাল ও জরুরি বিভাগ" },
+      { id: "police_control_noakhali", title: "নোয়াখালী জেলা পুলিশ কন্ট্রোল রুম", category_slug: "police", contact: "01320-115998", address: "পুলিশ সুপারের কার্যালয়, মাইজদী", designation: "পুলিশ সেবা (২৪/৭)" },
+      { id: "police_sudharam", title: "সুধারাম মডেল থানা (নোয়াখালী সদর)", category_slug: "police", contact: "01320-116035", address: "মাইজদী, নোয়াখালী", designation: "থানা ডিউটি অফিসার" },
+      { id: "police_begumganj", title: "বেগমগঞ্জ মডেল থানা", category_slug: "police", contact: "01320-116065", address: "চৌমুহনী, নোয়াখালী", designation: "থানা পুলিশ" },
+      { id: "fire_maijdee", title: "নোয়াখালী ফায়ার সার্ভিস ও সিভিল ডিফেন্স স্টেশন", category_slug: "fire-service", contact: "01730-002444", address: "মাইজদী কোর্ট, নোয়াখালী", designation: "অগ্নি নির্বাপণ ও উদ্ধার সেবা" },
+      { id: "fire_chowmuhani", title: "চৌমুহনী ফায়ার সার্ভিস স্টেশন", category_slug: "fire-service", contact: "01730-002445", address: "চৌমুহনী, বেগমগঞ্জ", designation: "জরুরি ফায়ার সার্ভিস" },
+      { id: "amb_red_crescent", title: "রেড ক্রিসেন্ট নোয়াখালী রক্তদান কেন্দ্র ও অ্যাম্বুলেন্স", category_slug: "ambulance", contact: "01819-880099", address: "মাইজদী বাজার রোড", designation: "রক্তদান ও অ্যাম্বুলেন্স" },
+      { id: "hotline_999", title: "জাতীয় জরুরি সেবা হটলাইন", category_slug: "police", contact: "999", address: "সারাদেশ (২৪ ঘণ্টা ফ্রি)", designation: "পুলিশ, অ্যাম্বুলেন্স, ফায়ার সার্ভিস" },
+      { id: "hotline_333", title: "সরকারি তথ্য ও সেবা হটলাইন", category_slug: "administration", contact: "333", address: "সারাদেশ (২৪ ঘণ্টা ফ্রি)", designation: "সরকারি সেবা ও তথ্য" },
     ];
 
-    const contextSummary = JSON.stringify({
-      emergencyDirectory: defaultNoakhaliDirectory,
-      matchedDirectory: (directoryContext.submissions || []).slice(0, 15),
-      bloodDonors: (directoryContext.donors || []).slice(0, 12),
-      emergencyRequests: (directoryContext.emergencyRequests || []).slice(0, 6),
-      donationNumbers: directoryContext.donationNumbers || [],
-    });
+    const allSubmissions = [
+      ...(directoryContext.submissions || []),
+      ...defaultNoakhaliDirectory,
+    ];
 
-    const systemInstruction = `You are the official Smart AI Assistant of "Smart Noakhali (স্মার্ট নোয়াখালী)" — an intelligent, versatile, multi-purpose assistant for both local Noakhali civic assistance and general-purpose problem solving.
+    const matchedSubmissions = allSubmissions
+      .filter((s) => {
+        const hay = `${s.title} ${s.contact || ""} ${s.address || ""} ${s.designation || ""} ${s.category_slug}`.toLowerCase();
+        if (expandedQuery.includes(s.title.toLowerCase())) return true;
+        return qTokens.some((tok) => hay.includes(tok));
+      })
+      .slice(0, 8);
 
-PRIMARY CAPABILITIES:
-1. General-Purpose Problem Solver: You are an expert at programming, software development (provide clean, production-grade code with markdown code blocks like \`\`\`javascript or \`\`\`python and clear explanations), mathematics, science, logical reasoning, document translation (Bengali <-> English), and creative drafting.
-2. Smart Noakhali & Civic Assistance: When users ask about Noakhali district, local civic directory, hospitals, doctors, ambulances, fire stations, police stations, lawyers, blood donors, or emergency hotlines (999, 333), you ground your response accurately using the provided directory and emergency contacts.
-3. Multilingual Excellence: Answer fluently in the language the user asked in (Bengali বাংলা or English). Use warm, polite, and respectful tone ("আপনি / আপনার").
-4. Markdown Formatting: Use bold for key numbers or names, bullet points for lists, and code blocks for programming solutions. Always provide clear phone numbers with 📞 emoji for local contacts.
+    const matchedDonors = (directoryContext.donors || [])
+      .filter((d) => {
+        const hay = `${d.full_name} ${d.phone} ${d.blood_group} ${d.address || ""} রক্ত ব্লাড ডোনার রক্তদাতা`.toLowerCase();
+        if (expandedQuery.includes(d.blood_group.toLowerCase())) return true;
+        return qTokens.some((tok) => hay.includes(tok));
+      })
+      .slice(0, 8);
 
-Local Smart Noakhali Directory Data:
+    const matchedCategories = (directoryContext.categories || [])
+      .filter((c) => {
+        const hay = `${c.bn} ${c.en} ${c.slug} ${c.description}`.toLowerCase();
+        return qTokens.some((tok) => hay.includes(tok));
+      })
+      .slice(0, 6);
+
+    const matchedFaqs = (aiConfig?.faqs || [])
+      .filter((f) => f && f.visible !== false)
+      .filter((f) => {
+        const hay = `${f.question} ${f.answer} ${f.keywords || ""}`.toLowerCase();
+        return qTokens.some((tok) => hay.includes(tok));
+      })
+      .slice(0, 5);
+
+    let generatedText = "";
+    if (apiKey) {
+      try {
+        const ai = new GoogleGenAI({
+          apiKey,
+          httpOptions: {
+            headers: {
+              "User-Agent": "aistudio-build",
+            },
+          },
+        });
+
+        const botName = (aiConfig?.botName || "Smart Noakhali AI").trim();
+        const toneGuide =
+          aiConfig?.tone === "concise_bn"
+            ? "Answer concisely in natural Bengali."
+            : aiConfig?.tone === "bilingual"
+              ? "Answer in Bengali or English matching the user's question."
+              : "Answer warmly, politely, and accurately in natural Bengali ('আপনি / আপনার').";
+
+        const contextSummary = JSON.stringify({
+          adminFaqs: matchedFaqs.length > 0 ? matchedFaqs : (aiConfig?.faqs || []).slice(0, 8),
+          categories: (directoryContext.categories || []).slice(0, 40),
+          matchedListings: matchedSubmissions,
+          allListingsSample: allSubmissions.slice(0, 35),
+          matchedBloodDonors: matchedDonors,
+          emergencyRequests: (directoryContext.emergencyRequests || []).slice(0, 6),
+          donationNumbers: directoryContext.donationNumbers || [],
+          verifiedHotlines: [
+            { name: "জাতীয় জরুরি সেবা", number: "999" },
+            { name: "সরকারি তথ্য ও সেবা", number: "333" },
+            { name: "নোয়াখালী ফায়ার সার্ভিস", number: "01730-002444" },
+            { name: "নোয়াখালী জেনারেল হাসপাতাল", number: "01730-324794" },
+            { name: "সুধারাম মডেল থানা পুলিশ", number: "01320-116035" },
+          ],
+        });
+
+        const systemInstruction = `You are "${botName}", the official digital citizen assistant for Smart Noakhali (স্মার্ট নোয়াখালী).
+${toneGuide}
+${aiConfig?.systemInstructions ? `Admin Instructions: ${aiConfig.systemInstructions}` : ""}
+
+STRICT GROUNDING & ACCURACY RULES:
+1. Only state Noakhali directory listings, contacts, hospitals, police, fire stations, blood donors, and donation numbers verified in the JSON context below. Never invent any phone number or listing.
+2. Understand phonetic Bengali/Banglish queries seamlessly (e.g. "noyakhali haspatal", "maijdee daktar", "roktodata").
+3. Format phone numbers clearly with 📞 emoji and bold service names.
+4. If the requested local service is missing from the directory context, state so clearly and suggest connecting to a human operator via Live Chat.
+
+Verified Smart Noakhali Knowledge Base & Directory Context:
 ${contextSummary}`;
 
-    // Build multi-turn contents
-    const contents: any[] = [];
-    for (const h of history.slice(-6)) {
-      if (h.text && h.text.trim()) {
-        contents.push({
-          role: h.role === "assistant" || h.role === "model" ? "model" : "user",
-          parts: [{ text: String(h.text).trim() }],
-        });
-      }
-    }
-    contents.push({
-      role: "user",
-      parts: [{ text: userQuery }],
-    });
-
-    // Try gemini-3.8-flash first, cascade to gemini-flash-latest
-    const candidateModels = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-2.5-flash"];
-    let generatedText = "";
-
-    for (const model of candidateModels) {
-      try {
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-        const resp = await fetch(geminiUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            system_instruction: {
-              parts: [{ text: systemInstruction }],
-            },
-            contents,
-            generationConfig: {
-              temperature: 0.4,
-              maxOutputTokens: 2048,
-            },
-          }),
-        });
-
-        if (resp.ok) {
-          const data: any = await resp.json();
-          const cand = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (cand && cand.trim()) {
-            generatedText = cand.trim();
-            break;
+        const contents: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [];
+        for (const h of history.slice(-6)) {
+          if (h.text && h.text.trim()) {
+            contents.push({
+              role: h.role === "assistant" || h.role === "model" ? "model" : "user",
+              parts: [{ text: String(h.text).trim() }],
+            });
           }
         }
-      } catch {
-        // try next model
+        contents.push({
+          role: "user",
+          parts: [{ text: userQuery }],
+        });
+
+        const response = await ai.models.generateContent({
+          model: "gemini-4-hydrogen",
+          contents,
+          config: {
+            systemInstruction,
+          },
+        });
+        generatedText = (response.text || "").trim();
+      } catch (err) {
+        console.warn("Edge Gemini call issue:", err instanceof Error ? err.message : err);
       }
     }
 
-    if (!generatedText) {
+    if (generatedText) {
+      const wantsHandoff =
+        /(লাইভ চ্যাট|অপারেটর|প্রতিনিধি|জানা নেই|তালিকায় নেই|পাওয়া যায়নি)/i.test(generatedText);
       return new Response(
         JSON.stringify({
-          text: "দুঃখিত, এই মুহূর্তে এআই সার্ভিসে সংযোগ করা যায়নি। নোয়াখালীর যেকোনো জরুরি সেবায় ৯৯৯ (জাতীয় জরুরি সেবা) বা ৩৩৩ (তথ্য সেবা) নাম্বারে বিনামূল্যে কল করুন।",
+          ok: true,
+          text: generatedText,
+          reply: generatedText,
+          suggestHandoff: wantsHandoff,
+          matches: {
+            submissions: matchedSubmissions,
+            donors: matchedDonors,
+            categories: matchedCategories,
+          },
           sources: [],
         }),
         {
@@ -128,9 +284,56 @@ ${contextSummary}`;
       );
     }
 
+    const fallbackParts: string[] = [];
+    if (matchedFaqs.length > 0) {
+      matchedFaqs.forEach((f) => {
+        fallbackParts.push(`📌 **${f.question}**\n${f.answer}`);
+      });
+    }
+    if (matchedDonors.length > 0) {
+      fallbackParts.push(`🩸 **রক্তদাতা তথ্য (${matchedDonors.length} জন):**`);
+      matchedDonors.slice(0, 5).forEach((d, i) => {
+        fallbackParts.push(
+          `${i + 1}. **${d.full_name}** (${d.blood_group}) — 📞 [${d.phone}](tel:${d.phone.replace(/\D/g, "")})${d.address ? ` • 📍 ${d.address}` : ""}`
+        );
+      });
+    }
+    if (matchedSubmissions.length > 0) {
+      fallbackParts.push(`📋 **যাচাইকৃত ডিরেক্টরি তথ্য (${matchedSubmissions.length} টি):**`);
+      matchedSubmissions.slice(0, 5).forEach((s, i) => {
+        fallbackParts.push(
+          `${i + 1}. **${s.title}**${s.designation ? ` (${s.designation})` : ""}${
+            s.contact ? ` — 📞 [${s.contact}](tel:${s.contact.replace(/\D/g, "")})` : ""
+          }${s.address ? ` • 📍 ${s.address}` : ""}`
+        );
+      });
+    }
+    if (fallbackParts.length === 0) {
+      fallbackParts.push(
+        `স্মার্ট নোয়াখালী ডিরেক্টরি তথ্য: জরুরি যোগাযোগের জন্য:`
+      );
+      fallbackParts.push("• **জাতীয় জরুরি সেবা:** 📞 [999](tel:999)");
+      fallbackParts.push("• **সরকারি তথ্য সেবা:** 📞 [333](tel:333)");
+      fallbackParts.push("• **নোয়াখালী জেনারেল হাসপাতাল:** 📞 [01730-324794](tel:01730324794)");
+      fallbackParts.push("• **নোয়াখালী ফায়ার সার্ভিস:** 📞 [01730-002444](tel:01730002444)");
+    }
+    fallbackParts.push(
+      "\n💬 সরাসরি অপারেটরের সহায়তা পেতে নিচের **'লাইভ চ্যাট'** / হিউম্যান সাপোর্ট বাটনে ট্যাপ করুন।"
+    );
+
+    const finalFallback = fallbackParts.join("\n");
     return new Response(
       JSON.stringify({
-        text: generatedText,
+        ok: true,
+        mode: apiKey ? "upstream_fallback" : "directory_lookup",
+        text: finalFallback,
+        reply: finalFallback,
+        suggestHandoff: true,
+        matches: {
+          submissions: matchedSubmissions,
+          donors: matchedDonors,
+          categories: matchedCategories,
+        },
         sources: [],
       }),
       {
@@ -138,9 +341,12 @@ ${contextSummary}`;
         headers: { "Content-Type": "application/json; charset=utf-8" },
       }
     );
-  } catch (err: any) {
+  } catch (err: unknown) {
     return new Response(
-      JSON.stringify({ error: err?.message || "Internal server error" }),
+      JSON.stringify({
+        error: err instanceof Error ? err.message : "Internal server error",
+        suggestHandoff: true,
+      }),
       {
         status: 500,
         headers: { "Content-Type": "application/json; charset=utf-8" },

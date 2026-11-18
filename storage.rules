@@ -103,6 +103,12 @@ service firebase.storage {
       allow delete: if isMainAdmin();
     }
 
+    // Centralized Media & Icon Library — Main Admin ONLY
+    match /media_library/{fileName} {
+      allow write: if isMainAdmin() && isValidImageUpload();
+      allow delete: if isMainAdmin();
+    }
+
     // Category images — Staff / Main Admin
     match /categories/{categorySlug}/{fileName} {
       allow write: if isStaff() && isValidImageUpload();

@@ -161,14 +161,22 @@ export function resolveCurrentStaffActor(): {
         const roles = Array.isArray(sess.roles) ? sess.roles : [];
         const sp = staffProfiles[uid] || (email ? staffProfiles[email] : undefined);
 
+        const customRoleLabel =
+          (sess as { customRoleName?: string }).customRoleName ||
+          sp?.role_label ||
+          "";
+
         let role: StaffRoleType = "staff";
-        let roleBn = "স্টাফ";
+        let roleBn = customRoleLabel || "অপারেটর";
         if (isSuperAdminEmail(email)) {
           role = "super_admin";
-          roleBn = "সুপার এডমিন";
+          roleBn = "সুপার অ্যাডমিন";
+        } else if (customRoleLabel) {
+          role = "admin";
+          roleBn = customRoleLabel;
         } else if (roles.includes("admin") || email === REGULAR_ADMIN_EMAIL.toLowerCase()) {
           role = "admin";
-          roleBn = "এডমিন";
+          roleBn = "অ্যাডমিন";
         } else if (roles.includes("editor")) {
           role = "editor";
           roleBn = "এডিটর";
@@ -205,19 +213,19 @@ export function resolveCurrentStaffActor(): {
       actor_id: u.uid,
       actor_email: email || u.uid,
       actor_name:
-        sp?.full_name || u.displayName || (email ? email.split("@")[0] : "স্টাফ"),
+        sp?.full_name || u.displayName || (email ? email.split("@")[0] : "সাপোর্ট অ্যাডমিন"),
       actor_role: isRegAdmin ? "admin" : "staff",
-      actor_role_bn: sp?.role_label || (isRegAdmin ? "এডমিন" : "স্টাফ"),
+      actor_role_bn: sp?.role_label || (isRegAdmin ? "অ্যাডমিন" : "অপারেটর"),
       actor_photo: sp?.photo_url || u.photoURL || "",
     };
   }
 
   return {
-    actor_id: "staff_member",
-    actor_email: "staff@smartnoakhali.app",
-    actor_name: "স্টাফ সদস্য",
+    actor_id: "operator_session",
+    actor_email: "operator@smartnoakhali.app",
+    actor_name: "অপারেটর",
     actor_role: "staff",
-    actor_role_bn: "স্টাফ",
+    actor_role_bn: "অপারেটর",
     actor_photo: "",
   };
 }
@@ -656,13 +664,17 @@ export function useStaffAuditLogs() {
 export type SuperAuditAction =
   | "create"
   | "edit"
+  | "update"
   | "delete"
   | "trash"
   | "restore"
+  | "cleanup"
   | "approve"
   | "reject"
   | "role_change"
   | "config_update"
+  | "settings_change"
+  | "security"
   | "media_update"
   | "notification_send"
   | "backup_export";

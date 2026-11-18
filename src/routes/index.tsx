@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Phone,
   Droplet,
@@ -13,12 +13,47 @@ import {
   AlertTriangle,
   HandCoins,
   ShieldAlert,
+  HeartPulse,
+  Hospital,
+  GraduationCap,
+  Newspaper,
+  Users,
+  Bell,
+  Sparkles,
+  Megaphone,
+  ExternalLink,
+  type LucideIcon,
 } from "lucide-react";
-import { useCategories, useDivisions, useHeroBannerConfig } from "@/lib/store";
+import {
+  useCategories,
+  useDivisions,
+  useHeroBannerConfig,
+  useHomepageConfig,
+  useWebsiteContentConfig,
+  type HomepageQuickAction,
+} from "@/lib/store";
 import type { Category, Division } from "@/data/categories";
 import { BannerPopup } from "@/components/BannerPopup";
 import { EmergencyBanner } from "@/components/EmergencyBanner";
 import { ServiceCategoryCard } from "@/components/ServiceCategoryCard";
+
+const HOMEPAGE_ICONS: Record<string, LucideIcon> = {
+  ShieldAlert,
+  Droplet,
+  HandCoins,
+  MapPin,
+  Building2,
+  Briefcase,
+  AlertTriangle,
+  Phone,
+  HeartPulse,
+  Hospital,
+  GraduationCap,
+  Newspaper,
+  Users,
+  Bell,
+  Sparkles,
+};
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -37,16 +72,18 @@ export const Route = createFileRoute("/")({
 function HeroActionLink({
   href,
   className,
+  style,
   children,
 }: {
   href: string;
   className: string;
+  style?: React.CSSProperties;
   children: React.ReactNode;
 }) {
   const cleanHref = (href || "").trim();
   if (cleanHref.startsWith("/")) {
     return (
-      <Link to={cleanHref as "/"} className={className}>
+      <Link to={cleanHref as "/"} className={className} style={style}>
         {children}
       </Link>
     );
@@ -57,6 +94,7 @@ function HeroActionLink({
       href={cleanHref || "#"}
       {...(isExternalHttp ? { target: "_blank", rel: "noreferrer" } : {})}
       className={className}
+      style={style}
     >
       {children}
     </a>
@@ -66,16 +104,43 @@ function HeroActionLink({
 function Index() {
   const { categories } = useCategories();
   const { divisions } = useDivisions();
-  const { banner } = useHeroBannerConfig();
+  const { activeBanners, carousel } = useHeroBannerConfig();
+  const { homepageConfig } = useHomepageConfig();
+  const { contentConfig } = useWebsiteContentConfig();
 
-  // Preserve all visible service categories across all 22 divisions
+  const [heroSlideIdx, setHeroSlideIdx] = useState(0);
+  const [heroPaused, setHeroPaused] = useState(false);
+  const touchStartX = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (heroSlideIdx >= activeBanners.length) {
+      setHeroSlideIdx(0);
+    }
+  }, [activeBanners.length, heroSlideIdx]);
+
+  useEffect(() => {
+    if (activeBanners.length <= 1 || !carousel.autoRotate || heroPaused) return;
+    const ms = Math.max(2000, (carousel.intervalSeconds || 5) * 1000);
+    const id = setInterval(() => {
+      setHeroSlideIdx((prev) => (prev + 1) % activeBanners.length);
+    }, ms);
+    return () => clearInterval(id);
+  }, [activeBanners.length, carousel.autoRotate, carousel.intervalSeconds, heroPaused]);
+
+  useEffect(() => {
+    if (contentConfig.seoTitle?.trim()) {
+      document.title = contentConfig.seoTitle.trim();
+    }
+  }, [contentConfig.seoTitle]);
+
+  // Preserve all visible service categories across all divisions
   const filteredCategories = useMemo(() => {
     return categories.filter(
       (c) => c.slug !== "chat" && c.slug !== "app-download" && c.visible !== false
     );
   }, [categories]);
 
-  // Group all categories strictly into the 22 main divisions vertically
+  // Group all categories strictly into active main divisions vertically
   const divisionSections = useMemo(() => {
     const visibleDivisionIds = new Set(divisions.map((d) => d.id));
     const bucket = new Map<string, Category[]>();
@@ -105,239 +170,436 @@ function Index() {
       .filter((sec) => sec.items.length > 0);
   }, [divisions, filteredCategories]);
 
-  const desktopHeroImg = banner.desktopImageUrl || banner.mobileImageUrl;
-  const mobileHeroImg = banner.mobileImageUrl || banner.desktopImageUrl;
-  const hasHeroImage = banner.backgroundMode === "image" && Boolean(desktopHeroImg || mobileHeroImg);
+  const currentHeroBanner = activeBanners[heroSlideIdx] ?? activeBanners[0] ?? null;
+  const desktopHeroImg = currentHeroBanner
+    ? currentHeroBanner.desktopImageUrl || currentHeroBanner.mobileImageUrl
+    : "";
+  const mobileHeroImg = currentHeroBanner
+    ? currentHeroBanner.mobileImageUrl || currentHeroBanner.desktopImageUrl
+    : "";
+  const hasHeroImage = Boolean(
+    currentHeroBanner &&
+      currentHeroBanner.backgroundMode === "image" &&
+      (desktopHeroImg || mobileHeroImg)
+  );
+
+  const visibleQuickActions = useMemo(
+    () => (homepageConfig.quickActions || []).filter((q) => q.visible !== false),
+    [homepageConfig.quickActions]
+  );
+
+  const visibleFeaturedShortcuts = useMemo(
+    () => (homepageConfig.featuredShortcuts || []).filter((s) => s.visible !== false),
+    [homepageConfig.featuredShortcuts]
+  );
+
+  const activeNotices = useMemo(
+    () => (contentConfig.publicNotices || []).filter((n) => n.visible !== false && (n.title || n.body)),
+    [contentConfig.publicNotices]
+  );
+
+  const announcementToneMap = {
+    amber: "border-amber-500/35 bg-amber-500/10 text-amber-950",
+    emerald: "border-emerald-500/35 bg-emerald-500/10 text-emerald-950",
+    blue: "border-blue-500/35 bg-blue-500/10 text-blue-950",
+    rose: "border-rose-500/35 bg-rose-500/10 text-rose-950",
+  };
+
+  const shortcutToneMap: Record<string, string> = {
+    primary: "bg-primary/10 text-primary",
+    blue: "bg-blue-500/10 text-blue-600",
+    emerald: "bg-emerald-500/10 text-emerald-600",
+    amber: "bg-amber-500/10 text-amber-600",
+    rose: "bg-rose-500/10 text-rose-600",
+  };
 
   return (
     <div className="mx-auto w-full max-w-3xl overflow-x-hidden px-3.5 pb-28 pt-3 sm:px-4 sm:pt-4">
-      {/* Dynamic Premium Hero Banner (Controlled by Main Admin) */}
-      {banner.visible !== false && (
+      {/* Optional Top Super Admin Announcement Strip */}
+      {homepageConfig.announcement?.visible && homepageConfig.announcement.text.trim() && (
+        <HeroActionLink
+          href={homepageConfig.announcement.link || "/notifications"}
+          className={`mb-3 flex items-start gap-2.5 rounded-2xl border px-3.5 py-2.5 text-xs shadow-xs transition hover:opacity-95 ${
+            announcementToneMap[homepageConfig.announcement.tone || "amber"]
+          }`}
+        >
+          <Megaphone className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="min-w-0 flex-1">
+            {homepageConfig.announcement.title && (
+              <p className="font-bold">{homepageConfig.announcement.title}</p>
+            )}
+            <p className="text-[11px] opacity-90">{homepageConfig.announcement.text}</p>
+          </div>
+        </HeroActionLink>
+      )}
+
+      {/* Dynamic Multi-Banner Hero Section / Carousel */}
+      {homepageConfig.showHero !== false && currentHeroBanner && (
         <section
-          className={`relative overflow-hidden border border-emerald-300/20 p-5 shadow-[0_18px_40px_-14px_rgba(7,54,34,0.45)] sm:p-7 ${
-            banner.borderRadius || "rounded-[26px]"
+          onMouseEnter={() => {
+            if (carousel.pauseOnHover) setHeroPaused(true);
+          }}
+          onMouseLeave={() => setHeroPaused(false)}
+          onTouchStart={(e) => {
+            touchStartX.current = e.touches[0]?.clientX ?? null;
+          }}
+          onTouchEnd={(e) => {
+            if (touchStartX.current === null || activeBanners.length <= 1) return;
+            const endX = e.changedTouches[0]?.clientX ?? touchStartX.current;
+            const delta = endX - touchStartX.current;
+            touchStartX.current = null;
+            if (Math.abs(delta) > 40) {
+              setHeroSlideIdx((prev) =>
+                delta < 0
+                  ? (prev + 1) % activeBanners.length
+                  : (prev - 1 + activeBanners.length) % activeBanners.length
+              );
+            }
+          }}
+          className={`relative overflow-hidden border border-emerald-300/20 p-5 shadow-[0_18px_40px_-14px_rgba(7,54,34,0.45)] transition-all duration-300 sm:p-7 ${
+            currentHeroBanner.borderRadius || "rounded-[26px]"
           }`}
           style={{
             background:
-              banner.backgroundMode === "solid"
-                ? banner.solidColor
-                : `linear-gradient(135deg, ${banner.gradientFrom} 0%, ${banner.gradientVia} 50%, ${banner.gradientTo} 100%)`,
-            color: banner.textColor || "#ffffff",
+              currentHeroBanner.backgroundMode === "solid"
+                ? currentHeroBanner.solidColor
+                : `linear-gradient(135deg, ${currentHeroBanner.gradientFrom} 0%, ${currentHeroBanner.gradientVia} 50%, ${currentHeroBanner.gradientTo} 100%)`,
+            color: currentHeroBanner.headingColor || currentHeroBanner.textColor || "#ffffff",
           }}
         >
-          {/* Uploaded Desktop / Mobile Hero Image Layers + Contrast Scrim */}
           {hasHeroImage && (
             <>
               {mobileHeroImg && (
                 <img
                   src={mobileHeroImg}
-                  alt={banner.headingLine1 || "Smart Noakhali"}
+                  alt={currentHeroBanner.headingLine1 || "Smart Noakhali"}
                   className="pointer-events-none absolute inset-0 h-full w-full object-cover md:hidden"
-                  style={{ objectPosition: banner.imagePositionMobile || "center center" }}
+                  style={{ objectPosition: currentHeroBanner.imagePositionMobile || "center center" }}
                 />
               )}
               {desktopHeroImg && (
                 <img
                   src={desktopHeroImg}
-                  alt={banner.headingLine1 || "Smart Noakhali"}
+                  alt={currentHeroBanner.headingLine1 || "Smart Noakhali"}
                   className="pointer-events-none absolute inset-0 hidden h-full w-full object-cover md:block"
-                  style={{ objectPosition: banner.imagePositionDesktop || "center center" }}
+                  style={{ objectPosition: currentHeroBanner.imagePositionDesktop || "center center" }}
                 />
               )}
               <div
                 aria-hidden="true"
                 className="pointer-events-none absolute inset-0"
                 style={{
-                  backgroundColor: banner.overlayColor || "#042316",
-                  opacity: Math.min(90, Math.max(0, banner.overlayOpacity ?? 55)) / 100,
+                  backgroundColor: currentHeroBanner.overlayColor || "#042316",
+                  opacity: Math.min(90, Math.max(0, currentHeroBanner.overlayOpacity ?? 55)) / 100,
                 }}
               />
             </>
           )}
 
-          {/* Subtle depth lighting & architectural glow */}
-          {banner.showDecorativeGlow !== false && (
+          {currentHeroBanner.showDecorativeGlow !== false && (
             <>
               <div className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-amber-300/20 blur-3xl" />
               <div className="pointer-events-none absolute -bottom-14 -left-10 h-44 w-44 rounded-full bg-emerald-300/20 blur-3xl" />
-              <div className="pointer-events-none inset-x-0 top-0 absolute h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
             </>
           )}
 
-          <div className="relative">
-            {banner.badgeText.trim() && (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/12 px-3 py-1 text-[11px] font-semibold tracking-wide text-emerald-50 backdrop-blur-sm">
-                <Droplet className="h-3 w-3 text-amber-300" /> {banner.badgeText}
+          <div
+            className={`relative ${
+              currentHeroBanner.textAlign === "left"
+                ? "text-left"
+                : currentHeroBanner.textAlign === "right"
+                ? "text-right"
+                : "text-left sm:text-left"
+            }`}
+          >
+            {currentHeroBanner.badgeText.trim() && (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1 text-[11px] font-semibold tracking-wide backdrop-blur-sm"
+                style={{
+                  color: currentHeroBanner.badgeColor || "#ffffff",
+                  backgroundColor: currentHeroBanner.badgeBgColor || "rgba(255,255,255,0.14)",
+                }}
+              >
+                <Droplet className="h-3 w-3 text-amber-300" /> {currentHeroBanner.badgeText}
               </span>
             )}
 
             <h1
               className="mt-3.5 font-bangla text-[24px] font-extrabold leading-[1.24] tracking-tight drop-shadow-xs sm:text-[32px]"
-              style={{ color: banner.textColor || "#ffffff" }}
+              style={{
+                color: currentHeroBanner.headingColor || currentHeroBanner.textColor || "#ffffff",
+              }}
             >
-              {banner.headingLine1}
-              {banner.headingLine2 && (
+              {currentHeroBanner.headingLine1}
+              {currentHeroBanner.headingLine2 && (
                 <>
                   <br />
-                  {banner.headingLine2}
+                  {currentHeroBanner.headingLine2}
                 </>
               )}
             </h1>
 
-            {banner.description.trim() && (
+            {currentHeroBanner.description.trim() && (
               <p
-                className="mt-2.5 max-w-xl text-[12.5px] leading-relaxed sm:text-sm"
-                style={{ color: banner.subtextColor || "#ecfdf5", opacity: 0.92 }}
+                className={`mt-2.5 max-w-xl text-[12.5px] leading-relaxed sm:text-sm ${
+                  currentHeroBanner.textAlign === "center" ? "mx-auto sm:mx-0" : ""
+                }`}
+                style={{
+                  color:
+                    currentHeroBanner.descriptionColor ||
+                    currentHeroBanner.subtextColor ||
+                    "#ecfdf5",
+                  opacity: 0.94,
+                }}
               >
-                {banner.description}
+                {currentHeroBanner.description}
               </p>
             )}
 
-            {(banner.primaryButtonText.trim() || banner.secondaryButtonText.trim()) && (
-              <div className="mt-5 flex flex-wrap items-center gap-2.5">
-                {banner.primaryButtonText.trim() && (
+            {(currentHeroBanner.primaryButtonText.trim() ||
+              currentHeroBanner.secondaryButtonText.trim() ||
+              currentHeroBanner.optionalButtonText?.trim()) && (
+              <div
+                className={`mt-5 flex flex-wrap items-center gap-2.5 ${
+                  currentHeroBanner.textAlign === "right" ? "justify-end" : "justify-start"
+                }`}
+              >
+                {currentHeroBanner.primaryButtonText.trim() && (
                   <HeroActionLink
-                    href={banner.primaryButtonLink || "tel:999"}
-                    className="inline-flex min-h-[40px] items-center gap-2 rounded-full bg-gradient-gold px-5 py-2.5 text-xs font-extrabold text-primary-deep shadow-gold transition hover:brightness-105 active:scale-95 sm:text-[13px]"
+                    href={currentHeroBanner.primaryButtonLink || "tel:999"}
+                    className="inline-flex min-h-[40px] items-center gap-2 rounded-full px-5 py-2.5 text-xs font-extrabold shadow-md transition hover:brightness-105 active:scale-95 sm:text-[13px]"
+                    style={{
+                      backgroundColor: currentHeroBanner.primaryButtonBgColor || "#dc2626",
+                      color: currentHeroBanner.primaryButtonColor || "#ffffff",
+                    }}
                   >
-                    <Phone className="h-3.5 w-3.5" /> {banner.primaryButtonText}
+                    <Phone className="h-3.5 w-3.5" /> {currentHeroBanner.primaryButtonText}
                   </HeroActionLink>
                 )}
-                {banner.secondaryButtonText.trim() && (
+                {currentHeroBanner.secondaryButtonText.trim() && (
                   <HeroActionLink
-                    href={banner.secondaryButtonLink || "/submit-info"}
-                    className="inline-flex min-h-[40px] items-center gap-2 rounded-full border border-white/30 bg-white/10 px-4.5 py-2.5 text-xs font-bold text-white backdrop-blur-sm transition hover:bg-white/20 active:scale-95 sm:text-[13px]"
+                    href={currentHeroBanner.secondaryButtonLink || "/submit-info"}
+                    className="inline-flex min-h-[40px] items-center gap-2 rounded-full border border-white/25 px-4.5 py-2.5 text-xs font-bold shadow-xs backdrop-blur-sm transition hover:brightness-95 active:scale-95 sm:text-[13px]"
+                    style={{
+                      backgroundColor: currentHeroBanner.secondaryButtonBgColor || "#ffffff",
+                      color: currentHeroBanner.secondaryButtonColor || "#064e3b",
+                    }}
                   >
-                    <Send className="h-3.5 w-3.5" /> {banner.secondaryButtonText}
+                    <Send className="h-3.5 w-3.5" /> {currentHeroBanner.secondaryButtonText}
+                  </HeroActionLink>
+                )}
+                {currentHeroBanner.optionalButtonText?.trim() && (
+                  <HeroActionLink
+                    href={currentHeroBanner.optionalButtonLink || "/directory"}
+                    className="inline-flex min-h-[40px] items-center gap-2 rounded-full border border-white/25 px-4 py-2.5 text-xs font-bold backdrop-blur-sm transition hover:brightness-110 active:scale-95 sm:text-[13px]"
+                    style={{
+                      backgroundColor:
+                        currentHeroBanner.optionalButtonBgColor || "rgba(255,255,255,0.16)",
+                      color: currentHeroBanner.optionalButtonColor || "#ffffff",
+                    }}
+                  >
+                    {currentHeroBanner.optionalButtonText}
                   </HeroActionLink>
                 )}
               </div>
             )}
           </div>
+
+          {/* Multi-Banner Carousel Controls */}
+          {activeBanners.length > 1 && (
+            <>
+              {carousel.showArrows && (
+                <div className="mt-4 flex items-center justify-between gap-2 sm:mt-0">
+                  <button
+                    type="button"
+                    aria-label="পূর্ববর্তী ব্যানার"
+                    onClick={() =>
+                      setHeroSlideIdx(
+                        (prev) => (prev - 1 + activeBanners.length) % activeBanners.length
+                      )
+                    }
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-white/25 bg-black/25 text-white backdrop-blur-sm transition hover:bg-black/40 sm:absolute sm:right-12 sm:top-4"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="পরবর্তী ব্যানার"
+                    onClick={() =>
+                      setHeroSlideIdx((prev) => (prev + 1) % activeBanners.length)
+                    }
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-white/25 bg-black/25 text-white backdrop-blur-sm transition hover:bg-black/40 sm:absolute sm:right-3 sm:top-4"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+
+              {carousel.showDots && (
+                <div className="relative mt-4 flex items-center justify-center gap-1.5">
+                  {activeBanners.map((bItem, i) => (
+                    <button
+                      key={bItem.id}
+                      type="button"
+                      aria-label={`ব্যানার ${i + 1}`}
+                      onClick={() => setHeroSlideIdx(i)}
+                      className={`h-2 rounded-full transition-all ${
+                        i === heroSlideIdx ? "w-6 bg-white" : "w-2 bg-white/40 hover:bg-white/65"
+                      }`}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </section>
       )}
 
-      {/* Three Prominent Quick-Action Pill Buttons */}
-      <div className="mt-4 grid grid-cols-3 gap-2">
-        <QuickLink
-          to="/emergency-request"
-          label="জরুরী রক্ত"
-          tone="red"
-          icon={<ShieldAlert className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />}
-        />
-        <QuickLink
-          to="/blood-donor"
-          label="রক্তদাতা"
-          tone="rose"
-          icon={<Droplet className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />}
-        />
-        <QuickLink
-          to="/donation"
-          label="অনুদান তহবিল"
-          tone="emerald"
-          icon={<HandCoins className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />}
-        />
-      </div>
+      {/* Quick-Action Pill Buttons */}
+      {homepageConfig.showQuickActions !== false && visibleQuickActions.length > 0 && (
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          {visibleQuickActions.map((qa) => {
+            const IconComp = HOMEPAGE_ICONS[qa.iconName] || Sparkles;
+            return (
+              <QuickLink
+                key={qa.id}
+                to={qa.to}
+                label={qa.label}
+                tone={qa.tone || "emerald"}
+                icon={<IconComp className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />}
+              />
+            );
+          })}
+        </div>
+      )}
 
       {/* Featured District Service Shortcuts */}
-      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Link
-          to="/map"
-          className="group flex min-w-0 items-center gap-2.5 rounded-2xl border border-border/80 bg-card p-2.5 shadow-card transition hover:border-primary/40 hover:bg-muted/40 active:scale-95"
-        >
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <MapPin className="h-4 w-4" />
-          </div>
-          <div className="min-w-0">
-            <p className="truncate font-display text-xs font-bold text-foreground">
-              নোয়াখালী ম্যাপ
-            </p>
-            <p className="truncate text-[10px] text-muted-foreground">
-              ৯ উপজেলা ও দূরত্ব
-            </p>
-          </div>
-        </Link>
-
-        <Link
-          to="/directory"
-          className="group flex min-w-0 items-center gap-2.5 rounded-2xl border border-border/80 bg-card p-2.5 shadow-card transition hover:border-primary/40 hover:bg-muted/40 active:scale-95"
-        >
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600">
-            <Building2 className="h-4 w-4" />
-          </div>
-          <div className="min-w-0">
-            <p className="truncate font-display text-xs font-bold text-foreground">
-              ডিরেক্টরি
-            </p>
-            <p className="truncate text-[10px] text-muted-foreground">
-              প্রতিষ্ঠান ও ব্যবসা
-            </p>
-          </div>
-        </Link>
-
-        <Link
-          to="/career"
-          className="group flex min-w-0 items-center gap-2.5 rounded-2xl border border-border/80 bg-card p-2.5 shadow-card transition hover:border-primary/40 hover:bg-muted/40 active:scale-95"
-        >
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600">
-            <Briefcase className="h-4 w-4" />
-          </div>
-          <div className="min-w-0">
-            <p className="truncate font-display text-xs font-bold text-foreground">
-              শিক্ষা ও ক্যারিয়ার
-            </p>
-            <p className="truncate text-[10px] text-muted-foreground">
-              চাকরি ও প্রতিষ্ঠান
-            </p>
-          </div>
-        </Link>
-
-        <Link
-          to="/complaint-tracking"
-          className="group flex min-w-0 items-center gap-2.5 rounded-2xl border border-border/80 bg-card p-2.5 shadow-card transition hover:border-primary/40 hover:bg-muted/40 active:scale-95"
-        >
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600">
-            <AlertTriangle className="h-4 w-4" />
-          </div>
-          <div className="min-w-0">
-            <p className="truncate font-display text-xs font-bold text-foreground">
-              অভিযোগ ট্র্যাকিং
-            </p>
-            <p className="truncate text-[10px] text-muted-foreground">
-              লাইভ অগ্রগতি
-            </p>
-          </div>
-        </Link>
-      </div>
+      {homepageConfig.showFeaturedShortcuts !== false && visibleFeaturedShortcuts.length > 0 && (
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {visibleFeaturedShortcuts.map((fs) => {
+            const IconComp = HOMEPAGE_ICONS[fs.iconName] || MapPin;
+            const toneClass = shortcutToneMap[fs.tone || "primary"] || shortcutToneMap.primary;
+            return (
+              <HeroActionLink
+                key={fs.id}
+                href={fs.to}
+                className="group flex min-w-0 items-center gap-2.5 rounded-2xl border border-border/80 bg-card p-2.5 shadow-card transition hover:border-primary/40 hover:bg-muted/40 active:scale-95"
+              >
+                <div
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${toneClass}`}
+                >
+                  <IconComp className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate font-display text-xs font-bold text-foreground">
+                    {fs.title}
+                  </p>
+                  <p className="truncate text-[10px] text-muted-foreground">{fs.subtitle}</p>
+                </div>
+              </HeroActionLink>
+            );
+          })}
+        </div>
+      )}
 
       {/* Live Emergency Alert Banner */}
-      <EmergencyBanner />
+      {homepageConfig.showEmergencyBanner !== false && <EmergencyBanner />}
 
-      {/* ALL 22 MAIN SECTIONS — Vertically Stacked, Each with 2-Row Horizontal Scroll */}
-      <div className="mt-6 space-y-6">
-        {divisionSections.map(({ division, items }, index) => (
-          <DivisionHorizontalSection
-            key={division.id}
-            division={division}
-            items={items}
-            index={index}
-          />
-        ))}
-      </div>
+      {/* Optional Public Notices (managed by Super Admin) */}
+      {activeNotices.length > 0 && (
+        <div className="mt-4 space-y-2">
+          {activeNotices.map((notice) => (
+            <div
+              key={notice.id}
+              className="rounded-2xl border border-primary/20 bg-primary/5 px-3.5 py-2.5 text-xs shadow-2xs"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-bold text-primary-deep">{notice.title}</p>
+                {notice.date && (
+                  <span className="text-[10px] text-muted-foreground">{notice.date}</span>
+                )}
+              </div>
+              {notice.body && (
+                <p className="mt-1 text-[11px] text-muted-foreground leading-relaxed">
+                  {notice.body}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
-      {/* App Download Footer Callout */}
-      <footer className="mt-9 flex flex-col items-center gap-2 border-t border-border/60 pt-6 text-center">
-        <Link
-          to="/app-download"
-          className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold text-primary transition hover:text-primary-deep hover:underline"
-        >
-          <Smartphone className="h-3.5 w-3.5 shrink-0" />
-          <span>Android / iOS অ্যাপ ও PWA ডাউনলোড করুন</span>
-        </Link>
-        <p className="text-[11px] text-muted-foreground">
-          © স্মার্ট নোয়াখালী • নোয়াখালীর ডিজিটাল সিটিজেন সেবা ডিরেক্টরি
-        </p>
-      </footer>
+      {/* ALL MAIN SECTIONS — Vertically Stacked, Each with 2-Row Horizontal Scroll */}
+      {homepageConfig.showDivisions !== false && (
+        <div className="mt-6 space-y-6">
+          {divisionSections.map(({ division, items }) => (
+            <DivisionHorizontalSection
+              key={division.id}
+              division={division}
+              items={items}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* App Download & Custom Footer Callout */}
+      {homepageConfig.showFooterAppCallout !== false && (
+        <footer className="mt-9 flex flex-col items-center gap-2.5 border-t border-border/60 pt-6 text-center">
+          <Link
+            to="/app-download"
+            className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold text-primary transition hover:text-primary-deep hover:underline"
+          >
+            <Smartphone className="h-3.5 w-3.5 shrink-0" />
+            <span>
+              {contentConfig.footerTagline || "Android / iOS অ্যাপ ও PWA ডাউনলোড করুন"}
+            </span>
+          </Link>
+
+          {contentConfig.socialLinks &&
+            (contentConfig.socialLinks.facebook ||
+              contentConfig.socialLinks.youtube ||
+              contentConfig.socialLinks.whatsapp) && (
+              <div className="flex flex-wrap items-center justify-center gap-2 text-[11px]">
+                {contentConfig.socialLinks.facebook && (
+                  <a
+                    href={contentConfig.socialLinks.facebook}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-0.5 font-semibold text-foreground hover:border-primary/40"
+                  >
+                    Facebook <ExternalLink className="h-2.5 w-2.5" />
+                  </a>
+                )}
+                {contentConfig.socialLinks.youtube && (
+                  <a
+                    href={contentConfig.socialLinks.youtube}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-0.5 font-semibold text-foreground hover:border-primary/40"
+                  >
+                    YouTube <ExternalLink className="h-2.5 w-2.5" />
+                  </a>
+                )}
+                {contentConfig.socialLinks.whatsapp && (
+                  <a
+                    href={contentConfig.socialLinks.whatsapp}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-0.5 font-semibold text-foreground hover:border-primary/40"
+                  >
+                    WhatsApp <ExternalLink className="h-2.5 w-2.5" />
+                  </a>
+                )}
+              </div>
+            )}
+
+          <p className="text-[11px] text-muted-foreground">
+            {contentConfig.footerCopyright ||
+              "© স্মার্ট নোয়াখালী • নোয়াখালীর ডিজিটাল সিটিজেন সেবা ডিরেক্টরি"}
+          </p>
+        </footer>
+      )}
 
       <BannerPopup />
     </div>
@@ -347,11 +609,9 @@ function Index() {
 function DivisionHorizontalSection({
   division,
   items,
-  index,
 }: {
   division: Division;
   items: Category[];
-  index: number;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const DivIcon = division.icon;
@@ -367,7 +627,7 @@ function DivisionHorizontalSection({
       aria-labelledby={`division-heading-${division.id}`}
       className="border-b border-border/50 pb-5 last:border-b-0 last:pb-0"
     >
-      {/* Clear Bengali Section Heading (clean layout without standalone count badge) */}
+      {/* Clear Bengali Section Heading */}
       <div className="mb-2.5 flex items-center justify-between gap-2 px-0.5">
         <div className="flex min-w-0 items-center gap-2.5">
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-50 via-emerald-100 to-emerald-200/85 text-emerald-700 ring-1 ring-emerald-300/70 shadow-[inset_0_1px_1px_rgba(255,255,255,0.9),0_3px_8px_-3px_rgba(4,120,87,0.2)]">
@@ -387,7 +647,7 @@ function DivisionHorizontalSection({
               id={`division-heading-${division.id}`}
               className="truncate font-bangla text-[15px] font-bold leading-snug text-primary-deep sm:text-base"
             >
-              {index + 1}. {division.bn}
+              {division.bn}
             </h2>
           </div>
         </div>
@@ -434,9 +694,9 @@ function QuickLink({
   tone,
   icon,
 }: {
-  to: "/blood-donor" | "/donation" | "/emergency-request";
+  to: string;
   label: string;
-  tone: "rose" | "red" | "emerald";
+  tone: HomepageQuickAction["tone"];
   icon: React.ReactNode;
 }) {
   const tones = {
@@ -444,14 +704,17 @@ function QuickLink({
     rose: "border-rose-200/80 bg-gradient-to-br from-rose-50 via-pink-50 to-rose-100/70 text-rose-700 hover:border-rose-300",
     emerald:
       "border-emerald-200/80 bg-gradient-to-br from-emerald-50 via-teal-50 to-emerald-100/70 text-emerald-800 hover:border-emerald-300",
+    blue: "border-blue-200/80 bg-gradient-to-br from-blue-50 via-sky-50 to-blue-100/70 text-blue-800 hover:border-blue-300",
+    amber:
+      "border-amber-200/80 bg-gradient-to-br from-amber-50 via-yellow-50 to-amber-100/70 text-amber-800 hover:border-amber-300",
   };
   return (
-    <Link
-      to={to}
-      className={`flex min-w-0 items-center justify-center gap-1 rounded-full border px-2 py-2.5 text-center text-[11px] font-bold shadow-card transition active:scale-95 min-[360px]:gap-1.5 min-[360px]:text-xs sm:py-3 ${tones[tone]}`}
+    <HeroActionLink
+      href={to}
+      className={`flex min-w-0 items-center justify-center gap-1 rounded-full border px-2 py-2.5 text-center text-[11px] font-bold shadow-card transition active:scale-95 min-[360px]:gap-1.5 min-[360px]:text-xs sm:py-3 ${tones[tone] || tones.emerald}`}
     >
       {icon}
       <span className="truncate">{label}</span>
-    </Link>
+    </HeroActionLink>
   );
 }

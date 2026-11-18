@@ -201,7 +201,7 @@ function AuthPage() {
       toast.success("লগইন সফল হয়েছে");
       navigate({ to: safeRedirectPath as any });
     } else if (res.isStaff) {
-      toast.success("স্বাগতম! স্টাফ ড্যাশবোর্ডে প্রবেশ সফল");
+      toast.success("স্বাগতম! অ্যাডমিন ড্যাশবোর্ডে প্রবেশ সফল");
       navigate({ to: "/mdmahmudulhashan" });
     } else {
       toast.success("লগইন সফল হয়েছে");

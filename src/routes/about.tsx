@@ -1,6 +1,24 @@
+import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeft, Phone, Mail, MapPin, CheckCircle2, Sparkles, Layers } from "lucide-react";
-import { useLogo, useSiteMetaConfig, useServicesConfig, type ServiceItem } from "@/lib/store";
+import {
+  ArrowLeft,
+  Phone,
+  Mail,
+  MapPin,
+  CheckCircle2,
+  Sparkles,
+  Layers,
+  HelpCircle,
+  Megaphone,
+  ChevronDown,
+} from "lucide-react";
+import {
+  useLogo,
+  useSiteMetaConfig,
+  useServicesConfig,
+  useWebsiteContentConfig,
+  type ServiceItem,
+} from "@/lib/store";
 import { CATEGORY_ICONS } from "@/data/categories";
 
 export const Route = createFileRoute("/about")({
@@ -17,6 +35,8 @@ function About() {
   const { logo } = useLogo();
   const { meta } = useSiteMetaConfig();
   const { config, services } = useServicesConfig();
+  const { contentConfig } = useWebsiteContentConfig();
+  const [openFaqId, setOpenFaqId] = useState<string | null>(null);
 
   const phone = meta.contactPhone || meta.helplinePhone || "01850999178";
   const email = meta.contactEmail || "e.smartnoakhali@gmail.com";
@@ -25,6 +45,13 @@ function About() {
     "কালাসর্দ্দা, গোবিন্দপুর, কুতুবের হাট-৩৮৬২, নবীপুর, সেনবাগ, নোয়াখালী, বাংলাদেশ।";
 
   const activeServices = (services || []).filter((s) => s.active !== false);
+  const visibleGoals = (contentConfig.aboutMissionGoals || []).filter((g) => g.trim());
+  const visibleFaqs = (contentConfig.faqItems || []).filter(
+    (f) => f.visible !== false && f.question.trim()
+  );
+  const visibleNotices = (contentConfig.publicNotices || []).filter(
+    (n) => n.visible !== false && (n.title.trim() || n.body.trim())
+  );
 
   return (
     <div className="mx-auto max-w-4xl px-4 pb-24 pt-4">
@@ -99,32 +126,85 @@ function About() {
       </div>
 
       {/* Goals & Missions */}
-      <div className="mt-6 rounded-2xl border border-border/80 bg-card p-5 shadow-card">
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <CheckCircle2 className="h-4 w-4" />
+      {visibleGoals.length > 0 && (
+        <div className="mt-6 rounded-2xl border border-border/80 bg-card p-5 shadow-card">
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <CheckCircle2 className="h-4 w-4" />
+            </div>
+            <h3 className="font-display font-bold text-primary-deep">আমাদের লক্ষ্য ও উদ্দেশ্য</h3>
           </div>
-          <h3 className="font-display font-bold text-primary-deep">আমাদের লক্ষ্য ও উদ্দেশ্য</h3>
-        </div>
-        <div className="mt-3 grid gap-2.5 sm:grid-cols-2 text-sm text-foreground/90">
-          <div className="flex items-start gap-2 rounded-xl bg-muted/40 p-3">
-            <span className="text-primary font-bold">•</span>
-            <span>নোয়াখালী জেলার প্রতিটি উপজেলা ও ইউনিয়নের সঠিক যোগাযোগ তথ্য এক ক্লিকে প্রদান।</span>
-          </div>
-          <div className="flex items-start gap-2 rounded-xl bg-muted/40 p-3">
-            <span className="text-primary font-bold">•</span>
-            <span>জরুরী প্রয়োজনে ২৪ ঘণ্টা স্বেচ্ছায় রক্তদাতাদের সাথে দ্রুত সংযোগ স্থাপন।</span>
-          </div>
-          <div className="flex items-start gap-2 rounded-xl bg-muted/40 p-3">
-            <span className="text-primary font-bold">•</span>
-            <span>সব ধরণের সরকারি, বেসরকারি, আইনি ও জরুরি সেবা সম্পূর্ণ বিনামূল্যে পৌঁছে দেওয়া।</span>
-          </div>
-          <div className="flex items-start gap-2 rounded-xl bg-muted/40 p-3">
-            <span className="text-primary font-bold">•</span>
-            <span>এলাকাবাসীর সহজ ব্যবহার ও সার্বক্ষণিক লাইভ চ্যাট ও এআই সহায়তা নিশ্চিত করা।</span>
+          <div className="mt-3 grid gap-2.5 sm:grid-cols-2 text-sm text-foreground/90">
+            {visibleGoals.map((goal, idx) => (
+              <div key={idx} className="flex items-start gap-2 rounded-xl bg-muted/40 p-3">
+                <span className="text-primary font-bold">•</span>
+                <span>{goal}</span>
+              </div>
+            ))}
           </div>
         </div>
-      </div>
+      )}
+
+      {/* FAQ Accordion */}
+      {visibleFaqs.length > 0 && (
+        <div className="mt-6 rounded-2xl border border-border/80 bg-card p-5 shadow-card space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <HelpCircle className="h-4 w-4" />
+            </div>
+            <h3 className="font-display font-bold text-primary-deep">সাধারণ জিজ্ঞাসা (FAQ)</h3>
+          </div>
+          <div className="space-y-2">
+            {visibleFaqs.map((faq) => {
+              const isOpen = openFaqId === faq.id;
+              return (
+                <div key={faq.id} className="rounded-xl border border-border/70 bg-muted/25">
+                  <button
+                    type="button"
+                    onClick={() => setOpenFaqId(isOpen ? null : faq.id)}
+                    className="flex w-full items-center justify-between gap-2 px-3.5 py-2.5 text-left text-xs font-bold text-foreground sm:text-sm"
+                  >
+                    <span>{faq.question}</span>
+                    <ChevronDown
+                      className={`h-4 w-4 shrink-0 transition-transform ${
+                        isOpen ? "rotate-180" : ""
+                      }`}
+                    />
+                  </button>
+                  {isOpen && (
+                    <div className="border-t border-border/50 px-3.5 py-2.5 text-xs text-muted-foreground leading-relaxed">
+                      {faq.answer}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Public Notices */}
+      {visibleNotices.length > 0 && (
+        <div className="mt-6 rounded-2xl border border-border/80 bg-card p-5 shadow-card space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/10 text-amber-700">
+              <Megaphone className="h-4 w-4" />
+            </div>
+            <h3 className="font-display font-bold text-primary-deep">জনস্বার্থ নোটিশ বোর্ড</h3>
+          </div>
+          <div className="space-y-2">
+            {visibleNotices.map((n) => (
+              <div key={n.id} className="rounded-xl border border-border/70 bg-muted/25 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-bold text-foreground sm:text-sm">{n.title}</p>
+                  {n.date && <span className="text-[11px] text-muted-foreground">{n.date}</span>}
+                </div>
+                {n.body && <p className="mt-1 text-xs text-muted-foreground">{n.body}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

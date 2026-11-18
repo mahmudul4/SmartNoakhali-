@@ -47,11 +47,17 @@ import {
   Droplet,
   MapPin,
   Wrench,
+  Bot,
+  Headphones,
+  Filter,
+  ArrowRightLeft,
+  Clock,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { auth, SUPER_ADMIN_EMAIL } from "@/lib/firebase";
 import { sendBrowserNotification } from "@/lib/notifications";
-import { CATEGORY_ICONS, CATEGORY_TINTS, DIVISIONS } from "@/data/categories";
+import { CATEGORY_ICONS, CATEGORY_TINTS } from "@/data/categories";
 import {
   syncCategoriesToFirestore,
   auditCategoriesFromFirestore,
@@ -67,6 +73,8 @@ import {
   useAppPackages,
   useSiteMetaConfig,
   useServicesConfig,
+  useAiChatConfig,
+  DEFAULT_AI_CHAT_CONFIG,
   type CategoryConfigItem,
   type DivisionConfigItem,
   type DonationConfig,
@@ -75,6 +83,8 @@ import {
   type StaffProfileEntry,
   type ServiceItem,
   type ServicesConfig,
+  type AiChatFaqItem,
+  type AiChatConfig,
 } from "@/lib/store";
 import { downloadAppPackageBinary } from "@/lib/pwa";
 import { useAuth } from "@/lib/auth";
@@ -93,10 +103,13 @@ import {
   useChatThreads,
   useThreadMessages,
   markThreadRead,
+  updateChatThreadMeta,
   uploadPublicImage,
   getUserSubmissionCounts,
   type BannerRow,
   type ChatThreadRow,
+  type ChatThreadStatus,
+  type ChatThreadPriority,
   type SubmissionRow,
   type DonationRow,
   type DonationCategory,
@@ -113,6 +126,7 @@ import {
   listUsers,
   createUser,
   setUserRole,
+  setUserCustomRole,
   deleteUser,
   suspendUser,
   resetUserPassword,
@@ -126,8 +140,11 @@ import {
   useStaffAuditLogs,
   recordStaffActivity,
   restoreDeletedAuditItem,
+  recordSuperAdminAudit,
+  useSuperAdminAuditLogs,
   type StaffActivityLogEntry,
 } from "@/lib/staff-audit";
+import { resolveStaffMessageRole } from "@/lib/chat-roles";
 import { AttachmentView, VoiceRecorderButton } from "@/routes/chat";
 import { UniversalImageUploader } from "@/components/UniversalImageUploader";
 import { SecurityPanel } from "@/components/security/SecurityPanel";
@@ -136,6 +153,9 @@ import { WebsiteBrandingManager } from "@/components/WebsiteBrandingManager";
 import { HeroBannerManager } from "@/components/HeroBannerManager";
 import { AdminNotificationsManager } from "@/components/AdminNotificationsManager";
 import { TaskManager } from "@/components/TaskManager";
+import { MediaLibraryManager, MediaPickerModal } from "@/components/MediaLibraryManager";
+import { DivisionAndCategoryTools } from "@/components/DivisionAndCategoryTools";
+import { HomepageContentManager } from "@/components/HomepageContentManager";
 import {
   InstitutionsAdminPanel,
   JobsAdminPanel,
@@ -146,7 +166,10 @@ import {
   useJobCirculars,
   useComplaints,
 } from "@/lib/district-platform";
-import { useRolePermissions } from "@/lib/permissions";
+import {
+  useRolePermissions,
+  resolveUserRoleDisplay,
+} from "@/lib/permissions";
 import {
   getLoginLockoutRemainingSeconds,
   recordFailedAdminLogin,
@@ -483,6 +506,7 @@ type Tab =
   | "overview"
   | "homepage"
   | "notifications"
+  | "ai_chat"
   | "tasks"
   | "roles"
   | "branding"
@@ -507,19 +531,6 @@ type Tab =
   | "settings"
   | "security";
 
-function getRoleBadgeText(
-  isMainAdmin: boolean,
-  isAdmin: boolean,
-  isEditor: boolean,
-  isModerator: boolean
-) {
-  if (isMainAdmin) return "সুপার অ্যাডমিন";
-  if (isAdmin) return "অ্যাডমিন";
-  if (isEditor) return "এডিটর";
-  if (isModerator) return "মডারেটর";
-  return "স্টাফ";
-}
-
 function Dashboard({
   onLogout,
   isMainAdmin,
@@ -529,8 +540,8 @@ function Dashboard({
   isMainAdmin: boolean;
   onLockScreen: () => void;
 }) {
-  const { user, isAdmin, isEditor, isModerator } = useAuth();
-  const { hasPermission } = useRolePermissions();
+  const { user, isAdmin, isEditor, isModerator, roles, customRoleId, customRoleName } = useAuth();
+  const { hasPermission, customRoles } = useRolePermissions();
   const { categories, allCategories } = useCategories();
   const { getStaffProfile } = useStaffProfiles();
   const subs = useCloudSubmissions();
@@ -568,6 +579,29 @@ function Dashboard({
   const [totalUsersCount, setTotalUsersCount] = useState<number>(0);
   const [refreshingDashboard, setRefreshingDashboard] = useState(false);
 
+  const canHomepageTab =
+    isMainAdmin ||
+    hasPermission("manage_hero_banners") ||
+    hasPermission("edit_homepage") ||
+    hasPermission("view_homepage");
+  const canNotificationsTab =
+    isMainAdmin ||
+    hasPermission("send_notifications") ||
+    hasPermission("view_notifications");
+  const canAiChatTab =
+    isMainAdmin ||
+    hasPermission("view_ai_settings") ||
+    hasPermission("edit_ai_config") ||
+    hasPermission("manage_ai_knowledge");
+  const canChatTab =
+    isMainAdmin ||
+    hasPermission("chat_view_all") ||
+    hasPermission("chat_view_assigned") ||
+    hasPermission("chat_reply") ||
+    isAdmin ||
+    isEditor ||
+    isModerator;
+
   useEffect(() => {
     if (!isMainAdmin && !isAdmin) return;
     let cancelled = false;
@@ -590,11 +624,20 @@ function Dashboard({
   const myStaffProfile =
     getStaffProfile(user?.id) || getStaffProfile(user?.email);
   const myAvatar = myStaffProfile?.photo_url || logo;
+  const roleDisplay = resolveUserRoleDisplay({
+    email: user?.email,
+    roles,
+    isMainAdmin,
+    customRoleId,
+    customRoleName,
+    customRoles,
+    designation: myStaffProfile?.designation,
+  });
+  const myRoleLabel = roleDisplay.labelBn;
   const myDisplayName =
     myStaffProfile?.full_name ||
     user?.displayName ||
-    (isMainAdmin ? "মেইন সুপার এডমিন" : user?.email?.split("@")[0] || "এডমিন");
-  const myRoleLabel = getRoleBadgeText(isMainAdmin, isAdmin, isEditor, isModerator);
+    (isMainAdmin ? "মেইন সুপার এডমিন" : user?.email?.split("@")[0] || myRoleLabel);
   const hasPin = Boolean(user?.id && getAdminSecurityPin(user.id));
 
   const pendingSubs = subs.items.filter((s) => s.status === "pending");
@@ -621,17 +664,36 @@ function Dashboard({
   // Enforce dynamic tab access based on permissions
   useEffect(() => {
     const mainAdminOnlyTabs: Tab[] = [
-      "homepage",
-      "notifications",
       "roles",
       "services",
       "donation",
+      "expenses",
       "apps",
       "users",
       "access",
       "security",
     ];
     if (!isMainAdmin && mainAdminOnlyTabs.includes(tab)) {
+      setTab("overview");
+      return;
+    }
+
+    if (tab === "homepage" && !canHomepageTab) {
+      setTab("overview");
+      return;
+    }
+
+    if (tab === "notifications" && !canNotificationsTab) {
+      setTab("overview");
+      return;
+    }
+
+    if (tab === "ai_chat" && !canAiChatTab) {
+      setTab("overview");
+      return;
+    }
+
+    if (tab === "chat" && !canChatTab) {
       setTab("overview");
       return;
     }
@@ -655,7 +717,16 @@ function Dashboard({
       setTab("overview");
       return;
     }
-  }, [isMainAdmin, isAdmin, tab, hasPermission]);
+  }, [
+    isMainAdmin,
+    isAdmin,
+    tab,
+    hasPermission,
+    canHomepageTab,
+    canNotificationsTab,
+    canAiChatTab,
+    canChatTab,
+  ]);
 
   async function handleDashboardRefresh() {
     setRefreshingDashboard(true);
@@ -789,14 +860,19 @@ function Dashboard({
         <TabBtn active={tab === "overview"} onClick={() => setTab("overview")}>
           ড্যাশবোর্ড
         </TabBtn>
-        {isMainAdmin && (
+        {canHomepageTab && (
           <TabBtn active={tab === "homepage"} onClick={() => setTab("homepage")}>
             🏠 হোমপেজ ও হিরো ব্যানার
           </TabBtn>
         )}
-        {isMainAdmin && (
+        {canNotificationsTab && (
           <TabBtn active={tab === "notifications"} onClick={() => setTab("notifications")}>
             🔔 বিজ্ঞপ্তি পরিচালনা
+          </TabBtn>
+        )}
+        {canAiChatTab && (
+          <TabBtn active={tab === "ai_chat"} onClick={() => setTab("ai_chat")}>
+            🤖 AI চ্যাট ও নলেজ
           </TabBtn>
         )}
         <TabBtn active={tab === "tasks"} onClick={() => setTab("tasks")}>
@@ -809,7 +885,7 @@ function Dashboard({
         )}
         {(isMainAdmin || hasPermission("upload_branding")) && (
           <TabBtn active={tab === "branding"} onClick={() => setTab("branding")}>
-            🎨 ওয়েবসাইট ব্র্যান্ডিং
+            🎨 ব্র্যান্ডিং ও মিডিয়া লাইব্রেরি
           </TabBtn>
         )}
         {(isMainAdmin || hasPermission("view_reports")) && (
@@ -818,7 +894,7 @@ function Dashboard({
             onClick={() => setTab("activity")}
             badge={deletedAuditCount > 0 ? deletedAuditCount : auditHook.logs.length}
           >
-            🕵️ স্টাফ অ্যাক্টিভিটি ও ডিলিট লগ
+            🕵️ অ্যাক্টিভিটি ও ডিলিট লগ
           </TabBtn>
         )}
         <TabBtn active={tab === "profile"} onClick={() => setTab("profile")}>
@@ -889,25 +965,27 @@ function Dashboard({
             ব্যানার
           </TabBtn>
         )}
-        <TabBtn
-          active={tab === "chat"}
-          onClick={() => setTab("chat")}
-          badge={unreadChatCount}
-        >
-          লাইভ চ্যাট
-        </TabBtn>
+        {canChatTab && (
+          <TabBtn
+            active={tab === "chat"}
+            onClick={() => setTab("chat")}
+            badge={unreadChatCount}
+          >
+            লাইভ চ্যাট
+          </TabBtn>
+        )}
         {isMainAdmin && (
           <TabBtn active={tab === "apps"} onClick={() => setTab("apps")}>
             অ্যাপ আপলোড
           </TabBtn>
         )}
-        {(isMainAdmin || hasPermission("manage_users")) && (
+        {isMainAdmin && (
           <TabBtn
             active={tab === "users"}
             onClick={() => setTab("users")}
             badge={totalUsersCount > 0 ? totalUsersCount : undefined}
           >
-            ইউজার ও পাসওয়ার্ড
+            ইউজার ও অ্যাকসেস
           </TabBtn>
         )}
         {isMainAdmin && (
@@ -978,20 +1056,32 @@ function Dashboard({
           />
         )}
 
-        {tab === "homepage" && isMainAdmin && <HeroBannerManager />}
+        {tab === "homepage" && canHomepageTab && (
+          <div className="space-y-6">
+            <HeroBannerManager />
+            {(isMainAdmin || hasPermission("edit_homepage") || hasPermission("view_homepage")) && (
+              <HomepageContentManager />
+            )}
+          </div>
+        )}
 
-        {tab === "notifications" && isMainAdmin && <AdminNotificationsManager />}
+        {tab === "notifications" && canNotificationsTab && <AdminNotificationsManager />}
+
+        {tab === "ai_chat" && canAiChatTab && <AiChatSettingsManager />}
 
         {tab === "tasks" && <TaskManager />}
 
         {tab === "roles" && isMainAdmin && <RolePermissionsManager />}
 
         {tab === "branding" && (isMainAdmin || hasPermission("upload_branding")) && (
-          <WebsiteBrandingManager />
+          <div className="space-y-6">
+            <WebsiteBrandingManager />
+            <MediaLibraryManager />
+          </div>
         )}
 
         {tab === "activity" && (isMainAdmin || hasPermission("view_reports")) && (
-          <StaffActivityAuditPanel auditHook={auditHook} />
+          <StaffActivityAuditPanel auditHook={auditHook} isMainAdmin={isMainAdmin} />
         )}
 
         {tab === "profile" && <MyStaffProfilePanel isMainAdmin={isMainAdmin} />}
@@ -1030,11 +1120,11 @@ function Dashboard({
           <BannersEditor />
         )}
 
-        {tab === "chat" && <ChatThreadsAdmin />}
+        {tab === "chat" && canChatTab && <ChatThreadsAdmin />}
 
         {tab === "apps" && isMainAdmin && <AppPackagesAdminPanel />}
 
-        {tab === "users" && (isMainAdmin || hasPermission("manage_users")) && <UsersEditor />}
+        {tab === "users" && isMainAdmin && <UsersEditor />}
 
         {tab === "access" && isMainAdmin && <AccessEditor />}
 
@@ -1050,9 +1140,7 @@ function Dashboard({
           <ComplaintsAdminPanel />
         )}
 
-        {tab === "settings" && (isMainAdmin || hasPermission("manage_settings")) && (
-          <SettingsAdminPanel />
-        )}
+        {tab === "settings" && (isMainAdmin || hasPermission("manage_settings")) && <SettingsAdminPanel />}
 
         {tab === "security" && isMainAdmin && <SecurityPanel />}
       </div>
@@ -1066,21 +1154,22 @@ function Dashboard({
 // Super Admin sees their own profile PLUS all staff profiles!
 // ============================================================================
 function MyStaffProfilePanel({ isMainAdmin }: { isMainAdmin: boolean }) {
-  const { user, username: authUsername, isAdmin, isEditor, isModerator } = useAuth();
+  const { user, username: authUsername, roles, customRoleId, customRoleName } = useAuth();
+  const { customRoles } = useRolePermissions();
   const { profiles: staffMap, getStaffProfile, upsertStaffProfile } = useStaffProfiles();
   const { logo } = useLogo();
   const photoInputRef = useRef<HTMLInputElement>(null);
 
   const existing = getStaffProfile(user?.id) || getStaffProfile(user?.email);
-  const roleLabel = isMainAdmin
-    ? "সুপার এডমিন"
-    : isAdmin
-      ? "এডমিন"
-      : isEditor
-        ? "এডিটর"
-        : isModerator
-          ? "মোডারেটর"
-          : "স্টাফ";
+  const roleLabel = resolveUserRoleDisplay({
+    email: user?.email,
+    roles,
+    isMainAdmin,
+    customRoleId,
+    customRoleName,
+    customRoles,
+    designation: existing?.designation,
+  }).labelBn;
 
   const [fullName, setFullName] = useState(
     existing?.full_name || user?.displayName || (isMainAdmin ? "মেইন সুপার এডমিন" : "")
@@ -1852,12 +1941,15 @@ function CategoriesEditor() {
     resetCategories,
     checkCategoryReferences,
   } = useCategories();
+  const { rawDivisions } = useDivisions();
   const [search, setSearch] = useState("");
   const [divisionFilter, setDivisionFilter] = useState("all");
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<Partial<CategoryConfigItem>>({});
   const [showAdd, setShowAdd] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [selectedBulkSlugs, setSelectedBulkSlugs] = useState<string[]>([]);
+  const [catMediaPickerTarget, setCatMediaPickerTarget] = useState<"new" | "edit" | null>(null);
 
   // Sync & Audit states
   const [syncing, setSyncing] = useState(false);
@@ -1874,9 +1966,11 @@ function CategoriesEditor() {
   const [confirmForceHardDelete, setConfirmForceHardDelete] = useState(false);
   const [deletingBusy, setDeletingBusy] = useState(false);
 
+  const defaultDivisionId = rawDivisions[0]?.id || "donation";
+
   const [newCat, setNewCat] = useState({
     slug: "",
-    divisionId: "division-2-shopping-market",
+    divisionId: defaultDivisionId,
     bn: "",
     en: "",
     iconName: "Users",
@@ -1886,13 +1980,14 @@ function CategoriesEditor() {
     sort_order: 100,
     visible: true,
     customIconUrl: "",
+    customRoute: "",
   });
 
   const divisionMap = useMemo(() => {
     const map = new Map<string, string>();
-    DIVISIONS.forEach((d) => map.set(d.id, d.bn));
+    rawDivisions.forEach((d) => map.set(d.id, d.bn));
     return map;
-  }, []);
+  }, [rawDivisions]);
 
   const filtered = useMemo(() => {
     return rawItems.filter((c) => {
@@ -1926,7 +2021,17 @@ function CategoriesEditor() {
       } else if (draftToSend.customIconUrl === undefined) {
         delete draftToSend.customIconUrl;
       }
+      if (typeof draftToSend.customRoute === "string") {
+        draftToSend.customRoute = draftToSend.customRoute.trim();
+      }
       await updateCategory(slug, draftToSend);
+      void recordSuperAdminAudit({
+        action: "update",
+        module: "categories",
+        target_id: slug,
+        target_label: draftToSend.bn || slug,
+        summary: `ক্যাটাগরি আপডেট করা হয়েছে: ${draftToSend.bn || slug}`,
+      });
       setEditingSlug(null);
       toast.success("ক্যাটাগরি সফলভাবে ফায়ারবেস ডেটাবেসে আপডেট ও সংরক্ষিত হয়েছে");
     } catch (e) {
@@ -1959,6 +2064,15 @@ function CategoriesEditor() {
         softDeleteOnly,
         force: !softDeleteOnly && confirmForceHardDelete,
       });
+      void recordSuperAdminAudit({
+        action: softDeleteOnly ? "trash" : "delete",
+        module: "categories",
+        target_id: categoryToDelete.slug,
+        target_label: categoryToDelete.bn,
+        summary: softDeleteOnly
+          ? `ক্যাটাগরি নিষ্ক্রিয় ও ট্র্যাশে পাঠানো হয়েছে: ${categoryToDelete.bn}`
+          : `ক্যাটাগরি মুছে ফেলা হয়েছে: ${categoryToDelete.bn}`,
+      });
       toast.success(
         softDeleteOnly
           ? `"${categoryToDelete.bn}" ক্যাটাগরি সফলভাবে নিষ্ক্রিয় ও আর্কাইভ করা হয়েছে`
@@ -1981,9 +2095,10 @@ function CategoriesEditor() {
     setBusy(true);
     try {
       const cleanCustomIcon = newCat.customIconUrl.trim();
+      const cleanCustomRoute = newCat.customRoute.trim();
       await addCategory({
         slug: newCat.slug.trim(),
-        divisionId: newCat.divisionId,
+        divisionId: newCat.divisionId || defaultDivisionId,
         bn: newCat.bn.trim(),
         en: newCat.en.trim() || newCat.slug.trim(),
         iconName: newCat.iconName,
@@ -1993,11 +2108,19 @@ function CategoriesEditor() {
         sort_order: Number(newCat.sort_order) || rawItems.length + 1,
         visible: newCat.visible,
         ...(cleanCustomIcon ? { customIconUrl: cleanCustomIcon } : {}),
+        ...(cleanCustomRoute ? { customRoute: cleanCustomRoute } : {}),
+      });
+      void recordSuperAdminAudit({
+        action: "create",
+        module: "categories",
+        target_id: newCat.slug.trim(),
+        target_label: newCat.bn.trim(),
+        summary: `নতুন ক্যাটাগরি যোগ করা হয়েছে: ${newCat.bn.trim()}`,
       });
       toast.success("নতুন ক্যাটাগরি সফলভাবে তৈরি ও ফায়ারবেসে সংরক্ষিত হয়েছে!");
       setNewCat({
         slug: "",
-        divisionId: "division-2-shopping-market",
+        divisionId: defaultDivisionId,
         bn: "",
         en: "",
         iconName: "Users",
@@ -2007,6 +2130,7 @@ function CategoriesEditor() {
         sort_order: rawItems.length + 2,
         visible: true,
         customIconUrl: "",
+        customRoute: "",
       });
       setShowAdd(false);
     } catch (e) {
@@ -2153,6 +2277,13 @@ function CategoriesEditor() {
         )}
       </div>
 
+      {/* 1.5 Divisions, Duplicate Audit, Trash & Bulk Tools */}
+      <DivisionAndCategoryTools
+        selectedBulkSlugs={selectedBulkSlugs}
+        onClearBulkSelection={() => setSelectedBulkSlugs([])}
+        onJumpToCategory={(s) => setSearch(s)}
+      />
+
       {/* 2. Category Control Header */}
       <div className="rounded-2xl bg-card p-4 shadow-card">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2178,7 +2309,7 @@ function CategoriesEditor() {
               title="ডিফল্ট রিসেট"
               className="flex items-center gap-1 rounded-full bg-muted px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
             >
-              <RotateCcw className="h-3.5 w-3.5" /> ডিফল্ট ১৮১
+              <RotateCcw className="h-3.5 w-3.5" /> ডিফল্ট রিসেট
             </button>
           </div>
         </div>
@@ -2197,7 +2328,7 @@ function CategoriesEditor() {
                   onChange={(e) => setNewCat({ ...newCat, divisionId: e.target.value })}
                   className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs font-medium"
                 >
-                  {DIVISIONS.map((d) => (
+                  {rawDivisions.map((d) => (
                     <option key={d.id} value={d.id}>
                       {d.bn}
                     </option>
@@ -2274,11 +2405,26 @@ function CategoriesEditor() {
                 ))}
               </select>
               <input
-                value={newCat.customIconUrl}
-                onChange={(e) => setNewCat({ ...newCat, customIconUrl: e.target.value })}
-                placeholder="কাস্টম আইকন URL (ঐচ্ছিক, https://...)"
-                className="rounded-xl border border-border bg-background px-3 py-2 text-xs sm:col-span-2"
+                value={newCat.customRoute}
+                onChange={(e) => setNewCat({ ...newCat, customRoute: e.target.value })}
+                placeholder="কাস্টম রুট / লিংক (ঐচ্ছিক, যেমন: /blood-donor বা https://...)"
+                className="rounded-xl border border-border bg-background px-3 py-2 font-mono text-xs"
               />
+              <div className="flex gap-1.5 sm:col-span-2">
+                <input
+                  value={newCat.customIconUrl}
+                  onChange={(e) => setNewCat({ ...newCat, customIconUrl: e.target.value })}
+                  placeholder="কাস্টম আইকন URL (ঐচ্ছিক, https://...)"
+                  className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={() => setCatMediaPickerTarget("new")}
+                  className="inline-flex items-center gap-1 rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold hover:bg-muted"
+                >
+                  <ImageIcon className="h-3.5 w-3.5" /> লাইব্রেরি
+                </button>
+              </div>
             </div>
             <div className="flex gap-2">
               <button
@@ -2319,7 +2465,7 @@ function CategoriesEditor() {
               className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
             >
               <option value="all">সকল বিভাগ ({rawItems.length} টি ক্যাটাগরি)</option>
-              {DIVISIONS.map((d) => {
+              {rawDivisions.map((d) => {
                 const count = rawItems.filter((c) => c.divisionId === d.id).length;
                 return (
                   <option key={d.id} value={d.id}>
@@ -2334,9 +2480,28 @@ function CategoriesEditor() {
 
       {/* 3. Category Items List */}
       <div className="space-y-2">
-        <p className="text-xs font-bold text-muted-foreground px-1">
-          প্রদর্শিত ক্যাটাগরি: {filtered.length} টি
-        </p>
+        <div className="flex items-center justify-between px-1">
+          <p className="text-xs font-bold text-muted-foreground">
+            প্রদর্শিত ক্যাটাগরি: {filtered.length} টি
+          </p>
+          {filtered.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                if (selectedBulkSlugs.length === filtered.length) {
+                  setSelectedBulkSlugs([]);
+                } else {
+                  setSelectedBulkSlugs(filtered.map((f) => f.slug));
+                }
+              }}
+              className="text-[11px] font-bold text-primary hover:underline"
+            >
+              {selectedBulkSlugs.length === filtered.length
+                ? "সব নির্বাচন বাতিল"
+                : "সবগুলো নির্বাচন করুন"}
+            </button>
+          )}
+        </div>
 
         {filtered.map((c, idx) => {
           const IconComp = CATEGORY_ICONS[c.iconName] || CATEGORY_ICONS.Users;
@@ -2364,13 +2529,13 @@ function CategoriesEditor() {
                       বিভাগ নির্ধারণ
                     </label>
                     <select
-                      value={editDraft.divisionId ?? c.divisionId ?? "division-2-shopping-market"}
+                      value={editDraft.divisionId ?? c.divisionId ?? defaultDivisionId}
                       onChange={(e) =>
                         setEditDraft({ ...editDraft, divisionId: e.target.value })
                       }
                       className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
                     >
-                      {DIVISIONS.map((d) => (
+                      {rawDivisions.map((d) => (
                         <option key={d.id} value={d.id}>
                           {d.bn}
                         </option>
@@ -2484,16 +2649,39 @@ function CategoriesEditor() {
 
                   <div>
                     <label className="text-[11px] font-semibold text-muted-foreground">
-                      কাস্টম আইকন URL (ঐচ্ছিক)
+                      কাস্টম রুট / লিংক (ঐচ্ছিক)
                     </label>
                     <input
-                      value={editDraft.customIconUrl ?? ""}
+                      value={editDraft.customRoute ?? ""}
                       onChange={(e) =>
-                        setEditDraft({ ...editDraft, customIconUrl: e.target.value })
+                        setEditDraft({ ...editDraft, customRoute: e.target.value })
                       }
-                      placeholder="https://... বা খালি রাখুন"
-                      className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs"
+                      placeholder="/blood-donor বা https://..."
+                      className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 font-mono text-xs"
                     />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="text-[11px] font-semibold text-muted-foreground">
+                      কাস্টম আইকন URL (ঐচ্ছিক)
+                    </label>
+                    <div className="mt-0.5 flex gap-1.5">
+                      <input
+                        value={editDraft.customIconUrl ?? ""}
+                        onChange={(e) =>
+                          setEditDraft({ ...editDraft, customIconUrl: e.target.value })
+                        }
+                        placeholder="https://... বা খালি রাখুন"
+                        className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setCatMediaPickerTarget("edit")}
+                        className="inline-flex items-center gap-1 rounded-xl border border-border bg-background px-3 text-xs font-semibold hover:bg-muted"
+                      >
+                        <ImageIcon className="h-3.5 w-3.5" /> লাইব্রেরি
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -2537,10 +2725,31 @@ function CategoriesEditor() {
               }`}
             >
               <div className="flex min-w-0 flex-1 items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={selectedBulkSlugs.includes(c.slug)}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setSelectedBulkSlugs((prev) => Array.from(new Set([...prev, c.slug])));
+                    } else {
+                      setSelectedBulkSlugs((prev) => prev.filter((s) => s !== c.slug));
+                    }
+                  }}
+                  aria-label={`${c.bn} নির্বাচন`}
+                  className="h-4 w-4 shrink-0 accent-emerald-700"
+                />
                 <div
-                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${c.tint} text-primary-deep`}
+                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${c.tint} text-primary-deep overflow-hidden`}
                 >
-                  <IconComp className="h-5 w-5" />
+                  {c.customIconUrl ? (
+                    <img
+                      src={c.customIconUrl}
+                      alt={c.bn}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <IconComp className="h-5 w-5" />
+                  )}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -2620,6 +2829,18 @@ function CategoriesEditor() {
           );
         })}
       </div>
+
+      <MediaPickerModal
+        open={Boolean(catMediaPickerTarget)}
+        onClose={() => setCatMediaPickerTarget(null)}
+        onSelect={(url) => {
+          if (catMediaPickerTarget === "new") {
+            setNewCat((prev) => ({ ...prev, customIconUrl: url }));
+          } else if (catMediaPickerTarget === "edit") {
+            setEditDraft((prev) => ({ ...prev, customIconUrl: url }));
+          }
+        }}
+      />
 
       {/* 4. Full 22-Division Audit Modal */}
       {showAuditModal && auditReport && (
@@ -2872,6 +3093,7 @@ function ServicesAdminPanel() {
   // Action busy states
   const [busyServiceId, setBusyServiceId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [confirmDeleteService, setConfirmDeleteService] = useState<ServiceItem | null>(null);
 
   if (!isMainAdmin) {
     return (
@@ -3004,14 +3226,18 @@ function ServicesAdminPanel() {
     }
   }
 
-  // Delete service
-  async function handleDelete(service: ServiceItem) {
-    if (!window.confirm(`আপনি কি নিশ্চিত যে “${service.title}” সেবা মুছে ফেলতে চান?`)) {
-      return;
-    }
+  // Delete service (via in-UI confirmation modal)
+  function handleDelete(service: ServiceItem) {
+    setConfirmDeleteService(service);
+  }
+
+  async function confirmDeleteServiceNow() {
+    if (!confirmDeleteService) return;
+    const target = confirmDeleteService;
+    setConfirmDeleteService(null);
     try {
-      await deleteService(service.id);
-      toast.success(`“${service.title}” সেবা মুছে ফেলা হয়েছে`);
+      await deleteService(target.id);
+      toast.success(`“${target.title}” সেবা মুছে ফেলা হয়েছে`);
     } catch (err: any) {
       toast.error(err?.message || "মুছে ফেলা ব্যর্থ");
     }
@@ -3525,6 +3751,42 @@ function ServicesAdminPanel() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {confirmDeleteService && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3"
+          onClick={() => setConfirmDeleteService(null)}
+        >
+          <div
+            className="w-full max-w-sm space-y-3 rounded-2xl bg-card p-5 shadow-elevated"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              <h4 className="font-display text-sm font-bold">সেবা মুছে ফেলার নিশ্চিতকরণ</h4>
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              আপনি কি নিশ্চিত যে <strong className="text-foreground">“{confirmDeleteService.title}”</strong> সেবাটি স্থায়ীভাবে মুছে ফেলতে চান?
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteService(null)}
+                className="rounded-full bg-muted px-4 py-1.5 text-xs font-semibold"
+              >
+                বাতিল
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeleteServiceNow()}
+                className="rounded-full bg-destructive px-4 py-1.5 text-xs font-bold text-white"
+              >
+                হ্যাঁ, মুছে ফেলুন
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -4638,6 +4900,7 @@ function ExpensesAdminPanel({
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<ExpenseRow | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmDeleteExpense, setConfirmDeleteExpense] = useState<ExpenseRow | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
 
@@ -4722,8 +4985,14 @@ function ExpensesAdminPanel({
     setEditing(null);
   }
 
-  async function handleDelete(item: ExpenseRow) {
-    if (!window.confirm(`আপনি কি নিশ্চিত যে "${item.title}" ব্যয়ের হিসাবটি মুছে ফেলতে চান?`)) return;
+  function handleDelete(item: ExpenseRow) {
+    setConfirmDeleteExpense(item);
+  }
+
+  async function confirmDeleteExpenseNow() {
+    if (!confirmDeleteExpense) return;
+    const item = confirmDeleteExpense;
+    setConfirmDeleteExpense(null);
     const res = await expensesHook.remove(item.id);
     if (res.error) {
       toast.error(res.error.message || "মুছে ফেলা ব্যর্থ হয়েছে");
@@ -5145,6 +5414,43 @@ function ExpensesAdminPanel({
                 className="flex items-center gap-1 rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground disabled:opacity-50"
               >
                 <Save className="h-3.5 w-3.5" /> সংরক্ষণ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmDeleteExpense && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setConfirmDeleteExpense(null)}
+        >
+          <div
+            className="w-full max-w-md space-y-3 rounded-3xl bg-card p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="font-display text-sm font-bold text-rose-600">
+              ব্যয়ের হিসাব মুছে ফেলার নিশ্চিতকরণ
+            </p>
+            <p className="text-xs text-muted-foreground">
+              আপনি কি নিশ্চিতভাবে{" "}
+              <span className="font-bold text-foreground">"{confirmDeleteExpense.title}"</span> (
+              {Number(confirmDeleteExpense.amount || 0).toLocaleString("bn-BD")} ৳) ব্যয়ের হিসাবটি স্থায়ীভাবে মুছে ফেলতে চান?
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteExpense(null)}
+                className="rounded-full bg-muted px-4 py-1.5 text-xs font-semibold"
+              >
+                বাতিল
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeleteExpenseNow()}
+                className="inline-flex items-center gap-1 rounded-full bg-rose-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-rose-700"
+              >
+                <Trash2 className="h-3.5 w-3.5" /> হ্যাঁ, মুছে ফেলুন
               </button>
             </div>
           </div>
@@ -5916,12 +6222,12 @@ function UsersEditor() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [roleFilter, setRoleFilter] = useState<
-    "all" | "admin" | "editor" | "moderator" | "user"
+    "all" | "admin" | "editor" | "moderator" | "custom" | "user"
   >("all");
   const [search, setSearch] = useState("");
-  const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
   const [editingPwUser, setEditingPwUser] = useState<AdminUserRecord | null>(null);
   const [newPasswordInput, setNewPasswordInput] = useState("");
+  const [confirmDeleteUser, setConfirmDeleteUser] = useState<AdminUserRecord | null>(null);
   const [form, setForm] = useState({
     email: "",
     password: "",
@@ -5929,11 +6235,12 @@ function UsersEditor() {
     phone: "",
     designation: "",
     role: "user" as "admin" | "moderator" | "editor" | "user",
+    custom_role_id: "",
   });
   const [busy, setBusy] = useState(false);
   const [detailsUser, setDetailsUser] = useState<AdminUserRecord | null>(null);
   const { logo } = useLogo();
-  const { allCategories } = useCategories();
+  const { customRoles } = useRolePermissions();
   const { items: allAccessItems, grant: grantCatAccess, revoke: revokeCatAccess } = useCategoryAccess();
   const { upsertStaffProfile } = useStaffProfiles();
   const avatarUploadRef = useRef<HTMLInputElement>(null);
@@ -5945,21 +6252,14 @@ function UsersEditor() {
       const list = await listUsers();
       setUsers((prev) => {
         const map = new Map<string, AdminUserRecord>();
-        // Add fresh items from list
         for (const item of list) {
           const key = (item.email || item.id || "").toLowerCase();
           if (key && !map.has(key)) map.set(key, item);
         }
-        // Preserve any optimistic items in prev if not yet returned
         for (const p of prev) {
           const key = (p.email || p.id || "").toLowerCase();
           if (key && !map.has(key)) {
             map.set(key, p);
-          } else if (key && map.has(key)) {
-            const existing = map.get(key)!;
-            if (p.password && (!existing.password || existing.password.includes("নিবন্ধিত"))) {
-              map.set(key, { ...existing, password: p.password });
-            }
           }
         }
         return Array.from(map.values());
@@ -6015,25 +6315,43 @@ function UsersEditor() {
     setBusy(true);
     const targetEmail = form.email.trim();
     const createdRole = form.role;
+    const selectedCustom = customRoles.find((r) => r.id === form.custom_role_id) || null;
     try {
-      const res = await createUser({ data: form });
+      const res = await createUser({
+        data: {
+          email: form.email,
+          password: form.password,
+          full_name: form.full_name,
+          phone: form.phone,
+          designation: form.designation,
+          role: form.role,
+          custom_role_id: selectedCustom?.id || null,
+          custom_role_name: selectedCustom?.name || null,
+        },
+      });
       const nowIso = new Date().toISOString();
-      const roleBadge =
-        createdRole === "admin"
-          ? "শুধু এডমিন"
-          : createdRole === "editor"
-            ? "এডিটর"
-            : createdRole === "moderator"
-              ? "মডারেটর"
-              : "সাধারণ ইউজার";
+      const roleResolved = resolveUserRoleDisplay({
+        email: targetEmail,
+        roles: createdRole === "user" ? (selectedCustom ? ["user", "moderator"] : ["user"]) : ["user", createdRole],
+        customRoleId: selectedCustom?.id || null,
+        customRoleName: selectedCustom?.name || null,
+        customRoles,
+        designation: form.designation,
+      });
 
       const optimisticUser: AdminUserRecord = {
         id: res.id,
         email: targetEmail,
-        password: form.password,
         photo_url: null,
-        designation: form.designation || roleBadge,
-        roles: createdRole === "user" ? ["user"] : ["user", createdRole],
+        designation: form.designation || roleResolved.labelBn,
+        roles:
+          createdRole === "user"
+            ? selectedCustom
+              ? ["user", "moderator"]
+              : ["user"]
+            : ["user", createdRole],
+        custom_role_id: selectedCustom?.id || null,
+        custom_role_name: selectedCustom?.name || null,
         verified_via: "email",
         created_at: nowIso,
         last_sign_in_at: nowIso,
@@ -6045,11 +6363,12 @@ function UsersEditor() {
           suspended: false,
           must_change_password: false,
           photo_url: null,
-          designation: form.designation || roleBadge,
+          designation: form.designation || roleResolved.labelBn,
+          custom_role_id: selectedCustom?.id || null,
+          custom_role_name: selectedCustom?.name || null,
         },
       };
 
-      // Optimistically add to users list so it never flickers or disappears
       setUsers((prev) => {
         const lowerTargetEmail = (targetEmail || "").trim().toLowerCase();
         const withoutTarget = prev.filter(
@@ -6068,7 +6387,6 @@ function UsersEditor() {
           : [optimisticUser, ...withoutTarget];
       });
 
-      // Reset filters so newly created user is 100% visible
       setRoleFilter("all");
       setSearch("");
       toast.success("নতুন ইউজার ও পাসওয়ার্ড সফলভাবে তৈরি হয়েছে");
@@ -6080,9 +6398,9 @@ function UsersEditor() {
         phone: "",
         designation: "",
         role: "user",
+        custom_role_id: "",
       });
 
-      // Fetch fresh list from server (will preserve optimisticUser)
       await refresh(true);
     } catch (e) {
       toast.error((e as Error).message ?? "ত্রুটি");
@@ -6098,6 +6416,13 @@ function UsersEditor() {
   ) {
     try {
       await setUserRole({ data: { user_id: uid, role, enable } });
+      void recordSuperAdminAudit({
+        action: "role_change",
+        module: "users",
+        target_id: uid,
+        target_label: uid,
+        summary: `ইউজারের রোল (${role}) ${enable ? "যুক্ত" : "বাতিল"} করা হয়েছে`,
+      });
       toast.success(`রোল আপডেট হয়েছে (${role})`);
       await refresh(true);
     } catch (e) {
@@ -6105,7 +6430,40 @@ function UsersEditor() {
     }
   }
 
-  async function del(u: AdminUserRecord) {
+  async function assignCustomRole(u: AdminUserRecord, customRoleId: string) {
+    const matched = customRoles.find((r) => r.id === customRoleId) || null;
+    try {
+      await setUserCustomRole({
+        data: {
+          user_id: u.id,
+          custom_role_id: matched?.id || null,
+          custom_role_name: matched?.name || null,
+        },
+      });
+      void recordSuperAdminAudit({
+        action: "role_change",
+        module: "users",
+        target_id: u.id,
+        target_label: u.email,
+        summary: matched
+          ? `কাস্টম রোল যুক্ত করা হয়েছে: ${matched.name}`
+          : "কাস্টম রোল অপসারণ করা হয়েছে",
+      });
+      toast.success(
+        matched
+          ? `${u.profile?.full_name || u.email}-কে "${matched.name}" রোল দেওয়া হয়েছে`
+          : "কাস্টম রোল অপসারণ করা হয়েছে"
+      );
+      await refresh(true);
+    } catch (e) {
+      toast.error((e as Error).message ?? "কাস্টম রোল আপডেট ব্যর্থ");
+    }
+  }
+
+  async function confirmDelNow() {
+    if (!confirmDeleteUser) return;
+    const u = confirmDeleteUser;
+    setConfirmDeleteUser(null);
     try {
       setUsers((prev) =>
         prev.filter(
@@ -6115,6 +6473,13 @@ function UsersEditor() {
         )
       );
       await deleteUser({ data: { user_id: u.id, email: u.email } });
+      void recordSuperAdminAudit({
+        action: "delete",
+        module: "users",
+        target_id: u.id,
+        target_label: u.email,
+        summary: `ইউজার একাউন্ট মুছে ফেলা হয়েছে: ${u.email}`,
+      });
       toast.success("ইউজার সফলভাবে মুছে ফেলা হয়েছে");
       await refresh(true);
     } catch (e) {
@@ -6127,6 +6492,13 @@ function UsersEditor() {
     const next = !(u.profile?.suspended || u.banned_until);
     try {
       await suspendUser({ data: { user_id: u.id, suspend: next } });
+      void recordSuperAdminAudit({
+        action: "update",
+        module: "users",
+        target_id: u.id,
+        target_label: u.email,
+        summary: next ? `ইউজার স্থগিত করা হয়েছে: ${u.email}` : `ইউজার সক্রিয় করা হয়েছে: ${u.email}`,
+      });
       toast.success(next ? "ইউজার স্থগিত করা হয়েছে" : "ইউজার সক্রিয় করা হয়েছে");
       await refresh(true);
     } catch (e) {
@@ -6147,6 +6519,13 @@ function UsersEditor() {
           email: editingPwUser.email,
           new_password: newPasswordInput.trim(),
         },
+      });
+      void recordSuperAdminAudit({
+        action: "security",
+        module: "users",
+        target_id: editingPwUser.id,
+        target_label: editingPwUser.email,
+        summary: `ইউজারের পাসওয়ার্ড রিসেট করা হয়েছে: ${editingPwUser.email}`,
       });
       toast.success(`${editingPwUser.email}-এর পাসওয়ার্ড আপডেট হয়েছে`);
       setEditingPwUser(null);
@@ -6173,18 +6552,20 @@ function UsersEditor() {
           photo_url: compressed,
         },
       });
-      const roleLabel = isProtectedMainSuperAdmin({
+      const isProtected = isProtectedMainSuperAdmin({
         id: avatarTargetUser.id,
         email: avatarTargetUser.email,
-      })
-        ? "সুপার এডমিন"
-        : avatarTargetUser.roles.includes("admin")
-          ? "এডমিন"
-          : avatarTargetUser.roles.includes("editor")
-            ? "এডিটর"
-            : avatarTargetUser.roles.includes("moderator")
-              ? "মোডারেটর"
-              : "ইউজার";
+      });
+      const resolvedRole = resolveUserRoleDisplay({
+        email: avatarTargetUser.email,
+        roles: avatarTargetUser.roles,
+        isMainAdmin: isProtected,
+        customRoleId: avatarTargetUser.custom_role_id || avatarTargetUser.profile?.custom_role_id,
+        customRoleName: avatarTargetUser.custom_role_name || avatarTargetUser.profile?.custom_role_name,
+        customRoles,
+        designation: avatarTargetUser.profile?.designation || avatarTargetUser.designation,
+      });
+      const roleLabel = resolvedRole.labelBn;
       await upsertStaffProfile({
         uid: avatarTargetUser.id,
         email: avatarTargetUser.email,
@@ -6204,18 +6585,23 @@ function UsersEditor() {
   }
 
   const filteredUsers = users.filter((u) => {
+    const hasCustom = Boolean(u.custom_role_id || u.profile?.custom_role_id);
     if (roleFilter === "admin" && !u.roles.includes("admin")) return false;
     if (roleFilter === "editor" && !u.roles.includes("editor")) return false;
     if (roleFilter === "moderator" && !u.roles.includes("moderator")) return false;
+    if (roleFilter === "custom" && !hasCustom) return false;
     if (
       roleFilter === "user" &&
-      (u.roles.includes("admin") || u.roles.includes("editor") || u.roles.includes("moderator"))
+      (u.roles.includes("admin") ||
+        u.roles.includes("editor") ||
+        u.roles.includes("moderator") ||
+        hasCustom)
     )
       return false;
 
     const q = (search || "").trim().toLowerCase();
     if (q) {
-      const hay = `${u.email ?? ""} ${u.profile?.full_name ?? ""} ${u.profile?.phone ?? ""} ${u.profile?.username ?? ""} ${u.id ?? ""}`.toLowerCase();
+      const hay = `${u.email ?? ""} ${u.profile?.full_name ?? ""} ${u.profile?.phone ?? ""} ${u.profile?.username ?? ""} ${u.custom_role_name ?? ""} ${u.id ?? ""}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -6235,10 +6621,10 @@ function UsersEditor() {
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-950">
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-1.5 font-bold">
-            <ShieldCheck className="h-4 w-4 text-amber-700" /> সুপার এডমিন মাস্টার ইউজার, অ্যাকসেস ও পাসওয়ার্ড ভল্ট
+            <ShieldCheck className="h-4 w-4 text-amber-700" /> সুপার অ্যাডমিন মাস্টার ইউজার, কাস্টম রোল ও অ্যাকসেস কন্ট্রোল
           </p>
           <p className="mt-0.5 text-[11px] opacity-90">
-            শুধুমাত্র প্রধান সুপার অ্যাডমিন এডমিন, এডিটর, মডারেটর ও সাধারণ ইউজারসহ সকলের পাসওয়ার্ড, ক্যাটাগরি অ্যাকসেস এবং জমাকৃত সকল তথ্য দেখতে ও নিয়ন্ত্রণ করতে পারবেন।
+            শুধুমাত্র প্রধান সুপার অ্যাডমিন সকল অ্যাডমিন, এডিটর, মডারেটর, কাস্টম রোল অপারেটর ও সাধারণ ইউজারের রোল, ক্যাটাগরি অ্যাকসেস এবং পাসওয়ার্ড রিসেট নিয়ন্ত্রণ করতে পারবেন।
           </p>
         </div>
         <button
@@ -6255,7 +6641,7 @@ function UsersEditor() {
       {/* Add User Form */}
       <div className="space-y-2.5 rounded-2xl bg-card p-4 shadow-card">
         <p className="flex items-center gap-2 font-display text-sm font-bold text-primary-deep">
-          <UsersIcon className="h-4 w-4 text-primary" /> নতুন এডমিন / স্টাফ / ইউজার তৈরি করুন
+          <UsersIcon className="h-4 w-4 text-primary" /> নতুন অ্যাডমিন / অপারেটর / ইউজার তৈরি করুন
         </p>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <input
@@ -6286,7 +6672,7 @@ function UsersEditor() {
           <input
             value={form.designation}
             onChange={(e) => setForm({ ...form, designation: e.target.value })}
-            placeholder="পদবি (যেমন: এডমিন / মডারেটর)"
+            placeholder="পদবি (যেমন: জেনারেল অ্যাডমিন / হিরো ব্যানার এডিটর)"
             className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
           />
           <select
@@ -6302,7 +6688,21 @@ function UsersEditor() {
             <option value="user">সাধারণ ইউজার (User)</option>
             <option value="editor">এডিটর (Editor)</option>
             <option value="moderator">মোডারেটর (Moderator)</option>
-            <option value="admin">এডমিন (Admin — সুপার এডমিন নয়)</option>
+            <option value="admin">অ্যাডমিন (Admin — সুপার অ্যাডমিন নয়)</option>
+          </select>
+          <select
+            value={form.custom_role_id}
+            onChange={(e) => setForm({ ...form, custom_role_id: e.target.value })}
+            className="rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold sm:col-span-2"
+          >
+            <option value="">কাস্টম রোল (ঐচ্ছিক — যেমন: লাইভ চ্যাট অপারেটর, ব্যানার ম্যানেজার)</option>
+            {customRoles
+              .filter((r) => r.active !== false)
+              .map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name} {r.nameEn ? `(${r.nameEn})` : ""}
+                </option>
+              ))}
           </select>
         </div>
         <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -6335,7 +6735,7 @@ function UsersEditor() {
             { key: "all", label: `সবাই (${users.length})` },
             {
               key: "admin",
-              label: `এডমিন (${users.filter((u) => u.roles.includes("admin")).length})`,
+              label: `অ্যাডমিন (${users.filter((u) => u.roles.includes("admin")).length})`,
             },
             {
               key: "editor",
@@ -6346,13 +6746,19 @@ function UsersEditor() {
               label: `মোডারেটর (${users.filter((u) => u.roles.includes("moderator")).length})`,
             },
             {
+              key: "custom",
+              label: `কাস্টম রোল (${users.filter((u) => Boolean(u.custom_role_id || u.profile?.custom_role_id)).length})`,
+            },
+            {
               key: "user",
               label: `সাধারণ ইউজার (${
                 users.filter(
                   (u) =>
                     !u.roles.includes("admin") &&
                     !u.roles.includes("editor") &&
-                    !u.roles.includes("moderator")
+                    !u.roles.includes("moderator") &&
+                    !u.custom_role_id &&
+                    !u.profile?.custom_role_id
                 ).length
               })`,
             },
@@ -6377,7 +6783,7 @@ function UsersEditor() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="নাম, ইমেইল, ফোন বা আইডি দিয়ে খুঁজুন..."
+            placeholder="নাম, ইমেইল, কাস্টম রোল, ফোন বা আইডি দিয়ে খুঁজুন..."
             className="w-full rounded-xl border border-border bg-background py-2 pl-9 pr-3 text-xs"
           />
         </div>
@@ -6396,13 +6802,27 @@ function UsersEditor() {
               email: u.email,
               username: u.profile?.username,
             });
-            const showPw = !!visiblePasswords[u.id];
-            const pwValue = u.password || "লগইনের পর সিঙ্ক হবে / সেট করুন";
-            const hasRealPw = Boolean(u.password);
+            const uCustomRoleId = u.custom_role_id || u.profile?.custom_role_id || "";
+            const uCustomRoleName = u.custom_role_name || u.profile?.custom_role_name || "";
+            const resolvedRole = resolveUserRoleDisplay({
+              email: u.email,
+              roles: u.roles,
+              isMainAdmin: isProtectedSuper,
+              customRoleId: uCustomRoleId || null,
+              customRoleName: uCustomRoleName || null,
+              customRoles,
+              designation: u.profile?.designation || u.designation,
+            });
             const userCatAccess = allAccessItems.filter(
               (a) =>
                 a.user_id === u.id ||
-                (Boolean(u?.email && a?.user_id && typeof u.email === "string" && typeof a.user_id === "string" && a.user_id.trim().toLowerCase() === u.email.trim().toLowerCase()))
+                (Boolean(
+                  u?.email &&
+                    a?.user_id &&
+                    typeof u.email === "string" &&
+                    typeof a.user_id === "string" &&
+                    a.user_id.trim().toLowerCase() === u.email.trim().toLowerCase()
+                ))
             );
 
             return (
@@ -6414,7 +6834,6 @@ function UsersEditor() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex min-w-0 flex-1 items-start gap-3">
-                    {/* User / Staff Avatar with upload button */}
                     <div className="relative shrink-0">
                       <img
                         src={u.profile?.photo_url || u.photo_url || logo}
@@ -6468,36 +6887,35 @@ function UsersEditor() {
                         )}
                       </div>
 
-                      {/* Role & Category Access Badges */}
+                      {/* Exact Role & Category Access Badges */}
                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                        {isProtectedSuper && (
+                        {isProtectedSuper ? (
                           <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-500 to-orange-600 px-2.5 py-0.5 text-[10px] font-extrabold text-white shadow-sm">
-                            <ShieldCheck className="h-3 w-3" /> মেইন সুপার এডমিন (অপরিবর্তনীয়)
+                            <ShieldCheck className="h-3 w-3" /> সুপার অ্যাডমিন (অপরিবর্তনীয়)
+                          </span>
+                        ) : (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold text-white shadow-xs"
+                            style={{ backgroundColor: resolvedRole.badgeColor }}
+                          >
+                            <ShieldCheck className="h-3 w-3" /> {resolvedRole.labelBn}
                           </span>
                         )}
-                        {u.roles.includes("admin") && !isProtectedSuper && (
+                        {!isProtectedSuper && u.roles.includes("admin") && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-800 ring-1 ring-amber-500/30">
-                            <ShieldCheck className="h-3 w-3" /> শুধু এডমিন (সুপার এডমিন নয়)
+                            অ্যাডমিন
                           </span>
                         )}
-                        {u.roles.includes("editor") && (
+                        {!isProtectedSuper && u.roles.includes("editor") && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-purple-500/15 px-2 py-0.5 text-[10px] font-bold text-purple-700 ring-1 ring-purple-500/30">
-                            <Edit3 className="h-3 w-3" /> Editor
+                            <Edit3 className="h-3 w-3" /> এডিটর
                           </span>
                         )}
-                        {u.roles.includes("moderator") && (
+                        {!isProtectedSuper && u.roles.includes("moderator") && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-bold text-blue-700 ring-1 ring-blue-500/30">
-                            <ShieldAlert className="h-3 w-3" /> Moderator
+                            <ShieldAlert className="h-3 w-3" /> মোডারেটর
                           </span>
                         )}
-                        {!isProtectedSuper &&
-                          !u.roles.includes("admin") &&
-                          !u.roles.includes("editor") &&
-                          !u.roles.includes("moderator") && (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
-                              সাধারণ ইউজার
-                            </span>
-                          )}
                         {!isProtectedSuper && userCatAccess.length > 0 && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-700 ring-1 ring-emerald-500/30">
                             <KeyRound className="h-3 w-3" /> {userCatAccess.length} টি ক্যাটাগরি অ্যাকসেস
@@ -6523,7 +6941,7 @@ function UsersEditor() {
                     {!isProtectedSuper && (
                       <button
                         type="button"
-                        onClick={() => void del(u)}
+                        onClick={() => setConfirmDeleteUser(u)}
                         className="rounded-full bg-destructive/10 p-1.5 text-destructive transition hover:bg-destructive hover:text-white"
                         title="ইউজার মুছুন"
                       >
@@ -6533,81 +6951,40 @@ function UsersEditor() {
                   </div>
                 </div>
 
-                {/* Super Admin Password Vault Bar */}
+                {/* Auth Protection & Password Reset Bar */}
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs">
                   <div className="flex items-center gap-2">
                     <KeyRound className="h-3.5 w-3.5 text-primary" />
-                    <span className="font-semibold text-muted-foreground">পাসওয়ার্ড:</span>
-                    <span className="rounded bg-background px-2 py-0.5 font-mono text-xs font-bold text-primary-deep">
-                      {hasRealPw ? (showPw ? pwValue : "••••••••••") : pwValue}
+                    <span className="font-semibold text-muted-foreground">নিরাপত্তা:</span>
+                    <span className="rounded bg-background px-2 py-0.5 text-[11px] font-bold text-primary-deep">
+                      {u.verified_via === "google"
+                        ? "Google OAuth যাচাইকৃত"
+                        : "পাসওয়ার্ড হ্যাশ দ্বারা সুরক্ষিত (শুধুমাত্র রিসেটযোগ্য)"}
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    {hasRealPw && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setVisiblePasswords((p) => ({ ...p, [u.id]: !p[u.id] }))
-                          }
-                          className="rounded-lg bg-background px-2 py-1 text-[11px] font-semibold hover:bg-muted"
-                        >
-                          {showPw ? (
-                            <>
-                              <EyeOff className="mr-1 inline h-3 w-3" /> লুকান
-                            </>
-                          ) : (
-                            <>
-                              <Eye className="mr-1 inline h-3 w-3" /> দেখুন
-                            </>
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard?.writeText(pwValue);
-                            toast.success("পাসওয়ার্ড কপি হয়েছে");
-                          }}
-                          className="rounded-lg bg-background px-2 py-1 text-[11px] font-semibold hover:bg-muted"
-                        >
-                          <Copy className="mr-1 inline h-3 w-3" /> কপি
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const creds = `ইউজার লগইন তথ্য:\nইমেইল: ${u.email}\nপাসওয়ার্ড: ${pwValue}`;
-                            navigator.clipboard?.writeText(creds);
-                            toast.success("লগইন তথ্য (ইমেইল ও পাসওয়ার্ড) কপি হয়েছে");
-                          }}
-                          className="rounded-lg bg-emerald-500/10 px-2 py-1 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-500/20"
-                          title="ইমেইল ও পাসওয়ার্ড একসাথে কপি করুন"
-                        >
-                          📋 ক্রেডেনশিয়াল কপি
-                        </button>
-                      </>
-                    )}
                     {!isProtectedSuper && (
                       <button
                         type="button"
                         onClick={() => {
                           setEditingPwUser(u);
-                          setNewPasswordInput(u.password || "");
+                          setNewPasswordInput("");
                         }}
                         className="rounded-lg bg-primary/15 px-2.5 py-1 text-[11px] font-bold text-primary-deep hover:bg-primary/25"
                       >
-                        পাসওয়ার্ড সেট/পরিবর্তন
+                        পাসওয়ার্ড রিসেট / সেট করুন
                       </button>
                     )}
                   </div>
                 </div>
 
-                {/* Role & Account Actions */}
+                {/* Role & Custom Role Assignment Actions */}
                 {isProtectedSuper ? (
                   <p className="mt-2 rounded-xl bg-amber-500/10 px-3 py-1.5 text-[11px] font-semibold text-amber-900">
                     🔒 মেইন সুপার অ্যাডমিন স্থায়ীভাবে সুরক্ষিত — কেউ রিমোভ, স্থগিত বা বাদ দিতে পারবে না।
                   </p>
                 ) : (
-                  <div className="mt-2.5 flex flex-wrap gap-1.5">
+                  <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                     <RoleToggle
                       active={u.roles.includes("admin")}
                       onClick={() => toggleRole(u.id, "admin", !u.roles.includes("admin"))}
@@ -6625,6 +7002,19 @@ function UsersEditor() {
                       }
                       label="Moderator"
                     />
+                    <select
+                      value={uCustomRoleId}
+                      onChange={(e) => void assignCustomRole(u, e.target.value)}
+                      className="rounded-full border border-primary/30 bg-background px-2.5 py-1 text-[11px] font-semibold text-primary-deep outline-none focus:border-primary"
+                      title="কাস্টম অ্যাডমিন রোল নির্ধারণ করুন"
+                    >
+                      <option value="">কাস্টম রোল: নেই</option>
+                      {customRoles.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          কাস্টম রোল: {r.name}
+                        </option>
+                      ))}
+                    </select>
                     <button
                       onClick={() => toggleSuspend(u)}
                       className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
@@ -6690,6 +7080,46 @@ function UsersEditor() {
                 className="rounded-full bg-muted px-3 py-1.5 text-xs font-semibold"
               >
                 বাতিল
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* In-UI Delete User Confirmation Modal */}
+      {confirmDeleteUser && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setConfirmDeleteUser(null)}
+        >
+          <div
+            className="w-full max-w-md space-y-3 rounded-3xl bg-card p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="font-display text-sm font-bold text-rose-600">
+              ইউজার অ্যাকাউন্ট মুছে ফেলার নিশ্চিতকরণ
+            </p>
+            <p className="text-xs text-muted-foreground">
+              আপনি কি নিশ্চিতভাবে{" "}
+              <span className="font-bold text-foreground">
+                {confirmDeleteUser.profile?.full_name || confirmDeleteUser.email}
+              </span>{" "}
+              ({confirmDeleteUser.email}) অ্যাকাউন্টটি স্থায়ীভাবে মুছে ফেলতে চান?
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteUser(null)}
+                className="rounded-full bg-muted px-4 py-1.5 text-xs font-semibold"
+              >
+                বাতিল
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDelNow()}
+                className="inline-flex items-center gap-1 rounded-full bg-rose-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-rose-700"
+              >
+                <Trash2 className="h-3.5 w-3.5" /> হ্যাঁ, মুছে ফেলুন
               </button>
             </div>
           </div>
@@ -6835,29 +7265,14 @@ function UserDetailsModal({
           </button>
         </div>
 
-        {/* Password & Auth Box */}
+        {/* Auth Protection Box */}
         <div className="rounded-2xl border border-primary/25 bg-primary/5 p-3">
-          <p className="text-[11px] font-bold text-primary-deep">🔐 লগইন ও পাসওয়ার্ড তথ্য</p>
-          <div className="mt-1.5 flex items-center justify-between gap-2">
-            <div>
-              <p className="text-[10px] text-muted-foreground">পাসওয়ার্ড:</p>
-              <p className="font-mono text-sm font-bold text-primary-deep">
-                {user.password || "Google / Phone লগইন (পাসওয়ার্ড সেট করতে পারেন)"}
-              </p>
-            </div>
-            {user.password && (
-              <button
-                type="button"
-                onClick={() => {
-                  navigator.clipboard?.writeText(user.password || "");
-                  toast.success("পাসওয়ার্ড কপি হয়েছে");
-                }}
-                className="rounded-full bg-primary px-3 py-1 text-[11px] font-bold text-primary-foreground"
-              >
-                <Copy className="mr-1 inline h-3 w-3" /> কপি
-              </button>
-            )}
-          </div>
+          <p className="text-[11px] font-bold text-primary-deep">🔐 লগইন ও নিরাপত্তা তথ্য</p>
+          <p className="mt-1 text-xs font-semibold text-primary-deep">
+            {user.verified_via === "google"
+              ? "Google OAuth দ্বারা সুরক্ষিত (পাসওয়ার্ড প্রয়োজন নেই)"
+              : "পাসওয়ার্ড নিরাপদ scrypt হ্যাশ দ্বারা সুরক্ষিত — প্রয়োজনে পাসওয়ার্ড রিসেট করা যাবে।"}
+          </p>
         </div>
 
         <div className="grid grid-cols-2 gap-2 text-xs">
@@ -8135,8 +8550,14 @@ function OtpGatewayConfigCard() {
     greenwebToken: "",
     customSmsUrl: "",
   });
+  const [configuredMap, setConfiguredMap] = useState<{
+    smtpPass?: boolean;
+    resendApiKey?: boolean;
+    bulksmsApiKey?: boolean;
+    greenwebToken?: boolean;
+  }>({});
   const [activeSessions, setActiveSessions] = useState<
-    Array<{ target: string; channel: "email" | "phone"; code: string; expiresAt: number }>
+    Array<{ target: string; channel: "email" | "phone"; codePreview: string; expiresAt: number }>
   >([]);
   const [saving, setSaving] = useState(false);
 
@@ -8145,7 +8566,11 @@ function OtpGatewayConfigCard() {
       const r = await fetch("/api/admin/otp-config");
       const data = await r.json();
       if (data?.config) {
-        setCfg((prev) => ({ ...prev, ...data.config }));
+        const { configured, ...rest } = data.config;
+        setCfg((prev) => ({ ...prev, ...rest }));
+        if (configured && typeof configured === "object") {
+          setConfiguredMap(configured);
+        }
       }
       if (Array.isArray(data?.activeSessions)) {
         setActiveSessions(data.activeSessions);
@@ -8171,6 +8596,13 @@ function OtpGatewayConfigCard() {
         body: JSON.stringify(cfg),
       });
       if (!r.ok) throw new Error("সংরক্ষণ ব্যর্থ");
+      void recordSuperAdminAudit({
+        action: "settings_change",
+        module: "security",
+        target_id: "otp_gateway_config",
+        target_label: "OTP & Email Gateway",
+        summary: "OTP ও ইমেইল গেটওয়ে কনফিগারেশন আপডেট করা হয়েছে",
+      });
       toast.success("৬-ডিজিট ওটিপি (OTP) ইমেইল ও এসএমএস গেটওয়ে সংরক্ষিত হয়েছে!");
       await loadConfig();
     } catch (err: any) {
@@ -8188,7 +8620,7 @@ function OtpGatewayConfigCard() {
             <KeyRound className="h-4 w-4 text-primary" /> ৬-ডিজিট ওটিপি (OTP) ইমেইল ও এসএমএস গেটওয়ে সেটিংস
           </p>
           <p className="text-xs text-muted-foreground">
-            ইমেইল ও মোবাইলে সরাসরি ৬ সংখ্যার ভেরিফিকেশন কোড পাঠানোর জন্য SMTP (Gmail App Password) বা SMS API কনফিগার করুন
+            ইমেইল ও মোবাইলে সরাসরি ৬ সংখ্যার ভেরিফিকেশন কোড এবং ইমেইল নোটিফিকেশন পাঠানোর জন্য SMTP, Resend বা SMS API কনফিগার করুন
           </p>
         </div>
         <button
@@ -8213,36 +8645,62 @@ function OtpGatewayConfigCard() {
           />
         </div>
         <div>
-          <label className="text-[11px] font-semibold text-muted-foreground">
-            Gmail App Password / SMTP পাসওয়ার্ড
+          <label className="flex items-center justify-between text-[11px] font-semibold text-muted-foreground">
+            <span>Gmail App Password / SMTP পাসওয়ার্ড</span>
+            <span className={configuredMap.smtpPass ? "text-emerald-700" : "text-muted-foreground"}>
+              {configuredMap.smtpPass ? "সেট করা আছে" : "সেট করা নেই"}
+            </span>
           </label>
           <input
             type="password"
             value={cfg.smtpPass}
             onChange={(e) => setCfg({ ...cfg, smtpPass: e.target.value })}
-            placeholder="১৬ অক্ষরের অ্যাপ পাসওয়ার্ড"
+            placeholder="•••••••• (পরিবর্তন করতে নতুন মান লিখুন)"
             className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs"
           />
         </div>
         <div>
-          <label className="text-[11px] font-semibold text-muted-foreground">
-            BulkSMSBD API Key (মোবাইল SMS কোডের জন্য)
+          <label className="flex items-center justify-between text-[11px] font-semibold text-muted-foreground">
+            <span>Resend API Key (বিকল্প ইমেইল ডেলিভারি)</span>
+            <span className={configuredMap.resendApiKey ? "text-emerald-700" : "text-muted-foreground"}>
+              {configuredMap.resendApiKey ? "সেট করা আছে" : "সেট করা নেই"}
+            </span>
           </label>
           <input
+            type="password"
+            value={cfg.resendApiKey}
+            onChange={(e) => setCfg({ ...cfg, resendApiKey: e.target.value })}
+            placeholder="re_... (ঐচ্ছিক)"
+            className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs"
+          />
+        </div>
+        <div>
+          <label className="flex items-center justify-between text-[11px] font-semibold text-muted-foreground">
+            <span>BulkSMSBD API Key (মোবাইল SMS কোডের জন্য)</span>
+            <span className={configuredMap.bulksmsApiKey ? "text-emerald-700" : "text-muted-foreground"}>
+              {configuredMap.bulksmsApiKey ? "সেট করা আছে" : "সেট করা নেই"}
+            </span>
+          </label>
+          <input
+            type="password"
             value={cfg.bulksmsApiKey}
             onChange={(e) => setCfg({ ...cfg, bulksmsApiKey: e.target.value })}
-            placeholder="BulkSMSBD API Key"
+            placeholder="•••••••• (BulkSMSBD API Key)"
             className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs"
           />
         </div>
         <div>
-          <label className="text-[11px] font-semibold text-muted-foreground">
-            GreenWeb BD SMS Token (বিকল্প SMS গেটওয়ে)
+          <label className="flex items-center justify-between text-[11px] font-semibold text-muted-foreground">
+            <span>GreenWeb BD SMS Token (বিকল্প SMS গেটওয়ে)</span>
+            <span className={configuredMap.greenwebToken ? "text-emerald-700" : "text-muted-foreground"}>
+              {configuredMap.greenwebToken ? "সেট করা আছে" : "সেট করা নেই"}
+            </span>
           </label>
           <input
+            type="password"
             value={cfg.greenwebToken}
             onChange={(e) => setCfg({ ...cfg, greenwebToken: e.target.value })}
-            placeholder="GreenWeb Token"
+            placeholder="•••••••• (GreenWeb Token)"
             className="mt-0.5 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs"
           />
         </div>
@@ -8251,7 +8709,7 @@ function OtpGatewayConfigCard() {
       {activeSessions.length > 0 && (
         <div className="rounded-2xl border border-primary/20 bg-primary/5 p-3">
           <p className="mb-2 text-xs font-bold text-primary-deep">
-            সক্রিয় ওটিপি সেশন মনিটর (শুধুমাত্র সুপার এডমিনের জন্য দৃশ্যমান):
+            সক্রিয় ওটিপি সেশন মনিটর (গোপনীয়তা সুরক্ষিত):
           </p>
           <div className="space-y-1.5">
             {activeSessions.map((s) => (
@@ -8262,8 +8720,8 @@ function OtpGatewayConfigCard() {
                 <span>
                   <strong>{s.channel === "email" ? "📧 ইমেইল" : "📱 মোবাইল"}:</strong> {s.target}
                 </span>
-                <span className="rounded-lg bg-emerald-500/15 px-2.5 py-0.5 font-mono text-sm font-extrabold text-emerald-800">
-                  {s.code}
+                <span className="rounded-lg bg-emerald-500/15 px-2.5 py-0.5 font-mono text-xs font-bold text-emerald-800">
+                  সক্রিয় ({s.codePreview || "••••••"})
                 </span>
               </div>
             ))}
@@ -9196,41 +9654,86 @@ const QUICK_STAFF_REPLIES = [
   "জরুরী রক্ত বা অ্যাম্বুলেন্সের জন্য আমাদের জরুরী সেকশন দেখুন অথবা ৯৯৯-এ কল করুন।",
 ];
 
+const CHAT_STATUS_LABELS: Record<ChatThreadStatus, { label: string; badge: string }> = {
+  new: { label: "নতুন", badge: "bg-rose-500/15 text-rose-700 border-rose-500/30" },
+  assigned: { label: "অ্যাসাইনড", badge: "bg-indigo-500/15 text-indigo-700 border-indigo-500/30" },
+  in_progress: { label: "চলমান", badge: "bg-amber-500/15 text-amber-800 border-amber-500/30" },
+  waiting_customer: {
+    label: "গ্রাহকের অপেক্ষায়",
+    badge: "bg-sky-500/15 text-sky-700 border-sky-500/30",
+  },
+  resolved: { label: "সমাধান হয়েছে", badge: "bg-emerald-500/15 text-emerald-700 border-emerald-500/30" },
+  closed: { label: "বন্ধ", badge: "bg-slate-500/15 text-slate-700 border-slate-500/30" },
+};
+
 function ChatThreadsAdmin() {
   const [threads, setThreads] = useState<ThreadView[]>([]);
+  const [operators, setOperators] = useState<AdminUserRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [active, setActive] = useState<ThreadView | null>(null);
   const [search, setSearch] = useState("");
-  const [filterMode, setFilterMode] = useState<"all" | "unread" | "replied">("all");
+  const [filterMode, setFilterMode] = useState<
+    | "all"
+    | "new"
+    | "unread"
+    | "mine"
+    | "unassigned"
+    | "in_progress"
+    | "waiting_customer"
+    | "resolved"
+    | "closed"
+  >("all");
   const [inlineDrafts, setInlineDrafts] = useState<Record<string, string>>({});
   const [sendingThreadId, setSendingThreadId] = useState<string | null>(null);
+  const [confirmDeleteThread, setConfirmDeleteThread] = useState<ThreadView | null>(null);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
 
-  const { user, isMainAdmin, isAdmin, isEditor, isModerator } = useAuth();
+  const { user, roles, isMainAdmin, customRoleId, customRoleName } = useAuth();
+  const { hasPermission, customRoles } = useRolePermissions();
   const { getStaffProfile, upsertStaffProfile } = useStaffProfiles();
   const { logo } = useLogo();
   const liveThreads = useChatThreads();
 
-  const me = user?.id || (isMainAdmin ? "super_admin_mahmudul" : "staff_member");
+  const canViewAll = isMainAdmin || hasPermission("chat_view_all");
+  const canReply = isMainAdmin || hasPermission("chat_reply");
+  const canAssign = isMainAdmin || hasPermission("chat_assign") || hasPermission("chat_transfer");
+  const canCloseReopen = isMainAdmin || hasPermission("chat_close_reopen");
+  const canViewHistory = isMainAdmin || hasPermission("chat_view_history");
+
+  const me = user?.id || (isMainAdmin ? "super_admin_mahmudul" : "operator");
   const myStaff = getStaffProfile(me) || getStaffProfile(user?.email);
-  const myRoleLabel = isMainAdmin
-    ? "সুপার এডমিন"
-    : isAdmin
-      ? "এডমিন"
-      : isEditor
-        ? "এডিটর"
-        : isModerator
-          ? "মোডারেটর"
-          : "স্টাফ";
+  const resolvedRole = resolveUserRoleDisplay({
+    email: user?.email,
+    roles,
+    isMainAdmin,
+    customRoleId,
+    customRoleName,
+    customRoles,
+    designation: myStaff?.designation,
+  });
+  const myRoleLabel = resolvedRole.labelBn;
   const myName =
     myStaff?.full_name ||
     user?.displayName ||
-    (isMainAdmin ? "মেইন সুপার এডমিন" : user?.email?.split("@")[0] || myRoleLabel);
+    (isMainAdmin ? "মেইন সুপার অ্যাডমিন" : user?.email?.split("@")[0] || myRoleLabel);
   const myPhoto = myStaff?.photo_url || logo;
 
   async function refresh() {
     try {
-      const list = (await listThreadsWithUsers()) as ThreadView[];
-      setThreads(list);
+      const [list, allUsers] = await Promise.all([
+        listThreadsWithUsers(),
+        listUsers().catch(() => [] as AdminUserRecord[]),
+      ]);
+      setThreads(list as ThreadView[]);
+      const eligibleOperators = allUsers.filter(
+        (u) =>
+          u.roles.includes("admin") ||
+          u.roles.includes("editor") ||
+          u.roles.includes("moderator") ||
+          Boolean(u.custom_role_id || u.profile?.custom_role_id) ||
+          isProtectedMainSuperAdmin({ id: u.id, email: u.email, username: u.profile?.username })
+      );
+      setOperators(eligibleOperators);
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -9240,7 +9743,7 @@ function ChatThreadsAdmin() {
 
   useEffect(() => {
     void refresh();
-    const timer = setInterval(refresh, 3000);
+    const timer = setInterval(refresh, 4000);
     return () => clearInterval(timer);
   }, []);
 
@@ -9249,6 +9752,10 @@ function ChatThreadsAdmin() {
   }, [liveThreads.items.length, liveThreads.items.map((t) => t.last_message_at).join(",")]);
 
   async function sendQuickInlineReply(thread: ThreadView, customText?: string) {
+    if (!canReply) {
+      toast.error("আপনার লাইভ চ্যাটে উত্তর দেওয়ার অনুমতি নেই");
+      return;
+    }
     const replyBody = (customText ?? inlineDrafts[thread.id] ?? "").trim();
     if (!replyBody) {
       toast.error("উত্তর লিখুন অথবা উপরের রেডি উত্তর বাটনে ক্লিক করুন");
@@ -9257,7 +9764,6 @@ function ChatThreadsAdmin() {
 
     setSendingThreadId(thread.id);
     try {
-      // Sync responder profile so customer sees their Name, Role & Photo
       await upsertStaffProfile({
         uid: me,
         email: user?.email || "",
@@ -9290,6 +9796,15 @@ function ChatThreadsAdmin() {
         throw new Error("উত্তর পাঠানো যায়নি");
       }
 
+      if (thread.status === "new" || !thread.status) {
+        await updateChatThreadMeta(thread.id, {
+          status: "in_progress",
+          assigned_to_uid: thread.assigned_to_uid || me,
+          assigned_to_name: thread.assigned_to_name || myName,
+          assigned_role: thread.assigned_role || myRoleLabel,
+        });
+      }
+
       void recordStaffActivity({
         action_type: "reply",
         action_label: "গ্রাহকের লাইভ চ্যাটে দ্রুত উত্তর দিয়েছে",
@@ -9310,8 +9825,86 @@ function ChatThreadsAdmin() {
     }
   }
 
-  async function handleDeleteThread(thread: ThreadView) {
-    if (!isMainAdmin) return;
+  async function handleAssignOperator(thread: ThreadView, operatorId: string) {
+    if (!canAssign) {
+      toast.error("চ্যাট অ্যাসাইন বা ট্রান্সফার করার অনুমতি নেই");
+      return;
+    }
+    if (!operatorId) {
+      const res = await updateChatThreadMeta(thread.id, {
+        assigned_to_uid: "",
+        assigned_to_name: "",
+        assigned_role: "",
+        status: thread.status === "assigned" ? "new" : thread.status,
+      });
+      if (res.ok) {
+        toast.success("অ্যাসাইনমেন্ট সরানো হয়েছে");
+        await refresh();
+      } else {
+        toast.error(res.error || "আপডেট ব্যর্থ");
+      }
+      return;
+    }
+    const op = operators.find((o) => o.id === operatorId);
+    if (!op) return;
+    const opRole = resolveUserRoleDisplay({
+      email: op.email,
+      roles: op.roles,
+      isMainAdmin: isProtectedMainSuperAdmin({ id: op.id, email: op.email, username: op.profile?.username }),
+      customRoleId: op.custom_role_id || op.profile?.custom_role_id,
+      customRoleName: op.custom_role_name || op.profile?.custom_role_name,
+      customRoles,
+      designation: op.profile?.designation || op.designation,
+    });
+    const opName = op.profile?.full_name || op.email.split("@")[0] || opRole.labelBn;
+    const res = await updateChatThreadMeta(thread.id, {
+      assigned_to_uid: op.id,
+      assigned_to_name: opName,
+      assigned_role: opRole.labelBn,
+      status: thread.status === "new" || !thread.status ? "assigned" : thread.status,
+    });
+    if (res.ok) {
+      toast.success(`${opName} (${opRole.labelBn})-কে চ্যাট অ্যাসাইন করা হয়েছে`);
+      await refresh();
+    } else {
+      toast.error(res.error || "অ্যাসাইন ব্যর্থ হয়েছে");
+    }
+  }
+
+  async function handleStatusChange(thread: ThreadView, status: ChatThreadStatus) {
+    if (!canCloseReopen) {
+      toast.error("স্ট্যাটাস পরিবর্তনের অনুমতি নেই");
+      return;
+    }
+    const patch: Parameters<typeof updateChatThreadMeta>[1] = { status };
+    if (thread.status === "closed" || thread.status === "resolved") {
+      if (status === "in_progress" || status === "assigned" || status === "new") {
+        patch.reopened_at = new Date().toISOString();
+      }
+    }
+    const res = await updateChatThreadMeta(thread.id, patch);
+    if (res.ok) {
+      toast.success(`চ্যাট স্ট্যাটাস "${CHAT_STATUS_LABELS[status].label}" করা হয়েছে`);
+      await refresh();
+    } else {
+      toast.error(res.error || "স্ট্যাটাস পরিবর্তন ব্যর্থ হয়েছে");
+    }
+  }
+
+  async function handlePriorityChange(thread: ThreadView, priority: ChatThreadPriority) {
+    const res = await updateChatThreadMeta(thread.id, { priority });
+    if (res.ok) {
+      toast.success(priority === "urgent" ? "জরুরি হিসেবে চিহ্নিত" : "সাধারণ অগ্রাধিকার");
+      await refresh();
+    } else {
+      toast.error(res.error || "আপডেট ব্যর্থ হয়েছে");
+    }
+  }
+
+  async function confirmDeleteThreadNow() {
+    if (!isMainAdmin || !confirmDeleteThread) return;
+    const thread = confirmDeleteThread;
+    setConfirmDeleteThread(null);
     const { error } = await liveThreads.remove(thread.id);
     if (error) {
       toast.error(error.message);
@@ -9324,8 +9917,9 @@ function ChatThreadsAdmin() {
     toast.success(`${thread.profile?.full_name || "গ্রাহক"}-এর লাইভ চ্যাট ডিলিট করা হয়েছে`);
   }
 
-  async function handleDeleteAllThreads() {
+  async function confirmDeleteAllNow() {
     if (!isMainAdmin || threads.length === 0) return;
+    setConfirmDeleteAll(false);
     const { error } = await liveThreads.removeAll();
     if (error) {
       toast.error(error.message);
@@ -9336,15 +9930,40 @@ function ChatThreadsAdmin() {
     toast.success("সকল লাইভ চ্যাট ডিলিট করা হয়েছে");
   }
 
-  const unreadTotal = threads.filter((t) => Number(t.staff_unread) > 0).length;
+  const visibleThreads = canViewAll
+    ? threads
+    : threads.filter((t) => !t.assigned_to_uid || t.assigned_to_uid === me);
 
-  const filtered = threads.filter((t) => {
+  const unreadTotal = visibleThreads.filter((t) => Number(t.staff_unread) > 0).length;
+  const mineTotal = visibleThreads.filter((t) => t.assigned_to_uid === me).length;
+  const unassignedTotal = visibleThreads.filter((t) => !t.assigned_to_uid).length;
+  const newTotal = visibleThreads.filter((t) => (t.status || "new") === "new").length;
+  const resolvedTotal = visibleThreads.filter((t) => t.status === "resolved").length;
+  const closedTotal = visibleThreads.filter((t) => t.status === "closed").length;
+
+  const filtered = visibleThreads.filter((t) => {
+    const status = (t.status || "new") as ChatThreadStatus;
+    if (filterMode === "new" && status !== "new") return false;
     if (filterMode === "unread" && !(Number(t.staff_unread) > 0)) return false;
-    if (filterMode === "replied" && Number(t.staff_unread) > 0) return false;
+    if (filterMode === "mine" && t.assigned_to_uid !== me) return false;
+    if (filterMode === "unassigned" && Boolean(t.assigned_to_uid)) return false;
+    if (filterMode === "in_progress" && status !== "in_progress" && status !== "assigned")
+      return false;
+    if (filterMode === "waiting_customer" && status !== "waiting_customer") return false;
+    if (filterMode === "resolved" && status !== "resolved") return false;
+    if (filterMode === "closed" && status !== "closed") return false;
 
     const q = (search || "").trim().toLowerCase();
     if (!q) return true;
-    return [t?.email, t?.profile?.full_name, t?.profile?.username, t?.profile?.phone, t?.last_message_preview]
+    return [
+      t?.email,
+      t?.profile?.full_name,
+      t?.profile?.username,
+      t?.profile?.phone,
+      t?.last_message_preview,
+      t?.assigned_to_name,
+      t?.handoff_summary,
+    ]
       .filter(Boolean)
       .join(" ")
       .toLowerCase()
@@ -9355,11 +9974,19 @@ function ChatThreadsAdmin() {
     return (
       <AdminChatPanel
         thread={active}
+        operators={operators}
+        canReply={canReply}
+        canAssign={canAssign}
+        canCloseReopen={canCloseReopen}
+        canViewHistory={canViewHistory}
         onBack={() => {
           setActive(null);
           void refresh();
         }}
-        onDeleteThread={() => void handleDeleteThread(active)}
+        onRequestDeleteThread={() => setConfirmDeleteThread(active)}
+        onAssignOperator={(opId) => void handleAssignOperator(active, opId)}
+        onStatusChange={(st) => void handleStatusChange(active, st)}
+        onPriorityChange={(pr) => void handlePriorityChange(active, pr)}
         me={me}
       />
     );
@@ -9367,7 +9994,7 @@ function ChatThreadsAdmin() {
 
   return (
     <div className="space-y-3">
-      {/* Easy Responder Identity Banner */}
+      {/* Responder Identity Banner */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/25 bg-gradient-card p-3.5 shadow-card">
         <div className="flex items-center gap-3">
           <img
@@ -9385,7 +10012,7 @@ function ChatThreadsAdmin() {
               </span>
             </div>
             <p className="mt-0.5 text-[11px] text-muted-foreground">
-              নিচের যেকোনো মেসেজ কার্ডে সরাসরি উত্তর লিখুন বা ১-ক্লিকে রেডি উত্তর পাঠান — গ্রাহক আপনার নাম ও ছবি দেখতে পাবেন।
+              চ্যাট অ্যাসাইন, ট্রান্সফার, AI হ্যান্ডঅফ সারাংশ এবং স্ট্যাটাস ম্যানেজমেন্ট সহ পূর্ণাঙ্গ সাপোর্ট ইনবক্স।
             </p>
           </div>
         </div>
@@ -9393,7 +10020,7 @@ function ChatThreadsAdmin() {
           {isMainAdmin && threads.length > 0 && (
             <button
               type="button"
-              onClick={() => void handleDeleteAllThreads()}
+              onClick={() => setConfirmDeleteAll(true)}
               className="inline-flex items-center gap-1.5 rounded-full bg-destructive/15 px-3 py-1.5 text-xs font-bold text-destructive transition hover:bg-destructive hover:text-white"
             >
               <Trash2 className="h-3.5 w-3.5" /> সব চ্যাট ডিলিট ({threads.length})
@@ -9409,50 +10036,41 @@ function ChatThreadsAdmin() {
         </div>
       </div>
 
-      {/* Filter Pills & Search */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      {/* Inbox Workflow Filter Pills & Search */}
+      <div className="flex flex-col gap-2">
         <div className="flex flex-wrap gap-1.5">
-          <button
-            type="button"
-            onClick={() => setFilterMode("all")}
-            className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
-              filterMode === "all"
-                ? "bg-gradient-hero text-white shadow-card"
-                : "bg-card text-muted-foreground border border-border"
-            }`}
-          >
-            সব মেসেজ ({threads.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilterMode("unread")}
-            className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
-              filterMode === "unread"
-                ? "bg-rose-600 text-white shadow-card"
-                : "bg-card text-rose-700 border border-rose-200"
-            }`}
-          >
-            উত্তর বাকি ({unreadTotal})
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilterMode("replied")}
-            className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
-              filterMode === "replied"
-                ? "bg-emerald-600 text-white shadow-card"
-                : "bg-card text-emerald-800 border border-emerald-200"
-            }`}
-          >
-            উত্তর দেওয়া হয়েছে ({Math.max(0, threads.length - unreadTotal)})
-          </button>
+          {[
+            { key: "all", label: `সব (${visibleThreads.length})` },
+            { key: "unread", label: `অপঠিত (${unreadTotal})` },
+            { key: "new", label: `নতুন (${newTotal})` },
+            { key: "mine", label: `আমার চ্যাট (${mineTotal})` },
+            { key: "unassigned", label: `আন-অ্যাসাইনড (${unassignedTotal})` },
+            { key: "in_progress", label: "চলমান / অ্যাসাইনড" },
+            { key: "waiting_customer", label: "গ্রাহকের অপেক্ষায়" },
+            { key: "resolved", label: `সমাধান (${resolvedTotal})` },
+            { key: "closed", label: `বন্ধ (${closedTotal})` },
+          ].map((pill) => (
+            <button
+              key={pill.key}
+              type="button"
+              onClick={() => setFilterMode(pill.key as typeof filterMode)}
+              className={`rounded-full px-3 py-1 text-[11px] font-bold transition ${
+                filterMode === pill.key
+                  ? "bg-gradient-hero text-white shadow-card"
+                  : "border border-border bg-card text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {pill.label}
+            </button>
+          ))}
         </div>
 
-        <div className="relative flex-1 sm:max-w-xs">
+        <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="গ্রাহকের নাম, ফোন বা মেসেজ খুঁজুন..."
+            placeholder="গ্রাহকের নাম, ফোন, অ্যাসাইনকৃত অপারেটর বা AI সারাংশ খুঁজুন..."
             className="w-full rounded-full border border-border bg-card py-1.5 pl-8 pr-3 text-xs shadow-sm outline-none focus:border-primary"
           />
         </div>
@@ -9466,9 +10084,9 @@ function ChatThreadsAdmin() {
       ) : filtered.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center text-sm text-muted-foreground">
           <MessageCircle className="mx-auto mb-2 h-8 w-8 text-muted-foreground/50" />
-          <p className="font-semibold text-foreground">এই মুহূর্তে কোনো লাইভ চ্যাট মেসেজ নেই</p>
+          <p className="font-semibold text-foreground">এই ফিল্টারে কোনো লাইভ চ্যাট মেসেজ নেই</p>
           <p className="mt-1 text-xs">
-            গ্রাহকরা ফ্লোটিং লাইভ চ্যাটে মেসেজ পাঠালেই এখানে তাৎক্ষণিকভাবে দেখা যাবে এবং সরাসরি উত্তর দিতে পারবেন।
+            গ্রাহকরা ফ্লোটিং লাইভ চ্যাটে বা AI হ্যান্ডঅফ থেকে মেসেজ পাঠালেই এখানে তাৎক্ষণিকভাবে দেখা যাবে।
           </p>
         </div>
       ) : (
@@ -9479,14 +10097,19 @@ function ChatThreadsAdmin() {
             const isUnread = Number(t.staff_unread) > 0;
             const draft = inlineDrafts[t.id] || "";
             const isSending = sendingThreadId === t.id;
+            const status = (t.status || "new") as ChatThreadStatus;
+            const statusMeta = CHAT_STATUS_LABELS[status] || CHAT_STATUS_LABELS.new;
+            const isUrgent = t.priority === "urgent";
 
             return (
               <div
                 key={t.id}
                 className={`rounded-3xl border p-4 shadow-card transition ${
-                  isUnread
-                    ? "border-rose-300 bg-gradient-to-br from-rose-50/60 to-card"
-                    : "border-border bg-card"
+                  isUrgent
+                    ? "border-amber-400 bg-gradient-to-br from-amber-50/70 to-card"
+                    : isUnread
+                      ? "border-rose-300 bg-gradient-to-br from-rose-50/60 to-card"
+                      : "border-border bg-card"
                 }`}
               >
                 {/* Customer Info & Open Chat / Delete Buttons */}
@@ -9506,13 +10129,24 @@ function ChatThreadsAdmin() {
                         <p className="font-display text-sm font-bold text-primary-deep">
                           {customerName}
                         </p>
-                        {isUnread ? (
-                          <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-extrabold text-white">
-                            {t.staff_unread} টি নতুন মেসেজ
+                        <span
+                          className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusMeta.badge}`}
+                        >
+                          {statusMeta.label}
+                        </span>
+                        {isUrgent && (
+                          <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                            <AlertTriangle className="h-3 w-3" /> জরুরি
                           </span>
-                        ) : (
-                          <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-                            ✓ উত্তর দেওয়া হয়েছে
+                        )}
+                        {t.source === "ai_handoff" && (
+                          <span className="inline-flex items-center gap-0.5 rounded-full bg-indigo-500/15 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
+                            <Bot className="h-3 w-3" /> AI হ্যান্ডঅফ
+                          </span>
+                        )}
+                        {isUnread && (
+                          <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                            {t.staff_unread} টি নতুন
                           </span>
                         )}
                       </div>
@@ -9525,6 +10159,11 @@ function ChatThreadsAdmin() {
                           day: "2-digit",
                           month: "2-digit",
                         })}
+                        {t.assigned_to_name && (
+                          <span className="ml-1 font-semibold text-primary-deep">
+                            • অ্যাসাইনড: {t.assigned_to_name} ({t.assigned_role || "অপারেটর"})
+                          </span>
+                        )}
                       </p>
                     </div>
                   </div>
@@ -9535,12 +10174,13 @@ function ChatThreadsAdmin() {
                       onClick={() => setActive(t)}
                       className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary-deep transition hover:bg-primary hover:text-white"
                     >
-                      <MessageCircle className="h-3.5 w-3.5" /> সম্পূর্ণ চ্যাট ও ফাইল/ভয়েস ({isUnread ? "উত্তর দিন" : "খুলুন"})
+                      <MessageCircle className="h-3.5 w-3.5" /> সম্পূর্ণ চ্যাট ও ফাইল/ভয়েস (
+                      {isUnread ? "উত্তর দিন" : "খুলুন"})
                     </button>
                     {isMainAdmin && (
                       <button
                         type="button"
-                        onClick={() => void handleDeleteThread(t)}
+                        onClick={() => setConfirmDeleteThread(t)}
                         className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-3 py-1.5 text-xs font-bold text-destructive transition hover:bg-destructive hover:text-white"
                         title="এই লাইভ চ্যাট ডিলিট করুন"
                       >
@@ -9550,10 +10190,86 @@ function ChatThreadsAdmin() {
                   </div>
                 </div>
 
+                {/* Operator Workflow Controls */}
+                {(canAssign || canCloseReopen) && (
+                  <div className="mt-2.5 flex flex-wrap items-center gap-2 rounded-2xl bg-muted/40 p-2 text-[11px]">
+                    {canAssign && (
+                      <label className="flex items-center gap-1.5 font-semibold text-muted-foreground">
+                        <ArrowRightLeft className="h-3.5 w-3.5 text-primary" />
+                        <span>অপারেটর:</span>
+                        <select
+                          value={t.assigned_to_uid || ""}
+                          onChange={(e) => void handleAssignOperator(t, e.target.value)}
+                          className="rounded-lg border border-border bg-background px-2 py-1 text-[11px] font-semibold text-foreground outline-none focus:border-primary"
+                        >
+                          <option value="">আন-অ্যাসাইনড</option>
+                          {operators.map((op) => {
+                            const r = resolveUserRoleDisplay({
+                              email: op.email,
+                              roles: op.roles,
+                              isMainAdmin: isProtectedMainSuperAdmin({
+                                id: op.id,
+                                email: op.email,
+                                username: op.profile?.username,
+                              }),
+                              customRoleId: op.custom_role_id || op.profile?.custom_role_id,
+                              customRoleName: op.custom_role_name || op.profile?.custom_role_name,
+                              customRoles,
+                            });
+                            return (
+                              <option key={op.id} value={op.id}>
+                                {op.profile?.full_name || op.email.split("@")[0]} ({r.labelBn})
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </label>
+                    )}
+                    {canCloseReopen && (
+                      <>
+                        <select
+                          value={status}
+                          onChange={(e) =>
+                            void handleStatusChange(t, e.target.value as ChatThreadStatus)
+                          }
+                          className="rounded-lg border border-border bg-background px-2 py-1 text-[11px] font-semibold text-foreground outline-none focus:border-primary"
+                        >
+                          {Object.entries(CHAT_STATUS_LABELS).map(([k, v]) => (
+                            <option key={k} value={k}>
+                              স্ট্যাটাস: {v.label}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handlePriorityChange(t, isUrgent ? "normal" : "urgent")
+                          }
+                          className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${
+                            isUrgent
+                              ? "bg-amber-500 text-white"
+                              : "border border-border bg-background text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          {isUrgent ? "⚡ জরুরি" : "সাধারণ"}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* AI Handoff Summary */}
+                {canViewHistory && t.handoff_summary && (
+                  <div className="mt-2 rounded-2xl border border-indigo-200 bg-indigo-50/70 px-3 py-2 text-[11px] text-indigo-950">
+                    <span className="font-bold text-indigo-700">🤖 AI হ্যান্ডঅফ সারাংশ: </span>
+                    <span>{t.handoff_summary}</span>
+                  </div>
+                )}
+
                 {/* Latest Message Preview Bubble */}
                 <div
                   onClick={() => setActive(t)}
-                  className="mt-3 cursor-pointer rounded-2xl border border-border/80 bg-background/90 px-3.5 py-2.5 text-xs transition hover:border-primary/40"
+                  className="mt-2.5 cursor-pointer rounded-2xl border border-border/80 bg-background/90 px-3.5 py-2.5 text-xs transition hover:border-primary/40"
                 >
                   <span className="font-bold text-muted-foreground">সর্বশেষ বার্তা: </span>
                   <span className="font-medium text-foreground">
@@ -9561,54 +10277,137 @@ function ChatThreadsAdmin() {
                   </span>
                 </div>
 
-                {/* 1-Click Quick Reply Pills */}
-                <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                  <span className="text-[10px] font-bold text-muted-foreground">⚡ ১-ক্লিক উত্তর:</span>
-                  {QUICK_STAFF_REPLIES.slice(0, 3).map((qr, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      disabled={isSending}
-                      onClick={() => void sendQuickInlineReply(t, qr)}
-                      className="rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-[10px] font-semibold text-primary-deep transition hover:bg-primary hover:text-white disabled:opacity-50"
-                    >
-                      {qr.length > 34 ? `${qr.slice(0, 34)}...` : qr}
-                    </button>
-                  ))}
-                </div>
+                {/* 1-Click Quick Reply Pills + Inline Reply */}
+                {canReply ? (
+                  <>
+                    <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10px] font-bold text-muted-foreground">⚡ ১-ক্লিক উত্তর:</span>
+                      {QUICK_STAFF_REPLIES.slice(0, 3).map((qr, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          disabled={isSending}
+                          onClick={() => void sendQuickInlineReply(t, qr)}
+                          className="rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-[10px] font-semibold text-primary-deep transition hover:bg-primary hover:text-white disabled:opacity-50"
+                        >
+                          {qr.length > 34 ? `${qr.slice(0, 34)}...` : qr}
+                        </button>
+                      ))}
+                    </div>
 
-                {/* Direct Inline Reply Input Box */}
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void sendQuickInlineReply(t);
-                  }}
-                  className="mt-2.5 flex items-center gap-2"
-                >
-                  <input
-                    value={draft}
-                    onChange={(e) =>
-                      setInlineDrafts((prev) => ({ ...prev, [t.id]: e.target.value }))
-                    }
-                    placeholder={`${customerName}-কে সরাসরি এখানেই উত্তর লিখুন...`}
-                    className="min-w-0 flex-1 rounded-full border border-border bg-background px-3.5 py-2 text-xs outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-                  />
-                  <button
-                    type="submit"
-                    disabled={isSending}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-gradient-hero px-4 py-2 text-xs font-bold text-primary-foreground shadow-card transition active:scale-95 disabled:opacity-60"
-                  >
-                    {isSending ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Send className="h-3.5 w-3.5" />
-                    )}
-                    উত্তর পাঠান
-                  </button>
-                </form>
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void sendQuickInlineReply(t);
+                      }}
+                      className="mt-2.5 flex items-center gap-2"
+                    >
+                      <input
+                        value={draft}
+                        onChange={(e) =>
+                          setInlineDrafts((prev) => ({ ...prev, [t.id]: e.target.value }))
+                        }
+                        placeholder={`${customerName}-কে সরাসরি এখানেই উত্তর লিখুন...`}
+                        className="min-w-0 flex-1 rounded-full border border-border bg-background px-3.5 py-2 text-xs outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                      />
+                      <button
+                        type="submit"
+                        disabled={isSending}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-gradient-hero px-4 py-2 text-xs font-bold text-primary-foreground shadow-card transition active:scale-95 disabled:opacity-60"
+                      >
+                        {isSending ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Send className="h-3.5 w-3.5" />
+                        )}
+                        উত্তর পাঠান
+                      </button>
+                    </form>
+                  </>
+                ) : (
+                  <p className="mt-2 text-[11px] font-semibold text-muted-foreground">
+                    🔒 আপনার অ্যাকাউন্টে উত্তর দেওয়ার পারমিশন (chat_reply) দেওয়া হয়নি।
+                  </p>
+                )}
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Delete Single Thread Modal */}
+      {confirmDeleteThread && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setConfirmDeleteThread(null)}
+        >
+          <div
+            className="w-full max-w-md space-y-3 rounded-3xl bg-card p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="font-display text-sm font-bold text-rose-600">
+              লাইভ চ্যাট ডিলিট নিশ্চিতকরণ
+            </p>
+            <p className="text-xs text-muted-foreground">
+              আপনি কি{" "}
+              <span className="font-bold text-foreground">
+                {confirmDeleteThread.profile?.full_name || confirmDeleteThread.email || "গ্রাহক"}
+              </span>
+              -এর সম্পূর্ণ চ্যাট ইতিহাস স্থায়ীভাবে মুছে ফেলতে চান?
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteThread(null)}
+                className="rounded-full bg-muted px-4 py-1.5 text-xs font-semibold"
+              >
+                বাতিল
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeleteThreadNow()}
+                className="inline-flex items-center gap-1 rounded-full bg-rose-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-rose-700"
+              >
+                <Trash2 className="h-3.5 w-3.5" /> হ্যাঁ, ডিলিট করুন
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete All Threads Modal */}
+      {confirmDeleteAll && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setConfirmDeleteAll(false)}
+        >
+          <div
+            className="w-full max-w-md space-y-3 rounded-3xl bg-card p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="font-display text-sm font-bold text-rose-600">
+              সকল লাইভ চ্যাট ডিলিট নিশ্চিতকরণ
+            </p>
+            <p className="text-xs text-muted-foreground">
+              সতর্কতা: সকল ({threads.length} টি) লাইভ চ্যাট থ্রেড ও বার্তা স্থায়ীভাবে মুছে যাবে। আপনি কি নিশ্চিত?
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteAll(false)}
+                className="rounded-full bg-muted px-4 py-1.5 text-xs font-semibold"
+              >
+                বাতিল
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeleteAllNow()}
+                className="inline-flex items-center gap-1 rounded-full bg-rose-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-rose-700"
+              >
+                <Trash2 className="h-3.5 w-3.5" /> হ্যাঁ, সব ডিলিট করুন
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -9617,17 +10416,34 @@ function ChatThreadsAdmin() {
 
 function AdminChatPanel({
   thread,
+  operators,
+  canReply,
+  canAssign,
+  canCloseReopen,
+  canViewHistory,
   onBack,
-  onDeleteThread,
+  onRequestDeleteThread,
+  onAssignOperator,
+  onStatusChange,
+  onPriorityChange,
   me,
 }: {
   thread: ThreadView;
+  operators: AdminUserRecord[];
+  canReply: boolean;
+  canAssign: boolean;
+  canCloseReopen: boolean;
+  canViewHistory: boolean;
   onBack: () => void;
-  onDeleteThread: () => void;
+  onRequestDeleteThread: () => void;
+  onAssignOperator: (operatorId: string) => void;
+  onStatusChange: (status: ChatThreadStatus) => void;
+  onPriorityChange: (priority: ChatThreadPriority) => void;
   me: string;
 }) {
   const { items, send, remove } = useThreadMessages(thread.id);
-  const { user, isMainAdmin, isAdmin, isEditor, isModerator } = useAuth();
+  const { user, roles, isMainAdmin, customRoleId, customRoleName } = useAuth();
+  const { customRoles } = useRolePermissions();
   const { getStaffProfile, upsertStaffProfile } = useStaffProfiles();
   const { logo } = useLogo();
   const [text, setText] = useState("");
@@ -9635,19 +10451,19 @@ function AdminChatPanel({
   const endRef = useRef<HTMLDivElement>(null);
 
   const myStaff = getStaffProfile(me) || getStaffProfile(user?.email);
-  const myRoleLabel = isMainAdmin
-    ? "সুপার এডমিন"
-    : isAdmin
-      ? "এডমিন"
-      : isEditor
-        ? "এডিটর"
-        : isModerator
-          ? "মোডারেটর"
-          : "স্টাফ";
+  const myRoleLabel = resolveUserRoleDisplay({
+    email: user?.email,
+    roles,
+    isMainAdmin,
+    customRoleId,
+    customRoleName,
+    customRoles,
+    designation: myStaff?.designation,
+  }).labelBn;
   const myName =
     myStaff?.full_name ||
     user?.displayName ||
-    (isMainAdmin ? "মেইন সুপার এডমিন" : user?.email?.split("@")[0] || myRoleLabel);
+    (isMainAdmin ? "মেইন সুপার অ্যাডমিন" : user?.email?.split("@")[0] || myRoleLabel);
   const myPhoto = myStaff?.photo_url || logo;
 
   useEffect(() => {
@@ -9676,6 +10492,10 @@ function AdminChatPanel({
   }
 
   async function sendReplyMessage(bodyText: string, attachmentUrl?: string | null) {
+    if (!canReply) {
+      toast.error("উত্তর দেওয়ার অনুমতি নেই");
+      return;
+    }
     const clean = bodyText.trim();
     if (!clean && !attachmentUrl) return;
     void syncResponderIdentity();
@@ -9721,46 +10541,114 @@ function AdminChatPanel({
 
   return (
     <div className="flex h-[75dvh] flex-col">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-card p-3 shadow-card">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={onBack}
-            className="rounded-full bg-muted px-3 py-1.5 text-xs font-semibold hover:bg-primary/10"
-          >
-            <ArrowLeft className="inline h-3.5 w-3.5" /> তালিকায় ফেরত
-          </button>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-bold text-primary-deep">
-              {thread.profile?.full_name || thread.email || "গ্রাহক"}
-            </p>
-            <p className="truncate text-[11px] text-muted-foreground">
-              {thread.profile?.phone ? `📞 ${thread.profile.phone} • ` : ""}
-              {thread.email}
-            </p>
-          </div>
-        </div>
-        {/* Responder Identity Indicator + Super Admin Delete Thread Button */}
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-2 rounded-full bg-primary/10 px-2.5 py-1">
-            <img
-              src={myPhoto}
-              alt={myName}
-              className="h-6 w-6 rounded-full border border-primary/30 bg-white object-cover"
-            />
-            <span className="text-[11px] font-bold text-primary-deep">
-              উত্তরদাতা: {myName} ({myRoleLabel})
-            </span>
-          </div>
-          {isMainAdmin && (
+      <div className="mb-2 space-y-2 rounded-2xl bg-card p-3 shadow-card">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
             <button
-              type="button"
-              onClick={onDeleteThread}
-              className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-3 py-1.5 text-xs font-bold text-destructive transition hover:bg-destructive hover:text-white"
+              onClick={onBack}
+              className="rounded-full bg-muted px-3 py-1.5 text-xs font-semibold hover:bg-primary/10"
             >
-              <Trash2 className="h-3.5 w-3.5" /> এই চ্যাট ডিলিট করুন
+              <ArrowLeft className="inline h-3.5 w-3.5" /> তালিকায় ফেরত
             </button>
-          )}
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold text-primary-deep">
+                {thread.profile?.full_name || thread.email || "গ্রাহক"}
+              </p>
+              <p className="truncate text-[11px] text-muted-foreground">
+                {thread.profile?.phone ? `📞 ${thread.profile.phone} • ` : ""}
+                {thread.email}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2 rounded-full bg-primary/10 px-2.5 py-1">
+              <img
+                src={myPhoto}
+                alt={myName}
+                className="h-6 w-6 rounded-full border border-primary/30 bg-white object-cover"
+              />
+              <span className="text-[11px] font-bold text-primary-deep">
+                উত্তরদাতা: {myName} ({myRoleLabel})
+              </span>
+            </div>
+            {isMainAdmin && (
+              <button
+                type="button"
+                onClick={onRequestDeleteThread}
+                className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-3 py-1.5 text-xs font-bold text-destructive transition hover:bg-destructive hover:text-white"
+              >
+                <Trash2 className="h-3.5 w-3.5" /> এই চ্যাট ডিলিট করুন
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* Thread Assignment, Status & AI Handoff Summary */}
+        {(canAssign || canCloseReopen || (canViewHistory && thread.handoff_summary)) && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-2 text-[11px]">
+            {canAssign && (
+              <select
+                value={thread.assigned_to_uid || ""}
+                onChange={(e) => onAssignOperator(e.target.value)}
+                className="rounded-lg border border-border bg-background px-2 py-1 text-[11px] font-semibold outline-none focus:border-primary"
+              >
+                <option value="">অপারেটর: আন-অ্যাসাইনড</option>
+                {operators.map((op) => {
+                  const r = resolveUserRoleDisplay({
+                    email: op.email,
+                    roles: op.roles,
+                    isMainAdmin: isProtectedMainSuperAdmin({
+                      id: op.id,
+                      email: op.email,
+                      username: op.profile?.username,
+                    }),
+                    customRoleId: op.custom_role_id || op.profile?.custom_role_id,
+                    customRoleName: op.custom_role_name || op.profile?.custom_role_name,
+                    customRoles,
+                  });
+                  return (
+                    <option key={op.id} value={op.id}>
+                      {op.profile?.full_name || op.email.split("@")[0]} ({r.labelBn})
+                    </option>
+                  );
+                })}
+              </select>
+            )}
+            {canCloseReopen && (
+              <>
+                <select
+                  value={(thread.status || "new") as ChatThreadStatus}
+                  onChange={(e) => onStatusChange(e.target.value as ChatThreadStatus)}
+                  className="rounded-lg border border-border bg-background px-2 py-1 text-[11px] font-semibold outline-none focus:border-primary"
+                >
+                  {Object.entries(CHAT_STATUS_LABELS).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onPriorityChange(thread.priority === "urgent" ? "normal" : "urgent")
+                  }
+                  className={`rounded-lg px-2.5 py-1 text-[11px] font-bold ${
+                    thread.priority === "urgent"
+                      ? "bg-amber-500 text-white"
+                      : "border border-border bg-background text-muted-foreground"
+                  }`}
+                >
+                  {thread.priority === "urgent" ? "⚡ জরুরি" : "সাধারণ"}
+                </button>
+              </>
+            )}
+            {canViewHistory && thread.handoff_summary && (
+              <span className="rounded-lg bg-indigo-50 px-2.5 py-1 text-[11px] text-indigo-900">
+                🤖 AI সারাংশ: {thread.handoff_summary}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex-1 space-y-2.5 overflow-y-auto rounded-2xl border border-border bg-card/40 p-3">
@@ -9773,16 +10661,22 @@ function AdminChatPanel({
           const isStaffMsg = m.sender_role === "staff";
           const isMyMsg = m.sender_id === me;
           const staffSender = isStaffMsg ? getStaffProfile(m.sender_id) : null;
+          const resolvedMsgRole = isStaffMsg
+            ? resolveStaffMessageRole({
+                sender_role: m.sender_role,
+                sender_role_label: m.sender_role_label || staffSender?.role_label,
+                sender_id: m.sender_id,
+                sender_name: m.sender_name || staffSender?.full_name,
+              })
+            : "";
 
-          // Staff Isolation: Super Admin sees exact responder name & photo for all staff;
-          // Non-Super-Admin only sees their own name & photo, while other staff are masked as "সাপোর্ট টিম"
           const displaySenderName = !isStaffMsg
             ? m.sender_name || thread.profile?.full_name || "গ্রাহক"
             : isMyMsg
               ? `${myName} (আপনি)`
               : isMainAdmin
-                ? `${m.sender_name || staffSender?.full_name || "স্টাফ"} (${
-                    m.sender_role_label || staffSender?.role_label || "Staff"
+                ? `${m.sender_name || staffSender?.full_name || resolvedMsgRole || "সাপোর্ট অ্যাডমিন"} (${
+                    resolvedMsgRole || "সাপোর্ট অ্যাডমিন"
                   })`
                 : "সাপোর্ট টিম";
 
@@ -9860,47 +10754,50 @@ function AdminChatPanel({
         <div ref={endRef} />
       </div>
 
-      {/* 1-Click Ready Reply Bar */}
-      <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1">
-        {QUICK_STAFF_REPLIES.map((qr, idx) => (
-          <button
-            key={idx}
-            type="button"
-            onClick={() => void sendReplyMessage(qr)}
-            className="shrink-0 rounded-full border border-primary/25 bg-card px-3 py-1 text-[11px] font-semibold text-primary-deep shadow-sm transition hover:bg-primary hover:text-white"
-          >
-            ⚡ {qr}
-          </button>
-        ))}
-      </div>
+      {canReply && (
+        <>
+          <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1">
+            {QUICK_STAFF_REPLIES.map((qr, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => void sendReplyMessage(qr)}
+                className="shrink-0 rounded-full border border-primary/25 bg-card px-3 py-1 text-[11px] font-semibold text-primary-deep shadow-sm transition hover:bg-primary hover:text-white"
+              >
+                ⚡ {qr}
+              </button>
+            ))}
+          </div>
 
-      <form onSubmit={onSend} className="mt-1.5 flex items-center gap-2">
-        <label
-          title="ছবি বা ফাইল পাঠান"
-          className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-card text-primary shadow-card"
-        >
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-          <input
-            type="file"
-            accept="image/*,audio/*,application/pdf"
-            className="hidden"
-            onChange={onFile}
-          />
-        </label>
-        <VoiceRecorderButton onRecorded={onVoice} disabled={busy} />
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={`${myName} হিসেবে উত্তর লিখুন...`}
-          className="min-w-0 flex-1 rounded-full border border-border bg-card px-4 py-2.5 text-sm outline-none focus:border-primary"
-        />
-        <button
-          type="submit"
-          className="flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-full bg-gradient-hero px-4 text-xs font-bold text-primary-foreground shadow-elevated"
-        >
-          <Send className="h-4 w-4" /> পাঠান
-        </button>
-      </form>
+          <form onSubmit={onSend} className="mt-1.5 flex items-center gap-2">
+            <label
+              title="ছবি বা ফাইল পাঠান"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-card text-primary shadow-card"
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+              <input
+                type="file"
+                accept="image/*,audio/*,application/pdf"
+                className="hidden"
+                onChange={onFile}
+              />
+            </label>
+            <VoiceRecorderButton onRecorded={onVoice} disabled={busy} />
+            <input
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder={`${myName} হিসেবে উত্তর লিখুন...`}
+              className="min-w-0 flex-1 rounded-full border border-border bg-card px-4 py-2.5 text-sm outline-none focus:border-primary"
+            />
+            <button
+              type="submit"
+              className="flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-full bg-gradient-hero px-4 text-xs font-bold text-primary-foreground shadow-elevated"
+            >
+              <Send className="h-4 w-4" /> পাঠান
+            </button>
+          </form>
+        </>
+      )}
     </div>
   );
 }
@@ -9911,10 +10808,15 @@ function AdminChatPanel({
 // ============================================================================
 function StaffActivityAuditPanel({
   auditHook,
+  isMainAdmin = false,
 }: {
   auditHook: ReturnType<typeof useStaffAuditLogs>;
+  isMainAdmin?: boolean;
 }) {
   const { logs, loading, refresh } = auditHook;
+  const { logs: superLogs, loading: superLoading, refresh: refreshSuperLogs } =
+    useSuperAdminAuditLogs(isMainAdmin);
+  const [auditView, setAuditView] = useState<"staff" | "super_immutable">("staff");
   const { logo } = useLogo();
   const [roleFilter, setRoleFilter] = useState<
     "all" | "deletions_only" | "admin" | "editor" | "moderator" | "super_admin"
@@ -9953,10 +10855,10 @@ function StaffActivityAuditPanel({
       if (!acc[k]) {
         acc[k] = {
           key: k,
-          name: l.actor_name || "স্টাফ",
+          name: l.actor_name || "অপারেটর",
           email: l.actor_email || "",
-          role_bn: l.actor_role_bn || "স্টাফ",
-          role: l.actor_role || "staff",
+          role_bn: l.actor_role_bn || "অপারেটর",
+          role: l.actor_role || "operator",
           photo: l.actor_photo || "",
           total: 0,
           deleted: 0,
@@ -10093,12 +10995,42 @@ function StaffActivityAuditPanel({
           </div>
           <button
             type="button"
-            onClick={() => void refresh()}
+            onClick={() => {
+              void refresh();
+              if (isMainAdmin) void refreshSuperLogs();
+            }}
             className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3.5 py-1.5 text-xs font-bold text-primary-deep transition hover:bg-primary/20"
           >
             <RefreshCcw className="h-3.5 w-3.5" /> লাইভ রিফ্রেশ
           </button>
         </div>
+
+        {isMainAdmin && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => setAuditView("staff")}
+              className={`rounded-full px-3.5 py-1 text-xs font-bold transition ${
+                auditView === "staff"
+                  ? "bg-gradient-hero text-primary-foreground shadow-xs"
+                  : "bg-card text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              স্টাফ অ্যাক্টিভিটি ও ডিলিট লগ ({logs.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setAuditView("super_immutable")}
+              className={`rounded-full px-3.5 py-1 text-xs font-bold transition ${
+                auditView === "super_immutable"
+                  ? "bg-amber-600 text-white shadow-xs"
+                  : "bg-card text-amber-800 hover:bg-amber-500/10"
+              }`}
+            >
+              🔒 সুপার এডমিন ইম্মিউটেবল অডিট হিস্ট্রি ({superLogs.length})
+            </button>
+          </div>
+        )}
 
         {/* Summary KPI Grid */}
         <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
@@ -10129,312 +11061,760 @@ function StaffActivityAuditPanel({
         </div>
       </div>
 
-      {/* Staff Member Wise Breakdown */}
-      {staffSummary.length > 0 && (
-        <div className="rounded-2xl bg-card p-4 shadow-card">
-          <p className="mb-2.5 font-display text-xs font-bold text-primary-deep">
-            👥 স্টাফ সদস্যভিত্তিক কাজের সারসংক্ষেপ (কে কতটি কাজ ও ডিলিট করেছে)
-          </p>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            {staffSummary.map((st) => (
-              <div
-                key={st.key}
-                onClick={() => setSearch(st.email || st.name)}
-                className="flex cursor-pointer items-center justify-between gap-2.5 rounded-2xl border border-border bg-muted/30 p-3 transition hover:border-primary"
+      {isMainAdmin && auditView === "super_immutable" ? (
+        <div className="space-y-3">
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-950">
+            <p className="font-bold">🔒 অপরিবর্তনীয় (Immutable) সুপার এডমিন অডিট লগ</p>
+            <p className="mt-0.5 text-[11px] opacity-90">
+              Firestore (/admin_audit_logs) এবং সার্ভার লগে সংরক্ষিত এই অডিট রেকর্ডগুলো কোনোভাবেই সম্পাদনা বা ডিলিট করা যায় না। পাসওয়ার্ড ও API কী স্বয়ংক্রিয়ভাবে রিড্যাক্ট (Redacted) করা থাকে।
+            </p>
+          </div>
+          {superLoading && superLogs.length === 0 ? (
+            <div className="flex justify-center p-8">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            </div>
+          ) : superLogs.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center text-xs text-muted-foreground">
+              এখনো কোনো সুপার এডমিন অডিট এন্ট্রি পাওয়া যায়নি।
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {superLogs.map((s) => (
+                <div
+                  key={s.id}
+                  className="rounded-2xl border border-border bg-card p-3.5 shadow-2xs text-xs space-y-1.5"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="rounded-full bg-primary/10 px-2.5 py-0.5 font-mono text-[10px] font-bold text-primary-deep">
+                        {s.action}
+                      </span>
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-foreground">
+                        {s.module}
+                      </span>
+                      <span className="font-bold text-foreground">{s.target_label}</span>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground">
+                      {new Date(s.created_at).toLocaleString("bn-BD")}
+                    </span>
+                  </div>
+                  <p className="text-muted-foreground">{s.summary}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    অ্যাক্টর: <span className="font-mono">{s.actor_email}</span>
+                    {s.target_id ? ` • ID: ${s.target_id}` : ""}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Staff Member Wise Breakdown */}
+          {staffSummary.length > 0 && (
+            <div className="rounded-2xl bg-card p-4 shadow-card">
+              <p className="mb-2.5 font-display text-xs font-bold text-primary-deep">
+                👥 স্টাফ সদস্যভিত্তিক কাজের সারসংক্ষেপ (কে কতটি কাজ ও ডিলিট করেছে)
+              </p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {staffSummary.map((st) => (
+                  <div
+                    key={st.key}
+                    onClick={() => setSearch(st.email || st.name)}
+                    className="flex cursor-pointer items-center justify-between gap-2.5 rounded-2xl border border-border bg-muted/30 p-3 transition hover:border-primary"
+                  >
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <img
+                        src={st.photo || logo}
+                        alt={st.name}
+                        className="h-10 w-10 shrink-0 rounded-full border border-primary/30 bg-white object-cover"
+                      />
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1">
+                          <p className="truncate text-xs font-bold text-foreground">{st.name}</p>
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[9px] font-bold ${getRoleBadgeStyle(
+                              st.role
+                            )}`}
+                          >
+                            {st.role_bn}
+                          </span>
+                        </div>
+                        <p className="truncate text-[10px] text-muted-foreground">{st.email}</p>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5 text-[10px] font-bold">
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-primary-deep">
+                        মোট: {st.total}
+                      </span>
+                      {st.deleted > 0 && (
+                        <span className="rounded-full bg-rose-600 px-2 py-0.5 text-white">
+                          ডিলিট: {st.deleted}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Role & Action Filter Bar */}
+          <div className="space-y-3 rounded-2xl bg-card p-4 shadow-card">
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => setRoleFilter("all")}
+                className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
+                  roleFilter === "all"
+                    ? "bg-gradient-hero text-white shadow-card"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                }`}
               >
-                <div className="flex min-w-0 items-center gap-2.5">
-                  <img
-                    src={st.photo || logo}
-                    alt={st.name}
-                    className="h-10 w-10 shrink-0 rounded-full border border-primary/30 bg-white object-cover"
-                  />
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-1">
-                      <p className="truncate text-xs font-bold text-foreground">{st.name}</p>
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[9px] font-bold ${getRoleBadgeStyle(
-                          st.role
-                        )}`}
-                      >
-                        {st.role_bn}
+                সব রোল ({logs.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setRoleFilter("deletions_only")}
+                className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
+                  roleFilter === "deletions_only"
+                    ? "bg-rose-600 text-white shadow-card"
+                    : "bg-rose-500/10 text-rose-700 hover:bg-rose-500/20"
+                }`}
+              >
+                🗑️ শুধু ডিলিট লগ ({totalDeletions})
+              </button>
+              <button
+                type="button"
+                onClick={() => setRoleFilter("admin")}
+                className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
+                  roleFilter === "admin"
+                    ? "bg-gradient-hero text-white shadow-card"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                এডমিন (Admin)
+              </button>
+              <button
+                type="button"
+                onClick={() => setRoleFilter("editor")}
+                className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
+                  roleFilter === "editor"
+                    ? "bg-gradient-hero text-white shadow-card"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                এডিটর (Editor)
+              </button>
+              <button
+                type="button"
+                onClick={() => setRoleFilter("moderator")}
+                className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
+                  roleFilter === "moderator"
+                    ? "bg-gradient-hero text-white shadow-card"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                মোডারেটর (Moderator)
+              </button>
+              <button
+                type="button"
+                onClick={() => setRoleFilter("super_admin")}
+                className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
+                  roleFilter === "super_admin"
+                    ? "bg-gradient-hero text-white shadow-card"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                সুপার এডমিন
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <select
+                value={actionFilter}
+                onChange={(e) => setActionFilter(e.target.value)}
+                className="rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
+              >
+                <option value="all">সব কাজের ধরন (All Actions)</option>
+                <option value="delete">🗑️ ডিলিট করা তথ্য (Deleted)</option>
+                <option value="approve">✓ অনুমোদন (Approved)</option>
+                <option value="reject">✕ বাতিল (Rejected)</option>
+                <option value="edit">✏️ সম্পাদনা (Edited)</option>
+                <option value="create">➕ নতুন যোগ (Created)</option>
+                <option value="reply">💬 লাইভ চ্যাট উত্তর (Chat Reply)</option>
+                <option value="user">👤 ইউজার/রোল পরিবর্তন</option>
+              </select>
+
+              <select
+                value={moduleFilter}
+                onChange={(e) => setModuleFilter(e.target.value)}
+                className="rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
+              >
+                <option value="all">সব সেকশন (All Sections)</option>
+                <option value="info">তথ্য ডিরেক্টরি</option>
+                <option value="donors">রক্তদাতা</option>
+                <option value="events">রক্তদান লগ</option>
+                <option value="emergency">জরুরী রক্ত অনুরোধ</option>
+                <option value="banners">জরুরী ব্যানার</option>
+                <option value="chat">লাইভ চ্যাট</option>
+                <option value="donation">অনুদান</option>
+                <option value="users">ইউজার ম্যানেজমেন্ট</option>
+                <option value="profile">প্রোফাইল</option>
+              </select>
+
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="স্টাফের নাম, ইমেইল বা ডিলিট তথ্য খুঁজুন..."
+                  className="w-full rounded-xl border border-border bg-background py-2 pl-8 pr-3 text-xs"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Activity & Deletion Cards List */}
+          {loading && filteredLogs.length === 0 ? (
+            <div className="flex justify-center p-10">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            </div>
+          ) : filteredLogs.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-border bg-card/60 p-8 text-center text-sm text-muted-foreground">
+              এই ফিল্টারে কোনো স্টাফ অ্যাক্টিভিটি বা ডিলিট লগ পাওয়া যায়নি।
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {filteredLogs.map((log) => {
+                const isDelete = log.action_type === "delete";
+                const snapEntries = log.deleted_snapshot
+                  ? Object.entries(log.deleted_snapshot).filter(
+                      ([k, v]) =>
+                        v !== null &&
+                        v !== undefined &&
+                        v !== "" &&
+                        k !== "id" &&
+                        k !== "author_id" &&
+                        k !== "created_at" &&
+                        k !== "updated_at"
+                    )
+                  : [];
+
+                return (
+                  <div
+                    key={log.id}
+                    className={`rounded-2xl bg-card p-4 shadow-card transition ${
+                      isDelete
+                        ? "border-2 border-rose-500/35 bg-gradient-to-br from-rose-500/[0.03] to-card"
+                        : "border border-border"
+                    }`}
+                  >
+                    {/* Actor & Timestamp Header */}
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <img
+                          src={log.actor_photo || logo}
+                          alt={log.actor_name}
+                          className="h-11 w-11 shrink-0 rounded-full border-2 border-primary/30 bg-white object-cover shadow-sm"
+                        />
+                        <div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <p className="font-display text-sm font-bold text-foreground">
+                              {log.actor_name}
+                            </p>
+                            <span
+                              className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${getRoleBadgeStyle(
+                                log.actor_role
+                              )}`}
+                            >
+                              {log.actor_role_bn}
+                            </span>
+                            <span
+                              className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${getActionBadgeStyle(
+                                log.action_type
+                              )}`}
+                            >
+                              {log.action_label}
+                            </span>
+                          </div>
+                          <p className="mt-0.5 text-[11px] text-muted-foreground">
+                            ইমেইল: <span className="font-mono">{log.actor_email}</span> • সেকশন:{" "}
+                            <strong className="text-primary-deep">{log.module_label}</strong>
+                          </p>
+                        </div>
+                      </div>
+
+                      <span className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-semibold text-muted-foreground">
+                        🕒 {new Date(log.created_at).toLocaleString("bn-BD")}
                       </span>
                     </div>
-                    <p className="truncate text-[10px] text-muted-foreground">{st.email}</p>
+
+                    {/* Target Item Details */}
+                    <div className="mt-3 rounded-xl bg-muted/40 p-3">
+                      <p className="text-xs font-bold text-primary-deep">
+                        {isDelete ? "🗑️ যে তথ্যটি ডিলিট করা হয়েছে:" : "📌 কাজের বিবরণ:"}{" "}
+                        <span className={isDelete ? "text-rose-700" : "text-foreground"}>
+                          {log.target_title}
+                        </span>
+                      </p>
+                      {log.target_detail && (
+                        <p className="mt-1 text-xs text-muted-foreground">{log.target_detail}</p>
+                      )}
+                    </div>
+
+                    {/* Full Deleted Item Snapshot + 1-Click Restore */}
+                    {isDelete && snapEntries.length > 0 && (
+                      <div className="mt-2.5 rounded-2xl border border-rose-500/30 bg-rose-500/5 p-3">
+                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-[11px] font-bold text-rose-800">
+                            🔍 ডিলিট হওয়া তথ্যের সম্পূর্ণ রেকর্ড (Deleted Data Snapshot):
+                          </p>
+                          {log.collection_name && (
+                            <div>
+                              {log.restored ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] font-bold text-emerald-700">
+                                  <CheckCircle2 className="h-3.5 w-3.5" /> পুনরুদ্ধার করা হয়েছে
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={restoringId === log.id}
+                                  onClick={() => void handleRestore(log)}
+                                  className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-[11px] font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
+                                >
+                                  {restoringId === log.id ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <RotateCcw className="h-3 w-3" />
+                                  )}
+                                  ডিলিট হওয়া তথ্য পুনরুদ্ধার করুন (Restore)
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-1 gap-1.5 text-xs sm:grid-cols-2">
+                          {snapEntries.map(([k, v]) => (
+                            <div
+                              key={k}
+                              className="rounded-lg bg-white/80 px-2.5 py-1.5 shadow-2xs"
+                            >
+                              <span className="text-[10px] font-semibold text-muted-foreground">
+                                {SNAPSHOT_LABELS[k] || k}:{" "}
+                              </span>
+                              <span className="font-semibold text-foreground break-words">
+                                {String(v)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-1.5 text-[10px] font-bold">
-                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-primary-deep">
-                    মোট: {st.total}
-                  </span>
-                  {st.deleted > 0 && (
-                    <span className="rounded-full bg-rose-600 px-2 py-0.5 text-white">
-                      ডিলিট: {st.deleted}
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
+    </div>
+  );
+}
 
-      {/* Role & Action Filter Bar */}
-      <div className="space-y-3 rounded-2xl bg-card p-4 shadow-card">
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            type="button"
-            onClick={() => setRoleFilter("all")}
-            className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
-              roleFilter === "all"
-                ? "bg-gradient-hero text-white shadow-card"
-                : "bg-muted text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            সব রোল ({logs.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setRoleFilter("deletions_only")}
-            className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
-              roleFilter === "deletions_only"
-                ? "bg-rose-600 text-white shadow-card"
-                : "bg-rose-500/10 text-rose-700 hover:bg-rose-500/20"
-            }`}
-          >
-            🗑️ শুধু ডিলিট লগ ({totalDeletions})
-          </button>
-          <button
-            type="button"
-            onClick={() => setRoleFilter("admin")}
-            className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
-              roleFilter === "admin"
-                ? "bg-gradient-hero text-white shadow-card"
-                : "bg-muted text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            এডমিন (Admin)
-          </button>
-          <button
-            type="button"
-            onClick={() => setRoleFilter("editor")}
-            className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
-              roleFilter === "editor"
-                ? "bg-gradient-hero text-white shadow-card"
-                : "bg-muted text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            এডিটর (Editor)
-          </button>
-          <button
-            type="button"
-            onClick={() => setRoleFilter("moderator")}
-            className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
-              roleFilter === "moderator"
-                ? "bg-gradient-hero text-white shadow-card"
-                : "bg-muted text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            মোডারেটর (Moderator)
-          </button>
-          <button
-            type="button"
-            onClick={() => setRoleFilter("super_admin")}
-            className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
-              roleFilter === "super_admin"
-                ? "bg-gradient-hero text-white shadow-card"
-                : "bg-muted text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            সুপার এডমিন
-          </button>
+// ============================================================================
+// Dynamic AI Chat & Knowledge Base Manager
+// (Zero API keys stored in UI/settings — GEMINI_API_KEY remains strictly server-side)
+// ============================================================================
+function AiChatSettingsManager() {
+  const { aiConfig, saveAiChatConfig, resetAiChatConfig } = useAiChatConfig();
+  const { isMainAdmin } = useAuth();
+  const { hasPermission } = useRolePermissions();
+
+  const canEditConfig = isMainAdmin || hasPermission("edit_ai_config");
+  const canManageKnowledge = isMainAdmin || hasPermission("manage_ai_knowledge");
+
+  const [draft, setDraft] = useState<AiChatConfig>(aiConfig);
+  const [newQuickPrompt, setNewQuickPrompt] = useState("");
+  const [faqQuestion, setFaqQuestion] = useState("");
+  const [faqAnswer, setFaqAnswer] = useState("");
+  const [faqKeywords, setFaqKeywords] = useState("");
+  const [editingFaqId, setEditingFaqId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDraft(aiConfig);
+  }, [aiConfig]);
+
+  async function handleSaveAll() {
+    setSaving(true);
+    try {
+      await saveAiChatConfig(draft);
+      void recordStaffActivity({
+        action_type: "edit",
+        action_label: "AI চ্যাট কনফিগারেশন ও নলেজ বেস আপডেট করেছে",
+        module: "settings",
+        module_label: "AI চ্যাট ম্যানেজার",
+        target_id: "ai_chat_config",
+        target_title: draft.botName,
+        target_detail: `সক্রিয়: ${draft.enabled ? "হ্যাঁ" : "না"} • FAQ: ${draft.faqs.length}টি`,
+      });
+      toast.success("AI চ্যাট সেটিংস ও নলেজ বেস সফলভাবে সংরক্ষণ করা হয়েছে!");
+    } catch (e) {
+      toast.error((e as Error).message || "সংরক্ষণ ব্যর্থ হয়েছে");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function addQuickPrompt() {
+    const clean = newQuickPrompt.trim();
+    if (!clean) return;
+    if (draft.quickPrompts.includes(clean)) return toast.info("এই প্রম্পট আগে থেকেই আছে");
+    setDraft((prev) => ({
+      ...prev,
+      quickPrompts: [...prev.quickPrompts, clean].slice(0, 8),
+    }));
+    setNewQuickPrompt("");
+  }
+
+  function removeQuickPrompt(idx: number) {
+    setDraft((prev) => ({
+      ...prev,
+      quickPrompts: prev.quickPrompts.filter((_, i) => i !== idx),
+    }));
+  }
+
+  function saveFaqItem(e: React.FormEvent) {
+    e.preventDefault();
+    if (!faqQuestion.trim() || !faqAnswer.trim()) {
+      return toast.error("প্রশ্ন এবং উত্তর উভয়ই লিখুন");
+    }
+    if (editingFaqId) {
+      setDraft((prev) => ({
+        ...prev,
+        faqs: prev.faqs.map((item) =>
+          item.id === editingFaqId
+            ? {
+                ...item,
+                question: faqQuestion.trim(),
+                answer: faqAnswer.trim(),
+                keywords: faqKeywords.trim(),
+              }
+            : item
+        ),
+      }));
+      toast.success("FAQ আপডেট হয়েছে — উপরে 'সব পরিবর্তন সংরক্ষণ করুন' বাটনে চাপুন");
+    } else {
+      const nextFaq: AiChatFaqItem = {
+        id: `ai_faq_${Date.now()}`,
+        question: faqQuestion.trim(),
+        answer: faqAnswer.trim(),
+        keywords: faqKeywords.trim(),
+        visible: true,
+      };
+      setDraft((prev) => ({
+        ...prev,
+        faqs: [nextFaq, ...prev.faqs],
+      }));
+      toast.success("নতুন FAQ যোগ হয়েছে — উপরে 'সব পরিবর্তন সংরক্ষণ করুন' বাটনে চাপুন");
+    }
+    setFaqQuestion("");
+    setFaqAnswer("");
+    setFaqKeywords("");
+    setEditingFaqId(null);
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-indigo-500/25 bg-indigo-500/10 p-4">
+        <div className="min-w-0 flex-1">
+          <p className="flex items-center gap-2 font-display text-sm font-bold text-indigo-950">
+            <Bot className="h-4 w-4 text-indigo-600" /> Smart Noakhali AI চ্যাট ও নলেজ বেস ম্যানেজার
+          </p>
+          <p className="mt-0.5 text-[11px] text-indigo-900/80">
+            নাগরিকদের বাংলা ও বাংলিশ (Banglish) প্রশ্নের সঠিক উত্তর, স্বাগত বার্তা, FAQ এবং লাইভ অপারেটর হ্যান্ডঅফ নিয়ন্ত্রণ করুন।
+          </p>
         </div>
-
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <select
-            value={actionFilter}
-            onChange={(e) => setActionFilter(e.target.value)}
-            className="rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
-          >
-            <option value="all">সব কাজের ধরন (All Actions)</option>
-            <option value="delete">🗑️ ডিলিট করা তথ্য (Deleted)</option>
-            <option value="approve">✓ অনুমোদন (Approved)</option>
-            <option value="reject">✕ বাতিল (Rejected)</option>
-            <option value="edit">✏️ সম্পাদনা (Edited)</option>
-            <option value="create">➕ নতুন যোগ (Created)</option>
-            <option value="reply">💬 লাইভ চ্যাট উত্তর (Chat Reply)</option>
-            <option value="user">👤 ইউজার/রোল পরিবর্তন</option>
-          </select>
-
-          <select
-            value={moduleFilter}
-            onChange={(e) => setModuleFilter(e.target.value)}
-            className="rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
-          >
-            <option value="all">সব সেকশন (All Sections)</option>
-            <option value="info">তথ্য ডিরেক্টরি</option>
-            <option value="donors">রক্তদাতা</option>
-            <option value="events">রক্তদান লগ</option>
-            <option value="emergency">জরুরী রক্ত অনুরোধ</option>
-            <option value="banners">জরুরী ব্যানার</option>
-            <option value="chat">লাইভ চ্যাট</option>
-            <option value="donation">অনুদান</option>
-            <option value="users">ইউজার ম্যানেজমেন্ট</option>
-            <option value="profile">প্রোফাইল</option>
-          </select>
-
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="স্টাফের নাম, ইমেইল বা ডিলিট তথ্য খুঁজুন..."
-              className="w-full rounded-xl border border-border bg-background py-2 pl-8 pr-3 text-xs"
-            />
-          </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {canEditConfig && (
+            <button
+              type="button"
+              onClick={async () => {
+                await resetAiChatConfig();
+                toast.success("ডিফল্ট AI কনফিগারেশন রিসেট করা হয়েছে");
+              }}
+              className="rounded-full bg-card px-3 py-1.5 text-xs font-semibold text-foreground shadow-xs hover:bg-muted"
+            >
+              <RotateCcw className="mr-1 inline h-3.5 w-3.5" /> ডিফল্ট
+            </button>
+          )}
+          {(canEditConfig || canManageKnowledge) && (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => void handleSaveAll()}
+              className="inline-flex items-center gap-1.5 rounded-full bg-gradient-hero px-4 py-2 text-xs font-bold text-primary-foreground shadow-card disabled:opacity-60"
+            >
+              {saving ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Save className="h-3.5 w-3.5" />
+              )}
+              সব পরিবর্তন সংরক্ষণ করুন
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Activity & Deletion Cards List */}
-      {loading && filteredLogs.length === 0 ? (
-        <div className="flex justify-center p-10">
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+      {/* Assistant Core Behavior */}
+      <div className="space-y-3 rounded-2xl bg-card p-4 shadow-card">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-bold text-primary-deep">AI অ্যাসিস্ট্যান্ট আচরণ ও হ্যান্ডঅফ</p>
+          <label className="flex items-center gap-2 text-xs font-bold">
+            <input
+              type="checkbox"
+              disabled={!canEditConfig}
+              checked={draft.enabled}
+              onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
+            />
+            AI চ্যাট সক্রিয় রাখুন
+          </label>
         </div>
-      ) : filteredLogs.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-border bg-card/60 p-8 text-center text-sm text-muted-foreground">
-          এই ফিল্টারে কোনো স্টাফ অ্যাক্টিভিটি বা ডিলিট লগ পাওয়া যায়নি।
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {filteredLogs.map((log) => {
-            const isDelete = log.action_type === "delete";
-            const snapEntries = log.deleted_snapshot
-              ? Object.entries(log.deleted_snapshot).filter(
-                  ([k, v]) =>
-                    v !== null &&
-                    v !== undefined &&
-                    v !== "" &&
-                    k !== "id" &&
-                    k !== "author_id" &&
-                    k !== "created_at" &&
-                    k !== "updated_at"
-                )
-              : [];
 
-            return (
-              <div
-                key={log.id}
-                className={`rounded-2xl bg-card p-4 shadow-card transition ${
-                  isDelete
-                    ? "border-2 border-rose-500/35 bg-gradient-to-br from-rose-500/[0.03] to-card"
-                    : "border border-border"
-                }`}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold text-muted-foreground">
+              AI সহকারীর নাম
+            </label>
+            <input
+              disabled={!canEditConfig}
+              value={draft.botName}
+              onChange={(e) => setDraft({ ...draft, botName: e.target.value })}
+              placeholder={DEFAULT_AI_CHAT_CONFIG.botName}
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm disabled:opacity-60"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold text-muted-foreground">
+              উত্তরের ধরন (Tone)
+            </label>
+            <select
+              disabled={!canEditConfig}
+              value={draft.tone}
+              onChange={(e) =>
+                setDraft({ ...draft, tone: e.target.value as AiChatConfig["tone"] })
+              }
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm disabled:opacity-60"
+            >
+              <option value="helpful_bn">সহায়ক ও বিস্তারিত বাংলা (Recommended)</option>
+              <option value="concise_bn">সংক্ষিপ্ত ও সরাসরি বাংলা</option>
+              <option value="bilingual">দ্বিভাষিক (বাংলা + English)</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-[11px] font-semibold text-muted-foreground">
+            স্বাগত বার্তা (Welcome Message)
+          </label>
+          <textarea
+            rows={2}
+            disabled={!canEditConfig}
+            value={draft.welcomeMessage}
+            onChange={(e) => setDraft({ ...draft, welcomeMessage: e.target.value })}
+            className="w-full rounded-xl border border-border bg-background p-3 text-sm disabled:opacity-60"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-[11px] font-semibold text-muted-foreground">
+            সিস্টেম নির্দেশনা ও গ্রাউন্ডিং রুলস (System Instructions)
+          </label>
+          <textarea
+            rows={3}
+            disabled={!canEditConfig}
+            value={draft.systemInstructions}
+            onChange={(e) => setDraft({ ...draft, systemInstructions: e.target.value })}
+            className="w-full rounded-xl border border-border bg-background p-3 text-xs disabled:opacity-60"
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/80 bg-muted/30 p-3">
+          <label className="flex items-center gap-2 text-xs font-semibold">
+            <input
+              type="checkbox"
+              disabled={!canEditConfig}
+              checked={draft.autoSuggestHandoff}
+              onChange={(e) => setDraft({ ...draft, autoSuggestHandoff: e.target.checked })}
+            />
+            তথ্য না পেলে স্বয়ংক্রিয়ভাবে হিউম্যান লাইভ চ্যাট হ্যান্ডঅফ সাজেশন দেখান
+          </label>
+          <input
+            disabled={!canEditConfig}
+            value={draft.handoffNotice}
+            onChange={(e) => setDraft({ ...draft, handoffNotice: e.target.value })}
+            placeholder="হ্যান্ডঅফ বার্তা..."
+            className="min-w-[240px] flex-1 rounded-xl border border-border bg-background px-3 py-1.5 text-xs disabled:opacity-60"
+          />
+        </div>
+      </div>
+
+      {/* Quick Prompts */}
+      <div className="space-y-3 rounded-2xl bg-card p-4 shadow-card">
+        <p className="text-sm font-bold text-primary-deep">কুইক প্রশ্ন সাজেশন (Quick Prompts)</p>
+        <div className="flex flex-wrap gap-1.5">
+          {draft.quickPrompts.map((qp, idx) => (
+            <span
+              key={idx}
+              className="inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary-deep"
+            >
+              {qp}
+              {canManageKnowledge && (
+                <button
+                  type="button"
+                  onClick={() => removeQuickPrompt(idx)}
+                  className="text-rose-600 hover:text-rose-800"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+        {canManageKnowledge && (
+          <div className="flex gap-2">
+            <input
+              value={newQuickPrompt}
+              onChange={(e) => setNewQuickPrompt(e.target.value)}
+              placeholder="নতুন কুইক প্রশ্ন লিখুন (যেমন: সুবর্ণচর ফায়ার সার্ভিস নম্বর)..."
+              className="min-w-0 flex-1 rounded-xl border border-border bg-background px-3 py-2 text-xs"
+            />
+            <button
+              type="button"
+              onClick={addQuickPrompt}
+              className="rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground"
+            >
+              <Plus className="mr-1 inline h-3.5 w-3.5" /> যোগ করুন
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* FAQ Knowledge Base */}
+      <div className="space-y-3 rounded-2xl bg-card p-4 shadow-card">
+        <p className="text-sm font-bold text-primary-deep">
+          নোয়াখালী FAQ ও নলেজ বেস ({draft.faqs.length} টি এন্ট্রি)
+        </p>
+        {canManageKnowledge && (
+          <form onSubmit={saveFaqItem} className="space-y-2 rounded-2xl bg-muted/40 p-3">
+            <input
+              value={faqQuestion}
+              onChange={(e) => setFaqQuestion(e.target.value)}
+              placeholder="প্রশ্ন (বাংলায়) *"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
+            />
+            <textarea
+              rows={2}
+              value={faqAnswer}
+              onChange={(e) => setFaqAnswer(e.target.value)}
+              placeholder="নির্ভরযোগ্য উত্তর *"
+              className="w-full rounded-xl border border-border bg-background p-2.5 text-xs"
+            />
+            <div className="flex flex-wrap gap-2">
+              <input
+                value={faqKeywords}
+                onChange={(e) => setFaqKeywords(e.target.value)}
+                placeholder="কীওয়ার্ড (বাংলা + বাংলিশ কমা দিয়ে, যেমন: haspatal,hospital,হাসপাতাল)"
+                className="min-w-[220px] flex-1 rounded-xl border border-border bg-background px-3 py-2 text-xs"
+              />
+              <button
+                type="submit"
+                className="rounded-full bg-gradient-hero px-4 py-1.5 text-xs font-bold text-primary-foreground"
               >
-                {/* Actor & Timestamp Header */}
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="flex items-center gap-2.5">
-                    <img
-                      src={log.actor_photo || logo}
-                      alt={log.actor_name}
-                      className="h-11 w-11 shrink-0 rounded-full border-2 border-primary/30 bg-white object-cover shadow-sm"
-                    />
-                    <div>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <p className="font-display text-sm font-bold text-foreground">
-                          {log.actor_name}
-                        </p>
-                        <span
-                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${getRoleBadgeStyle(
-                            log.actor_role
-                          )}`}
-                        >
-                          {log.actor_role_bn}
-                        </span>
-                        <span
-                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${getActionBadgeStyle(
-                            log.action_type
-                          )}`}
-                        >
-                          {log.action_label}
-                        </span>
-                      </div>
-                      <p className="mt-0.5 text-[11px] text-muted-foreground">
-                        ইমেইল: <span className="font-mono">{log.actor_email}</span> • সেকশন:{" "}
-                        <strong className="text-primary-deep">{log.module_label}</strong>
-                      </p>
-                    </div>
-                  </div>
+                {editingFaqId ? "FAQ আপডেট করুন" : "FAQ যোগ করুন"}
+              </button>
+              {editingFaqId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingFaqId(null);
+                    setFaqQuestion("");
+                    setFaqAnswer("");
+                    setFaqKeywords("");
+                  }}
+                  className="rounded-full bg-muted px-3 py-1.5 text-xs font-semibold"
+                >
+                  বাতিল
+                </button>
+              )}
+            </div>
+          </form>
+        )}
 
-                  <span className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-semibold text-muted-foreground">
-                    🕒 {new Date(log.created_at).toLocaleString("bn-BD")}
-                  </span>
-                </div>
-
-                {/* Target Item Details */}
-                <div className="mt-3 rounded-xl bg-muted/40 p-3">
-                  <p className="text-xs font-bold text-primary-deep">
-                    {isDelete ? "🗑️ যে তথ্যটি ডিলিট করা হয়েছে:" : "📌 কাজের বিবরণ:"}{" "}
-                    <span className={isDelete ? "text-rose-700" : "text-foreground"}>
-                      {log.target_title}
-                    </span>
-                  </p>
-                  {log.target_detail && (
-                    <p className="mt-1 text-xs text-muted-foreground">{log.target_detail}</p>
-                  )}
-                </div>
-
-                {/* Full Deleted Item Snapshot + 1-Click Restore */}
-                {isDelete && snapEntries.length > 0 && (
-                  <div className="mt-2.5 rounded-2xl border border-rose-500/30 bg-rose-500/5 p-3">
-                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-[11px] font-bold text-rose-800">
-                        🔍 ডিলিট হওয়া তথ্যের সম্পূর্ণ রেকর্ড (Deleted Data Snapshot):
-                      </p>
-                      {log.collection_name && (
-                        <div>
-                          {log.restored ? (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] font-bold text-emerald-700">
-                              <CheckCircle2 className="h-3.5 w-3.5" /> পুনরুদ্ধার করা হয়েছে
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              disabled={restoringId === log.id}
-                              onClick={() => void handleRestore(log)}
-                              className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-[11px] font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
-                            >
-                              {restoringId === log.id ? (
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                              ) : (
-                                <RotateCcw className="h-3 w-3" />
-                              )}
-                              ডিলিট হওয়া তথ্য পুনরুদ্ধার করুন (Restore)
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-1 gap-1.5 text-xs sm:grid-cols-2">
-                      {snapEntries.map(([k, v]) => (
-                        <div
-                          key={k}
-                          className="rounded-lg bg-white/80 px-2.5 py-1.5 shadow-2xs"
-                        >
-                          <span className="text-[10px] font-semibold text-muted-foreground">
-                            {SNAPSHOT_LABELS[k] || k}:{" "}
-                          </span>
-                          <span className="font-semibold text-foreground break-words">
-                            {String(v)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+        <div className="space-y-2">
+          {draft.faqs.map((item) => (
+            <div
+              key={item.id}
+              className="flex flex-wrap items-start justify-between gap-2 rounded-2xl border border-border/70 bg-background/80 p-3 text-xs"
+            >
+              <div className="min-w-0 flex-1 space-y-1">
+                <p className="font-bold text-primary-deep">{item.question}</p>
+                <p className="text-foreground/90 whitespace-pre-wrap">{item.answer}</p>
+                {item.keywords && (
+                  <p className="text-[10px] text-muted-foreground">কীওয়ার্ড: {item.keywords}</p>
                 )}
               </div>
-            );
-          })}
+              {canManageKnowledge && (
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        faqs: prev.faqs.map((f) =>
+                          f.id === item.id ? { ...f, visible: !f.visible } : f
+                        ),
+                      }))
+                    }
+                    className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${
+                      item.visible
+                        ? "bg-emerald-500/15 text-emerald-700"
+                        : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {item.visible ? "দৃশ্যমান" : "লুকানো"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingFaqId(item.id);
+                      setFaqQuestion(item.question);
+                      setFaqAnswer(item.answer);
+                      setFaqKeywords(item.keywords);
+                    }}
+                    className="rounded-full bg-primary/10 p-1.5 text-primary hover:bg-primary/20"
+                  >
+                    <Edit3 className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        faqs: prev.faqs.filter((f) => f.id !== item.id),
+                      }))
+                    }
+                    className="rounded-full bg-destructive/10 p-1.5 text-destructive hover:bg-destructive hover:text-white"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
-      )}
+      </div>
     </div>
   );
 }

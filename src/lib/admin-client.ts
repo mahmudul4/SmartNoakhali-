@@ -6,6 +6,8 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  query,
+  where,
   serverTimestamp,
 } from "firebase/firestore";
 import {
@@ -15,6 +17,7 @@ import {
   REGULAR_ADMIN_EMAIL,
   isSuperAdminEmail,
   isBootstrappedAdminEmail,
+  provisionFirebaseEmailUser,
   OperationType,
   handleFirestoreError,
   sanitizeString,
@@ -38,6 +41,8 @@ export interface AdminUserRecord {
   last_sign_in_at?: string | null;
   banned_until: string | null;
   roles: string[];
+  custom_role_id?: string | null;
+  custom_role_name?: string | null;
   profile: {
     full_name: string | null;
     username: string | null;
@@ -46,19 +51,23 @@ export interface AdminUserRecord {
     must_change_password: boolean;
     photo_url?: string | null;
     designation?: string | null;
+    custom_role_id?: string | null;
+    custom_role_name?: string | null;
   } | null;
 }
 
 export interface VaultUserMeta {
   uid: string;
   email: string;
-  password?: string;
+  hasPassword?: boolean;
   full_name?: string;
   username?: string;
   phone?: string;
   photo_url?: string;
   designation?: string;
   roles?: string[];
+  custom_role_id?: string | null;
+  custom_role_name?: string | null;
   suspended?: boolean;
   must_change_password?: boolean;
   verified_via?: "email" | "phone" | "google" | string;
@@ -145,7 +154,7 @@ export async function syncVaultFromCloud(force = false): Promise<Record<string, 
   let merged: Record<string, VaultUserMeta> = { ...local };
   const deletedSet = new Set<string>(readLocalDeletedUsers());
 
-  const upsertMeta = (u: Partial<VaultUserMeta> & { uid?: string; email?: string }) => {
+  const upsertMeta = (u: Partial<VaultUserMeta> & { uid?: string; email?: string; password?: string }) => {
     const cleanEmail = String(u.email || "").trim().toLowerCase();
     const cleanUid = String(u.uid || cleanEmail || "").trim();
     if (!cleanUid && !cleanEmail) return;
@@ -156,13 +165,15 @@ export async function syncVaultFromCloud(force = false): Promise<Record<string, 
     const meta: VaultUserMeta = {
       uid: cleanUid || existing?.uid || effectiveEmail,
       email: effectiveEmail,
-      password: u.password || existing?.password,
+      hasPassword: Boolean(u.hasPassword || u.password || existing?.hasPassword),
       full_name: u.full_name || existing?.full_name,
       username: u.username || existing?.username,
       phone: u.phone || existing?.phone,
       photo_url: u.photo_url || existing?.photo_url,
       designation: u.designation || existing?.designation,
       roles: Array.isArray(u.roles) && u.roles.length > 0 ? u.roles : existing?.roles || ["user"],
+      custom_role_id: u.custom_role_id !== undefined ? u.custom_role_id : existing?.custom_role_id,
+      custom_role_name: u.custom_role_name !== undefined ? u.custom_role_name : existing?.custom_role_name,
       suspended: u.suspended !== undefined ? Boolean(u.suspended) : existing?.suspended ?? false,
       must_change_password:
         u.must_change_password !== undefined
@@ -334,10 +345,14 @@ export async function syncVaultFromCloud(force = false): Promise<Record<string, 
     // Only delete if explicitly marked deleted and user lacks active verified credentials
     if (
       (deletedSet.has(kLow) || (uidLow && deletedSet.has(uidLow)) || (emailLow && deletedSet.has(emailLow))) &&
-      !v?.password &&
+      !v?.hasPassword &&
       !v?.verified_via
     ) {
       delete merged[k];
+    }
+    // Strip any legacy plaintext password field cached in browser storage
+    if (merged[k] && "password" in (merged[k] as unknown as Record<string, unknown>)) {
+      delete (merged[k] as unknown as Record<string, unknown>).password;
     }
   }
 
@@ -356,6 +371,8 @@ export async function recordUserCredential(entry: {
   photo_url?: string;
   designation?: string;
   roles?: string[];
+  custom_role_id?: string | null;
+  custom_role_name?: string | null;
   suspended?: boolean;
   must_change_password?: boolean;
   verified_via?: "email" | "phone" | "google";
@@ -380,17 +397,22 @@ export async function recordUserCredential(entry: {
     updated_at: new Date().toISOString(),
   };
 
+  const { password: _legacyPwd, ...existingClean } = existing as VaultUserMeta & { password?: string };
   const updated: VaultUserMeta = {
-    ...existing,
+    ...existingClean,
     uid: entry.uid || existing.uid || effectiveEmail,
     email: effectiveEmail,
-    password: entry.password !== undefined ? entry.password : existing.password,
+    hasPassword: Boolean(entry.password || existing.hasPassword),
     full_name: entry.full_name !== undefined ? entry.full_name : existing.full_name,
     username: entry.username !== undefined ? entry.username : existing.username,
     phone: entry.phone !== undefined ? entry.phone : existing.phone,
     photo_url: entry.photo_url !== undefined ? entry.photo_url : existing.photo_url,
     designation: entry.designation !== undefined ? entry.designation : existing.designation,
     roles: entry.roles !== undefined ? entry.roles : existing.roles,
+    custom_role_id:
+      entry.custom_role_id !== undefined ? entry.custom_role_id : existing.custom_role_id,
+    custom_role_name:
+      entry.custom_role_name !== undefined ? entry.custom_role_name : existing.custom_role_name,
     suspended: entry.suspended !== undefined ? entry.suspended : existing.suspended,
     must_change_password:
       entry.must_change_password !== undefined
@@ -405,7 +427,7 @@ export async function recordUserCredential(entry: {
   vault[effectiveEmail] = updated;
   writeLocalVault(vault);
 
-  // Sync with Express server store so phone/email/staff logins and Super Admin user list always work
+  // Sync with Express server store (password is hashed server-side and never returned/stored locally)
   try {
     await fetch("/api/auth/sync-user", {
       method: "POST",
@@ -414,10 +436,12 @@ export async function recordUserCredential(entry: {
         uid: updated.uid,
         email: updated.email,
         phone: updated.phone || "",
-        password: updated.password,
+        ...(entry.password ? { password: entry.password } : {}),
         full_name: updated.full_name || updated.email.split("@")[0],
         username: updated.username || updated.email.split("@")[0],
         roles: updated.roles || ["user"],
+        custom_role_id: updated.custom_role_id ?? null,
+        custom_role_name: updated.custom_role_name ?? null,
         photo_url: updated.photo_url,
         designation: updated.designation,
         suspended: Boolean(updated.suspended),
@@ -532,9 +556,93 @@ function isVerifiedFirebaseSuperAdmin(): boolean {
   return Boolean(u && (isSuperAdminEmail(u.email) || isBootstrappedAdminEmail(u.email)));
 }
 
-function isVerifiedFirebaseBootstrappedStaff(): boolean {
+function isVerifiedFirebaseChatOperator(): boolean {
   const u = auth.currentUser;
-  return Boolean(u && isBootstrappedAdminEmail(u.email));
+  if (!u || u.isAnonymous) return false;
+  if (isSuperAdminEmail(u.email) || isBootstrappedAdminEmail(u.email)) return true;
+  try {
+    const raw = sessionStorage.getItem("sn_verified_user_session_v1");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const roles: string[] = Array.isArray(parsed?.roles) ? parsed.roles : [];
+      if (
+        roles.includes("admin") ||
+        roles.includes("editor") ||
+        roles.includes("moderator") ||
+        Boolean(parsed?.customRoleId)
+      ) {
+        return true;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
+export function listAuthorizedChatOperatorUids(): string[] {
+  const vault = readLocalVault();
+  const uids = new Set<string>(["super_admin_mahmudul"]);
+  if (auth.currentUser && !auth.currentUser.isAnonymous && auth.currentUser.uid) {
+    uids.add(auth.currentUser.uid);
+  }
+  for (const v of Object.values(vault)) {
+    if (!v || !v.uid || v.suspended) continue;
+    const roles = Array.isArray(v.roles) ? v.roles : [];
+    if (
+      roles.includes("admin") ||
+      roles.includes("editor") ||
+      roles.includes("moderator") ||
+      Boolean(v.custom_role_id) ||
+      isBootstrappedAdminEmail(v.email)
+    ) {
+      uids.add(v.uid);
+    }
+  }
+  return Array.from(uids).slice(0, 24);
+}
+
+const CHAT_OPERATORS_CONFIG_ID = "chat_operators_config";
+const LOCAL_CHAT_OPERATOR_UIDS_KEY = "sn_chat_operator_uids_v1";
+
+export async function syncChatOperatorUidsSetting(): Promise<string[]> {
+  const uids = listAuthorizedChatOperatorUids();
+  try {
+    localStorage.setItem(LOCAL_CHAT_OPERATOR_UIDS_KEY, JSON.stringify(uids));
+  } catch {
+    // ignore
+  }
+  try {
+    await fetch("/api/chat/operators", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uids }),
+    });
+  } catch {
+    // ignore
+  }
+  if (isVerifiedFirebaseSuperAdmin()) {
+    try {
+      const payload = sanitizeString(
+        JSON.stringify({ uids, updatedAt: new Date().toISOString() }),
+        50000,
+        "{}"
+      );
+      await setDoc(
+        doc(db, "settings", CHAT_OPERATORS_CONFIG_ID),
+        {
+          key: CHAT_OPERATORS_CONFIG_ID,
+          logo_url: payload,
+          visible: true,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+    } catch {
+      // non-fatal
+    }
+  }
+  return uids;
 }
 
 function hasActiveSuperAdminSession(): boolean {
@@ -687,15 +795,16 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
         }
         const roles = Array.isArray(v.roles) && v.roles.length > 0 ? v.roles : ["user"];
         const resolvedRoleDesignation =
+          v.custom_role_name ||
           v.designation ||
           staffProfiles[emailLower]?.designation ||
           (roles.includes("admin")
-            ? "শুধু এডমিন"
+            ? "অ্যাডমিন"
             : roles.includes("editor")
               ? "এডিটর"
               : roles.includes("moderator")
                 ? "মডারেটর"
-                : "সাধারণ ইউজার");
+                : "সাধারণ ব্যবহারকারী");
         const isSuspended = Boolean(v.suspended);
         acc.push({
           id: v.uid || v.email,
@@ -708,6 +817,8 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
           last_sign_in_at: v.updated_at,
           banned_until: isSuspended ? "suspended" : null,
           roles,
+          custom_role_id: v.custom_role_id || null,
+          custom_role_name: v.custom_role_name || null,
           profile: {
             full_name:
               v.full_name ||
@@ -719,6 +830,8 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
             must_change_password: Boolean(v.must_change_password),
             photo_url: v.photo_url || staffProfiles[emailLower]?.photo_url || null,
             designation: resolvedRoleDesignation,
+            custom_role_id: v.custom_role_id || null,
+            custom_role_name: v.custom_role_name || null,
           },
         });
         return acc;
@@ -800,19 +913,29 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
       ? "•••••••• (Firebase Auth সুরক্ষিত)"
       : "•••••••• (নিরাপদ পাসওয়ার্ড)";
 
+    const resolvedCustomId =
+      (typeof data.custom_role_id === "string" && data.custom_role_id.trim()) ||
+      vMeta?.custom_role_id ||
+      null;
+    const resolvedCustomName =
+      (typeof data.custom_role_name === "string" && data.custom_role_name.trim()) ||
+      vMeta?.custom_role_name ||
+      null;
+
     const resolvedPhoto = sProf?.photo_url || vMeta?.photo_url || null;
     const resolvedDesignation =
+      resolvedCustomName ||
       sProf?.designation ||
       vMeta?.designation ||
       (isSuper
-        ? "মেইন সুপার এডমিন"
+        ? "সুপার অ্যাডমিন"
         : roles.includes("admin")
-        ? "শুধু এডমিন"
+        ? "অ্যাডমিন"
         : roles.includes("editor")
         ? "এডিটর"
         : roles.includes("moderator")
-        ? "মডারেটর"
-        : "সাধারণ ইউজার");
+        ? "মোডারেটর"
+        : "সাধারণ ব্যবহারকারী");
 
     return {
       id: d.id,
@@ -825,6 +948,8 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
       last_sign_in_at: updated_at,
       banned_until: suspended ? "suspended" : null,
       roles,
+      custom_role_id: resolvedCustomId,
+      custom_role_name: resolvedCustomName,
       profile: {
         full_name:
           sProf?.full_name ||
@@ -837,6 +962,8 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
         must_change_password: Boolean(vMeta?.must_change_password ?? data.must_change_password),
         photo_url: resolvedPhoto,
         designation: resolvedDesignation,
+        custom_role_id: resolvedCustomId,
+        custom_role_name: resolvedCustomName,
       },
     };
   });
@@ -875,6 +1002,9 @@ export async function listUsers(): Promise<AdminUserRecord[]> {
       uniqueMap.set(primaryKey, item);
     }
   }
+  if (isCurrentViewerSuperAdmin) {
+    void syncChatOperatorUidsSetting();
+  }
   return Array.from(uniqueMap.values()).map((u): AdminUserRecord => {
     if (!isCurrentViewerSuperAdmin && isProtectedMainSuperAdmin({ id: u.id, email: u.email, username: u.profile?.username })) {
       return {
@@ -905,17 +1035,33 @@ export async function createUser(opts?: {
     designation?: string;
     photo_url?: string;
     role?: "admin" | "moderator" | "editor" | "user";
+    custom_role_id?: string | null;
+    custom_role_name?: string | null;
   };
 }): Promise<{ id: string }> {
   await ensureSuperAdminSignedIn();
   const payload = opts?.data;
   if (!payload?.email) throw new Error("ইমেইল আবশ্যক");
-  const id = `usr_${crypto.randomUUID().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 24)}`;
-  const role = payload.role ?? "user";
-  const roles = role === "user" ? ["user"] : ["user", role];
-  const username = sanitizeString(payload.email.split("@")[0] || "user", 60, "user");
-  const path = `users/${id}`;
   const cleanEmail = payload.email.trim().toLowerCase();
+  const username = sanitizeString(cleanEmail.split("@")[0] || "user", 60, "user");
+
+  // 0. Provision real Firebase Auth Email/Password user via secondary app so operator receives real Firebase UID
+  const provisioned = await provisionFirebaseEmailUser({
+    email: cleanEmail,
+    password: payload.password,
+    displayName: payload.full_name || username,
+  });
+
+  const id =
+    provisioned?.uid ||
+    `usr_${crypto.randomUUID().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 24)}`;
+  const role = payload.role ?? "user";
+  const roles =
+    role === "user"
+      ? payload.custom_role_id
+        ? ["user", "moderator"]
+        : ["user"]
+      : ["user", role];
 
   // 1. Immediately remove from local and session deleted users so user is instantly visible
   const prevDel = readLocalDeletedUsers().filter(
@@ -937,9 +1083,9 @@ export async function createUser(opts?: {
   // 2. Always attempt to write to Firestore if any authenticated Firebase user exists
   if (auth.currentUser) {
     try {
-      await setDoc(doc(db, "users", id), {
+      const firestorePayload: Record<string, unknown> = {
         uid: id,
-        email: sanitizeString(payload.email, 254, "user@example.com"),
+        email: sanitizeString(cleanEmail, 254, "user@example.com"),
         full_name: sanitizeString(payload.full_name || username, 120, username),
         username,
         phone: sanitizeString(payload.phone ?? "", 30, ""),
@@ -948,12 +1094,19 @@ export async function createUser(opts?: {
         must_change_password: false,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      });
+      };
+      if (payload.custom_role_id) {
+        firestorePayload.custom_role_id = sanitizeString(payload.custom_role_id, 100, "");
+      }
+      if (payload.custom_role_name) {
+        firestorePayload.custom_role_name = sanitizeString(payload.custom_role_name, 120, "");
+      }
+      await setDoc(doc(db, "users", id), firestorePayload);
 
-      if (role === "admin") {
+      if (role === "admin" || Boolean(payload.custom_role_id)) {
         await setDoc(doc(db, "admins", id), {
           uid: id,
-          email: sanitizeString(payload.email, 254, "user@example.com"),
+          email: sanitizeString(cleanEmail, 254, "user@example.com"),
           createdAt: serverTimestamp(),
         });
       }
@@ -965,25 +1118,29 @@ export async function createUser(opts?: {
   // 3. Immediately record user credentials locally and in Express server store
   await recordUserCredential({
     uid: id,
-    email: payload.email,
+    email: cleanEmail,
     password: payload.password,
     full_name: payload.full_name || username,
     username,
     phone: payload.phone || "",
     photo_url: payload.photo_url || "",
-    designation: payload.designation || "",
+    designation: payload.custom_role_name || payload.designation || "",
     roles,
+    custom_role_id: payload.custom_role_id || null,
+    custom_role_name: payload.custom_role_name || null,
     suspended: false,
   });
 
+  void syncChatOperatorUidsSetting();
+
   void recordStaffActivity({
     action_type: "create",
-    action_label: `নতুন ইউজার তৈরি করেছে (${role})`,
+    action_label: `নতুন অ্যাকাউন্ট তৈরি করেছে (${payload.custom_role_name || role})`,
     module: "users",
     module_label: "ইউজার ম্যানেজমেন্ট",
     target_id: id,
-    target_title: `${payload.full_name || username} (${payload.email})`,
-    target_detail: `রোল: ${roles.join(", ")} • ফোন: ${payload.phone || "—"}`,
+    target_title: `${payload.full_name || username} (${cleanEmail})`,
+    target_detail: `রোল: ${payload.custom_role_name || roles.join(", ")} • ফোন: ${payload.phone || "—"}`,
   });
 
   return { id };
@@ -1061,6 +1218,8 @@ export async function setUserRole(opts?: {
     roles: nextRoles,
   });
 
+  void syncChatOperatorUidsSetting();
+
   void recordStaffActivity({
     action_type: "user",
     action_label: `ইউজারের রোল ${d.enable ? "যুক্ত" : "বাতিল"} করেছে (${d.role})`,
@@ -1069,6 +1228,86 @@ export async function setUserRole(opts?: {
     target_id: d.user_id,
     target_title: vMeta?.email || d.user_id,
     target_detail: `বর্তমান রোলসমূহ: ${nextRoles.join(", ")}`,
+  });
+
+  return { ok: true };
+}
+
+export async function setUserCustomRole(opts?: {
+  data?: {
+    user_id: string;
+    custom_role_id: string | null;
+    custom_role_name: string | null;
+  };
+}): Promise<{ ok: boolean }> {
+  await ensureSuperAdminSignedIn();
+  const d = opts?.data;
+  if (!d) throw new Error("Missing data");
+  await assertNotProtectedSuperAdmin(d.user_id);
+
+  const vault = readLocalVault();
+  const vMeta =
+    vault[d.user_id] ||
+    Object.values(vault).find(
+      (x) =>
+        x.uid === d.user_id ||
+        (Boolean(
+          x?.email &&
+            d?.user_id &&
+            typeof x.email === "string" &&
+            typeof d.user_id === "string" &&
+            x.email.toLowerCase() === d.user_id.toLowerCase()
+        ))
+    );
+
+  const existingRoles = Array.isArray(vMeta?.roles) ? vMeta.roles : ["user"];
+  const nextRolesSet = new Set(existingRoles);
+  if (d.custom_role_id) {
+    nextRolesSet.add("moderator");
+  }
+  const nextRoles = Array.from(nextRolesSet).slice(0, 4);
+
+  if (isVerifiedFirebaseSuperAdmin()) {
+    const ref = doc(db, "users", d.user_id);
+    const snap = await getDoc(ref).catch(() => null);
+    if (snap && snap.exists()) {
+      await updateDoc(ref, {
+        roles: nextRoles,
+        custom_role_id: d.custom_role_id || "",
+        custom_role_name: d.custom_role_name || "",
+        updatedAt: serverTimestamp(),
+      }).catch(() => {});
+    }
+    if (d.custom_role_id && vMeta?.email) {
+      await setDoc(doc(db, "admins", d.user_id), {
+        uid: d.user_id,
+        email: sanitizeString(vMeta.email, 254, "operator@example.com"),
+        createdAt: serverTimestamp(),
+      }).catch(() => {});
+    }
+  }
+
+  await recordUserCredential({
+    uid: d.user_id,
+    email: vMeta?.email || d.user_id,
+    roles: nextRoles,
+    custom_role_id: d.custom_role_id || null,
+    custom_role_name: d.custom_role_name || null,
+    designation: d.custom_role_name || vMeta?.designation,
+  });
+
+  void syncChatOperatorUidsSetting();
+
+  void recordStaffActivity({
+    action_type: "user",
+    action_label: d.custom_role_id
+      ? `কাস্টম রোল যুক্ত করেছে (${d.custom_role_name || d.custom_role_id})`
+      : "কাস্টম রোল অপসারণ করেছে",
+    module: "users",
+    module_label: "রোল ও পারমিশন",
+    target_id: d.user_id,
+    target_title: vMeta?.email || d.user_id,
+    target_detail: `কাস্টম রোল: ${d.custom_role_name || "নেই"}`,
   });
 
   return { ok: true };
@@ -1210,6 +1449,8 @@ export async function deleteUser(opts?: {
     }
   }
 
+  void syncChatOperatorUidsSetting();
+
   void recordStaffActivity({
     action_type: "delete",
     action_label: "ইউজার একাউন্ট ডিলিট করেছে",
@@ -1258,6 +1499,8 @@ export async function suspendUser(opts?: {
     suspended: Boolean(d.suspend),
   });
 
+  void syncChatOperatorUidsSetting();
+
   void recordStaffActivity({
     action_type: "user",
     action_label: d.suspend ? "ইউজার একাউন্ট স্থগিত (Suspend) করেছে" : "ইউজার একাউন্ট সক্রিয় করেছে",
@@ -1273,7 +1516,7 @@ export async function suspendUser(opts?: {
 
 export async function resetUserPassword(opts?: {
   data?: { user_id: string; email?: string; new_password?: string; force_change?: boolean };
-}): Promise<{ password: string }> {
+}): Promise<{ ok: boolean; password?: string }> {
   await ensureSuperAdminSignedIn();
   const d = opts?.data;
   if (!d) throw new Error("Missing data");
@@ -1293,14 +1536,22 @@ export async function resetUserPassword(opts?: {
     }
   }
 
+  await fetch("/api/auth/reset-password-direct", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      identifier: d.email || d.user_id,
+      newPassword: assignedPassword,
+    }),
+  }).catch(() => {});
+
   await recordUserCredential({
     uid: d.user_id,
     email: d.email || d.user_id,
-    password: assignedPassword,
     must_change_password: Boolean(d.force_change ?? false),
   });
 
-  return { password: assignedPassword };
+  return { ok: true, password: d.new_password?.trim() ? undefined : assignedPassword };
 }
 
 export async function updateUserProfile(opts?: {
@@ -1391,10 +1642,21 @@ export async function listThreadsWithUsers() {
           mergedMap.set(tid, {
             id: tid,
             user_id: String(t.user_id || tid),
+            user_name: t.user_name ?? vUser?.full_name ?? null,
+            user_email: t.user_email ?? vUser?.email ?? null,
             last_message_at: lastAt,
             last_message_preview: t.last_message_preview ?? null,
             user_unread: Number(t.user_unread ?? 0),
             staff_unread: Number(t.staff_unread ?? 0),
+            status: t.status ?? "new",
+            priority: t.priority ?? "normal",
+            assigned_to_uid: t.assigned_to_uid ?? null,
+            assigned_to_name: t.assigned_to_name ?? null,
+            assigned_role: t.assigned_role ?? null,
+            source: t.source ?? "direct",
+            handoff_summary: t.handoff_summary ?? null,
+            staff_uids: Array.isArray(t.staff_uids) ? t.staff_uids : undefined,
+            reopened_at: t.reopened_at ?? null,
             created_at: String(t.created_at || new Date().toISOString()),
             email: String(t.user_email || vUser?.email || ""),
             profile: {
@@ -1410,10 +1672,16 @@ export async function listThreadsWithUsers() {
     // ignore
   }
 
-  // 2. Also merge Firestore chat_threads if signed in with Firebase Staff account
-  if (isVerifiedFirebaseBootstrappedStaff()) {
+  // 2. Also merge Firestore chat_threads for ALL authorized Admins, Moderators, Editors & Custom Operators
+  if (isVerifiedFirebaseChatOperator()) {
     try {
-      const threadsSnap = await getDocs(collection(db, "chat_threads"));
+      const currentUid = auth.currentUser?.uid || "";
+      const canScanAllDirectly = isVerifiedFirebaseSuperAdmin();
+      const threadsSnap = canScanAllDirectly
+        ? await getDocs(collection(db, "chat_threads"))
+        : await getDocs(
+            query(collection(db, "chat_threads"), where("staff_uids", "array-contains", currentUid))
+          ).catch(() => ({ docs: [] as Array<{ id: string; data: () => Record<string, any> }> }));
       const usersSnap = isVerifiedFirebaseSuperAdmin()
         ? await getDocs(collection(db, "users")).catch(() => null)
         : null;
@@ -1438,7 +1706,6 @@ export async function listThreadsWithUsers() {
         const hasNoMessages = !t.last_message_preview && Number(t.staff_unread ?? 0) === 0 && Number(t.user_unread ?? 0) === 0;
 
         if (isChatThreadDeleted(tDoc.id, fsLastAt)) {
-          // Clean up tombstoned thread from Firestore in the background
           getDocs(collection(db, "chat_threads", tDoc.id, "messages"))
             .then((mSnap) => Promise.all(mSnap.docs.map((m) => deleteDoc(m.ref).catch(() => {}))))
             .then(() => deleteDoc(doc(db, "chat_threads", tDoc.id)).catch(() => {}))
@@ -1454,21 +1721,33 @@ export async function listThreadsWithUsers() {
         const vUser = vault[String(t.user_id)];
         const existing = mergedMap.get(tDoc.id);
 
-        if (!existing || fsLastAt > existing.last_message_at) {
+        if (!existing || fsLastAt >= existing.last_message_at) {
           mergedMap.set(tDoc.id, {
             id: tDoc.id,
             user_id: String(t.user_id),
+            user_name: t.user_name ?? existing?.user_name ?? uInfo?.full_name ?? vUser?.full_name ?? null,
+            user_email: t.user_email ?? existing?.user_email ?? uInfo?.email ?? vUser?.email ?? null,
             last_message_at: fsLastAt,
             last_message_preview: t.last_message_preview ?? existing?.last_message_preview ?? null,
             user_unread: Number(t.user_unread ?? existing?.user_unread ?? 0),
             staff_unread: Number(t.staff_unread ?? existing?.staff_unread ?? 0),
+            status: t.status ?? existing?.status ?? "new",
+            priority: t.priority ?? existing?.priority ?? "normal",
+            assigned_to_uid: t.assigned_to_uid ?? existing?.assigned_to_uid ?? null,
+            assigned_to_name: t.assigned_to_name ?? existing?.assigned_to_name ?? null,
+            assigned_role: t.assigned_role ?? existing?.assigned_role ?? null,
+            source: t.source ?? existing?.source ?? "direct",
+            handoff_summary: t.handoff_summary ?? existing?.handoff_summary ?? null,
+            staff_uids: Array.isArray(t.staff_uids) ? t.staff_uids : existing?.staff_uids,
+            reopened_at: t.reopened_at ?? existing?.reopened_at ?? null,
             created_at: tsToIso(t.createdAt),
-            email: uInfo?.email || existing?.email || vUser?.email || "",
+            email: uInfo?.email || existing?.email || vUser?.email || t.user_email || "",
             profile: {
               full_name:
                 uInfo?.full_name ||
                 existing?.profile?.full_name ||
                 vUser?.full_name ||
+                t.user_name ||
                 null,
               username:
                 uInfo?.username ||

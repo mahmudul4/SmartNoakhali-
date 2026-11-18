@@ -66,6 +66,9 @@ service cloud.firestore {
 
     function isMainAdminProtectedSetting(settingId) {
       return settingId == "hero_banner_config" ||
+        settingId == "homepage_config" ||
+        settingId == "website_content_config" ||
+        settingId == "media_library_config" ||
         settingId == "role_permissions" ||
         settingId == "site_config" ||
         settingId == "branding" ||
@@ -95,7 +98,24 @@ service cloud.firestore {
         data.read is bool &&
         (data.created_at is timestamp || (data.created_at is string && data.created_at.size() >= 1 && data.created_at.size() <= 64)) &&
         (!('user_id' in data) || (data.user_id is string && data.user_id.size() <= 128)) &&
-        (!('link' in data) || (data.link is string && data.link.size() <= 500));
+        (!('link' in data) || (data.link is string && data.link.size() <= 500)) &&
+        (!('category' in data) || (data.category is string && data.category.size() <= 100)) &&
+        (!('priority' in data) || (data.priority == 'normal' || data.priority == 'high' || data.priority == 'urgent')) &&
+        (!('audience' in data) || (data.audience == 'all_users' || data.audience == 'specific_users' || data.audience == 'all_admins' || data.audience == 'ordinary_admins' || data.audience == 'staff_editors')) &&
+        (!('status' in data) || (data.status == 'created' || data.status == 'queued' || data.status == 'sent' || data.status == 'failed' || data.status == 'partial')) &&
+        (!('scheduled_at' in data) || (data.scheduled_at is string && data.scheduled_at.size() <= 64)) &&
+        (!('idempotency_key' in data) || (data.idempotency_key is string && data.idempotency_key.size() <= 128)) &&
+        (!('channels' in data) || (data.channels is list && data.channels.size() <= 5 && (data.channels.size() == 0 || data.channels[0] is string)));
+    }
+
+    function isValidNotificationDelivery(data) {
+      return data.keys().hasAll(['notification_id', 'channel', 'status', 'recipient', 'created_at']) &&
+        data.notification_id is string && data.notification_id.size() >= 1 && data.notification_id.size() <= 128 &&
+        data.channel is string && (data.channel == 'in_app' || data.channel == 'web_push' || data.channel == 'email') &&
+        data.status is string && (data.status == 'queued' || data.status == 'sent' || data.status == 'failed') &&
+        data.recipient is string && data.recipient.size() >= 1 && data.recipient.size() <= 300 &&
+        data.created_at is string && data.created_at.size() >= 1 && data.created_at.size() <= 64 &&
+        (!('error_message' in data) || (data.error_message is string && data.error_message.size() <= 1000));
     }
 
     // Global Safety Net (Default Deny)
@@ -198,6 +218,39 @@ service cloud.firestore {
           incoming().read_at is string && incoming().read_at.size() <= 64;
         allow delete: if isValidId(userId) && isValidId(notifId) && (isOwner(userId) || isMainAdmin());
       }
+
+      // Per-user device push tokens (Least Privilege, cleaned up on signOut)
+      match /device_tokens/{tokenId} {
+        allow get: if isValidId(userId) && isValidId(tokenId) && (isOwner(userId) || isMainAdmin());
+        allow list: if (isSignedIn() && existing().user_id == request.auth.uid) || isMainAdmin();
+        allow create, update: if isValidId(userId) && isValidId(tokenId) &&
+          isOwner(userId) &&
+          incoming().user_id == request.auth.uid &&
+          incoming().user_id == userId &&
+          incoming().platform is string && incoming().platform.size() <= 40 &&
+          incoming().active is bool &&
+          incoming().updated_at is string && incoming().updated_at.size() <= 64 &&
+          (!('endpoint' in incoming()) || (incoming().endpoint is string && incoming().endpoint.size() <= 500)) &&
+          (!('subscription_json' in incoming()) || (incoming().subscription_json is string && incoming().subscription_json.size() <= 2000));
+        allow delete: if isValidId(userId) && isValidId(tokenId) && (isOwner(userId) || isMainAdmin());
+      }
+
+      // Per-user notification channel & category preferences
+      match /notification_preferences/{prefId} {
+        allow get: if isValidId(userId) && isValidId(prefId) && (isOwner(userId) || isMainAdmin());
+        allow list: if (isSignedIn() && existing().user_id == request.auth.uid) || isMainAdmin();
+        allow create, update: if isValidId(userId) && isValidId(prefId) &&
+          (isOwner(userId) || isMainAdmin()) &&
+          incoming().user_id == userId &&
+          incoming().in_app is bool &&
+          incoming().web_push is bool &&
+          incoming().email is bool &&
+          incoming().muted_categories is list &&
+          incoming().muted_categories.size() <= 10 &&
+          (incoming().muted_categories.size() == 0 || incoming().muted_categories[0] is string) &&
+          (!('email_address' in incoming()) || (incoming().email_address is string && incoming().email_address.size() <= 254));
+        allow delete: if isValidId(userId) && isValidId(prefId) && (isOwner(userId) || isMainAdmin());
+      }
     }
 
     // =========================================================
@@ -228,6 +281,29 @@ service cloud.firestore {
         )
       );
       allow delete: if isMainAdmin() && isValidId(notifId);
+    }
+
+    // =========================================================
+    // 3b. /notification_deliveries/{deliveryId} (Main Admin Audit & Retry Log)
+    // =========================================================
+    match /notification_deliveries/{deliveryId} {
+      allow get, list: if isMainAdmin();
+      allow create, update: if isValidId(deliveryId) && isMainAdmin() && isValidNotificationDelivery(incoming());
+      allow delete: if isValidId(deliveryId) && isMainAdmin();
+    }
+
+    // =========================================================
+    // 3c. /admin_audit_logs/{logId} (Immutable Super Admin Audit Trail)
+    // =========================================================
+    match /admin_audit_logs/{logId} {
+      allow get, list: if isMainAdmin();
+      allow create: if isValidId(logId) && isMainAdmin() &&
+        incoming().actor_email is string &&
+        incoming().action is string && incoming().action.size() >= 1 && incoming().action.size() <= 40 &&
+        incoming().module is string && incoming().module.size() >= 1 && incoming().module.size() <= 60 &&
+        incoming().summary is string && incoming().summary.size() >= 1 && incoming().summary.size() <= 1000 &&
+        (!('metadata_json' in incoming()) || (incoming().metadata_json is string && incoming().metadata_json.size() <= 5000));
+      allow update, delete: if false;
     }
 
     // =========================================================

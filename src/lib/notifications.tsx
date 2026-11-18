@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import {
   Bell,
   BellRing,
@@ -15,11 +15,16 @@ import {
   Clock,
   ChevronRight,
   Loader2,
+  ArrowUpRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useEmergencyBanners, useEmergencyRequests } from "@/lib/cloud";
 import { useAuth } from "@/lib/auth";
-import { useUserNotifications, type UserNotificationItem } from "@/lib/district-platform";
+import {
+  useUserNotifications,
+  registerDevicePushToken,
+  type UserNotificationItem,
+} from "@/lib/district-platform";
 
 export function playNotificationSound() {
   try {
@@ -75,7 +80,7 @@ export function useNotifications() {
     return Notification.permission;
   });
 
-  const { user } = useAuth();
+  const { user, isMainAdmin, isAdmin, isStaff } = useAuth();
   const { items: banners } = useEmergencyBanners();
   const { items: bloodRequests } = useEmergencyRequests();
   const {
@@ -85,7 +90,7 @@ export function useNotifications() {
     error,
     markAsRead,
     markAllAsRead,
-  } = useUserNotifications(user?.uid);
+  } = useUserNotifications(user?.uid, { isMainAdmin, isAdmin, isStaff });
 
   const activeBanners = useMemo(() => banners.filter((b) => b.visible), [banners]);
   const activeBlood = useMemo(
@@ -104,6 +109,9 @@ export function useNotifications() {
     const res = await requestNotificationPermission();
     setPermission(res);
     if (res === "granted") {
+      if (user?.uid) {
+        await registerDevicePushToken(user.uid).catch(() => {});
+      }
       toast.success("নোটিফিকেশন সফলভাবে চালু হয়েছে!");
       sendBrowserNotification("স্মার্ট নোয়াখালী", {
         body: "আপনার ডিভাইসে জরুরী নোটিফিকেশন সিস্টেম সক্রিয় হয়েছে।",
@@ -112,7 +120,7 @@ export function useNotifications() {
       toast.error("ব্রাউজার সেটিংসে নোটিফিকেশন ব্লক করা আছে। অনুমতি দিন।");
     }
     return res;
-  }, []);
+  }, [user?.uid]);
 
   const sendTestNotification = useCallback(() => {
     if (permission !== "granted") {
@@ -436,15 +444,34 @@ export function NotificationBell() {
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex items-start justify-between gap-2">
-                              <p
-                                className={`text-xs leading-snug ${
-                                  item.read
-                                    ? "font-semibold text-foreground"
-                                    : "font-extrabold text-primary-deep"
-                                }`}
-                              >
-                                {item.title}
-                              </p>
+                              <div className="min-w-0 flex-1 space-y-1">
+                                <div className="flex flex-wrap items-center gap-1">
+                                  {item.priority === "urgent" && (
+                                    <span className="rounded bg-rose-600 px-1.5 py-0.5 text-[9px] font-black text-white">
+                                      জরুরি
+                                    </span>
+                                  )}
+                                  {item.priority === "high" && (
+                                    <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-bold text-amber-800">
+                                      গুরুত্বপূর্ণ
+                                    </span>
+                                  )}
+                                  {item.category && (
+                                    <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary">
+                                      {item.category}
+                                    </span>
+                                  )}
+                                </div>
+                                <p
+                                  className={`text-xs leading-snug ${
+                                    item.read
+                                      ? "font-semibold text-foreground"
+                                      : "font-extrabold text-primary-deep"
+                                  }`}
+                                >
+                                  {item.title}
+                                </p>
+                              </div>
                               {!item.read && (
                                 <span
                                   className="mt-1 h-2 w-2 shrink-0 rounded-full bg-rose-500"
@@ -584,11 +611,19 @@ export function NotificationBell() {
             </div>
 
             {/* Footer */}
-            <div className="border-t border-border/60 bg-muted/20 px-4 py-3 text-center">
+            <div className="flex items-center gap-2 border-t border-border/60 bg-muted/20 px-4 py-3">
+              <Link
+                to="/notifications"
+                onClick={() => setOpen(false)}
+                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-primary px-3 py-2 text-xs font-extrabold text-primary-foreground shadow-xs transition hover:brightness-105"
+              >
+                <span>সব বিজ্ঞপ্তি ও সেটিংস</span>
+                <ArrowUpRight className="h-3.5 w-3.5" />
+              </Link>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="w-full rounded-2xl bg-muted py-2 text-xs font-bold text-foreground/80 transition hover:bg-muted/80"
+                className="rounded-2xl bg-muted px-4 py-2 text-xs font-bold text-foreground/80 transition hover:bg-muted/80"
               >
                 বন্ধ করুন
               </button>

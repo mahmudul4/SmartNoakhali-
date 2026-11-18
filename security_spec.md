@@ -126,6 +126,15 @@
     *Rejected by*: `allow create, delete: if isMainAdmin()` and read state tracked per-user in `/users/{userId}/notification_reads/{notifId}`.
 
 14. **Hero Banner Tampering (`/settings/hero_banner_config`)**:
-    Ordinary Admin (`mr.bear444plus@gmail.com`) or Editor attempting to modify `hero_banner_config` or upload to Firebase Storage `/banners/hero_banner/*`.
+    Ordinary Admin (`mr.bear444plus@gmail.com`) or Editor attempting to modify `hero_banner_config`, `homepage_config`, `website_content_config`, or `media_library_config`, or upload to Firebase Storage `/banners/hero_banner/*` or `/media_library/*`.
     *Rejected by*: `isMainAdminProtectedSetting(settingId)` + `isMainAdmin()` in `firestore.rules` and `storage.rules`.
+
+15. **Immutable Super Admin Audit Trail (`/admin_audit_logs/{logId}`)**:
+    Create-only by verified Main Admin (`mdmahmudulhashan0@gmail.com`); all `update` and `delete` operations are unconditionally denied (`allow update, delete: if false;`), and sensitive fields (`password`, `otp`, `apiKey`, `smtpPass`, `token`) are redacted before persistence.
+
+16. **Notification Delivery Audit & Channel Honesty (`/notification_deliveries/{deliveryId}`)**:
+    Readable, creatable, updatable (retry), and deletable exclusively by `isMainAdmin()`, recording actual channel status (`sent`, `queued`, `failed`) with validated `channel`, `status`, and bounded `error_message`.
+
+17. **Owner-Scoped Device Push Tokens (`/users/{userId}/device_tokens/{tokenId}`) & Preferences (`/users/{userId}/notification_preferences/{prefId}`)**:
+    Strictly readable/writable only by `isOwner(userId)` (or `isMainAdmin()` for diagnostics/preferences), preventing cross-user push endpoint harvesting or token hijacking, and cleaned up on `signOut`.
 

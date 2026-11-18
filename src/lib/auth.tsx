@@ -45,12 +45,16 @@ export interface AppUser {
   photoURL: string | null;
   emailVerified: boolean;
   verifiedVia?: "email" | "phone" | "google";
+  customRoleId?: string | null;
+  customRoleName?: string | null;
 }
 
 interface VerifiedSessionData {
   user: AppUser;
   roles: Role[];
   username: string | null;
+  customRoleId?: string | null;
+  customRoleName?: string | null;
 }
 
 interface AuthCtx {
@@ -58,6 +62,8 @@ interface AuthCtx {
   firebaseUser: FirebaseUser | null;
   session: { user: AppUser } | null;
   roles: Role[];
+  customRoleId: string | null;
+  customRoleName: string | null;
   loading: boolean;
   isAdmin: boolean;
   isModerator: boolean;
@@ -191,6 +197,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [user, setUser] = useState<AppUser | null>(null);
   const [roles, setRoles] = useState<Role[]>([]);
+  const [customRoleId, setCustomRoleId] = useState<string | null>(null);
+  const [customRoleName, setCustomRoleName] = useState<string | null>(null);
   const [username, setUsername] = useState<string | null>(null);
   const [localSuperAdmin, setLocalSuperAdmin] = useState<boolean>(() => {
     try {
@@ -219,6 +227,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (currentVerified && currentVerified.user) {
           setUser(currentVerified.user);
           setRoles(currentVerified.roles || []);
+          setCustomRoleId(currentVerified.customRoleId || currentVerified.user.customRoleId || null);
+          setCustomRoleName(currentVerified.customRoleName || currentVerified.user.customRoleName || null);
           setUsername(currentVerified.username || null);
           setLoading(false);
           return;
@@ -227,6 +237,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setFirebaseUser(null);
         setUser(null);
         setRoles([]);
+        setCustomRoleId(null);
+        setCustomRoleName(null);
         setUsername(null);
         setLoading(false);
         return;
@@ -277,6 +289,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.warn("Profile init check:", err);
       }
 
+      const resolvedVaultCustomId = vaultEntry?.custom_role_id || currentVerified?.customRoleId || null;
+      const resolvedVaultCustomName = vaultEntry?.custom_role_name || currentVerified?.customRoleName || null;
+
       unsubProfile = onSnapshot(
         userRef,
         (docSnap) => {
@@ -288,9 +303,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const effectiveRoles: Role[] = isSuper
               ? (Array.from(new Set([...docRoles, "admin", "moderator", "editor", "user"])) as Role[])
               : isRegularBootstrappedAdmin
-              ? (Array.from(new Set([...docRoles, ...vaultRoles, ...sessionRoles, "admin", "editor", "user"])) as Role[])
+              ? (Array.from(new Set([...docRoles, ...vaultRoles, ...sessionRoles, "admin", "user"])) as Role[])
               : (Array.from(new Set([...docRoles, ...vaultRoles, ...sessionRoles])) as Role[]);
+            const finalCustomId =
+              (typeof data.custom_role_id === "string" && data.custom_role_id.trim()) ||
+              resolvedVaultCustomId ||
+              null;
+            const finalCustomName =
+              (typeof data.custom_role_name === "string" && data.custom_role_name.trim()) ||
+              resolvedVaultCustomName ||
+              null;
             setRoles(effectiveRoles);
+            setCustomRoleId(finalCustomId);
+            setCustomRoleName(finalCustomName);
             const resolvedUsername =
               typeof data.username === "string"
                 ? data.username
@@ -311,6 +336,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 typeof data.phone === "string" && data.phone.trim()
                   ? data.phone.trim()
                   : appU.phone,
+              customRoleId: finalCustomId,
+              customRoleName: finalCustomName,
             };
             setUser(hydratedUser);
 
@@ -318,26 +345,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               user: hydratedUser,
               roles: effectiveRoles,
               username: resolvedUsername,
+              customRoleId: finalCustomId,
+              customRoleName: finalCustomName,
             });
           } else {
             const effectiveRoles: Role[] = isSuper
               ? ["admin", "moderator", "editor", "user"]
               : isRegularBootstrappedAdmin
-              ? (Array.from(new Set([...vaultRoles, ...sessionRoles, "admin", "editor", "user"])) as Role[])
+              ? (Array.from(new Set([...vaultRoles, ...sessionRoles, "admin", "user"])) as Role[])
               : vaultRoles.length > 0 || sessionRoles.length > 0
               ? (Array.from(new Set([...vaultRoles, ...sessionRoles, "user"])) as Role[])
               : ["user"];
             setRoles(effectiveRoles);
+            setCustomRoleId(resolvedVaultCustomId);
+            setCustomRoleName(resolvedVaultCustomName);
             const resolvedUsername =
               isSuper
                 ? "mahmudul"
                 : vaultEntry?.username ?? currentVerified?.username ?? fbUser.displayName ?? null;
             setUsername(resolvedUsername);
 
+            const hydratedAppU: AppUser = {
+              ...appU,
+              customRoleId: resolvedVaultCustomId,
+              customRoleName: resolvedVaultCustomName,
+            };
+            setUser(hydratedAppU);
             writeVerifiedSession({
-              user: appU,
+              user: hydratedAppU,
               roles: effectiveRoles,
               username: resolvedUsername,
+              customRoleId: resolvedVaultCustomId,
+              customRoleName: resolvedVaultCustomName,
             });
           }
           setLoading(false);
@@ -355,11 +394,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const effectiveRoles: Role[] = isSuper
             ? ["admin", "moderator", "editor", "user"]
             : isRegularBootstrappedAdmin
-            ? (Array.from(new Set([...vaultRoles, ...sessionRoles, "admin", "editor", "user"])) as Role[])
+            ? (Array.from(new Set([...vaultRoles, ...sessionRoles, "admin", "user"])) as Role[])
             : vaultRoles.length > 0 || sessionRoles.length > 0
             ? (Array.from(new Set([...vaultRoles, ...sessionRoles, "user"])) as Role[])
             : ["user"];
           setRoles(effectiveRoles);
+          setCustomRoleId(resolvedVaultCustomId);
+          setCustomRoleName(resolvedVaultCustomName);
           setLoading(false);
         }
       );
@@ -403,14 +444,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const resolvedRoles: Role[] = isSuper
         ? ["admin", "moderator", "editor", "user"]
         : isRegAdmin
-        ? ["editor", "user"]
+        ? (Array.from(new Set([...(vaultEntry?.roles || []), "admin", "user"])) as Role[])
         : vaultEntry?.roles?.length
         ? (Array.from(new Set([...vaultEntry.roles, "user"])) as Role[])
         : ["user"];
 
-      if (options?.requireStaff && !isSuper && !isRegAdmin && !resolvedRoles.includes("editor") && !resolvedRoles.includes("moderator")) {
+      const gCustomRoleId = vaultEntry?.custom_role_id || null;
+      const gCustomRoleName = vaultEntry?.custom_role_name || null;
+
+      if (
+        options?.requireStaff &&
+        !isSuper &&
+        !isRegAdmin &&
+        !resolvedRoles.includes("admin") &&
+        !resolvedRoles.includes("editor") &&
+        !resolvedRoles.includes("moderator") &&
+        !gCustomRoleId
+      ) {
         await firebaseSignOut(auth);
-        throw new Error("শুধুমাত্র অনুমোদিত স্টাফ মেম্বারদের জন্য প্রবেশাধিকার রয়েছে।");
+        throw new Error("শুধুমাত্র অনুমোদিত অ্যাডমিন ও অপারেটরদের জন্য প্রবেশাধিকার রয়েছে।");
       }
 
       const cleanDisplayName = fbUser.displayName || email.split("@")[0] || "User";
@@ -440,6 +492,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         phone: fbUser.phoneNumber || undefined,
         photo_url: fbUser.photoURL || undefined,
         roles: resolvedRoles,
+        custom_role_id: gCustomRoleId || undefined,
+        custom_role_name: gCustomRoleName || undefined,
         verified_via: "google",
       }).catch(() => {});
 
@@ -452,18 +506,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         photoURL: fbUser.photoURL || null,
         emailVerified: true,
         verifiedVia: "google",
+        customRoleId: gCustomRoleId,
+        customRoleName: gCustomRoleName,
       };
 
       const sess: VerifiedSessionData = {
         user: appU,
         roles: resolvedRoles,
         username: cleanUsername,
+        customRoleId: gCustomRoleId,
+        customRoleName: gCustomRoleName,
       };
       writeVerifiedSession(sess);
       setVerifiedSession(sess);
       setFirebaseUser(fbUser);
       setUser(appU);
       setRoles(resolvedRoles);
+      setCustomRoleId(gCustomRoleId);
+      setCustomRoleName(gCustomRoleName);
       setUsername(cleanUsername);
 
       await logEvent("google_login_success", email).catch(() => {});
@@ -642,10 +702,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           username: vMatch.username || vMatch.email.split("@")[0],
           roles: (vMatch.roles as Role[]) || (isRegAdmin ? ["admin", "user"] : ["user"]),
           photo_url: vMatch.photo_url,
-        };
-        if (vMatch.password && vMatch.password === password) {
-          passwordMatchedOnServer = true;
-        }
+          custom_role_id: vMatch.custom_role_id || null,
+          custom_role_name: vMatch.custom_role_name || null,
+        } as typeof lookupUser & { custom_role_id?: string | null; custom_role_name?: string | null };
       }
     }
 
@@ -661,12 +720,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       );
     }
 
+    const lCustomId = (lookupUser as { custom_role_id?: string | null } | null)?.custom_role_id || null;
+    const lCustomName = (lookupUser as { custom_role_name?: string | null } | null)?.custom_role_name || null;
+
     // 2. Try Firebase Email/Password sign-in if available
     try {
       const cred = await signInWithEmailAndPassword(auth, targetEmail, password);
       const isRegAdmin = targetEmail.toLowerCase() === REGULAR_ADMIN_EMAIL.toLowerCase();
       const resolvedRoles: Role[] = isRegAdmin
-        ? ["editor", "user"]
+        ? (Array.from(new Set([...(lookupUser?.roles || []), "admin", "user"])) as Role[])
         : lookupUser?.roles?.length
         ? (Array.from(new Set([...lookupUser.roles, "user"])) as Role[])
         : ["user"];
@@ -679,29 +741,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         displayName: lookupUser?.full_name || cred.user.displayName || targetEmail.split("@")[0],
         photoURL: lookupUser?.photo_url || cred.user.photoURL || null,
         emailVerified: true,
+        customRoleId: lCustomId,
+        customRoleName: lCustomName,
       };
 
       const sess: VerifiedSessionData = {
         user: appU,
         roles: resolvedRoles,
         username: lookupUser?.username || targetEmail.split("@")[0],
+        customRoleId: lCustomId,
+        customRoleName: lCustomName,
       };
       writeVerifiedSession(sess);
       setVerifiedSession(sess);
+      setRoles(resolvedRoles);
+      setCustomRoleId(lCustomId);
+      setCustomRoleName(lCustomName);
 
       await recordUserCredential({
         uid: appU.uid,
         email: targetEmail,
-        password,
         full_name: appU.displayName || undefined,
         phone: appU.phone || undefined,
         roles: resolvedRoles,
+        custom_role_id: lCustomId || undefined,
+        custom_role_name: lCustomName || undefined,
       });
 
       const staffFlag =
         resolvedRoles.includes("admin") ||
         resolvedRoles.includes("editor") ||
-        resolvedRoles.includes("moderator");
+        resolvedRoles.includes("moderator") ||
+        Boolean(lCustomId);
 
       return { user: appU, roles: resolvedRoles, isStaff: staffFlag };
     } catch (fbErr: any) {
@@ -709,7 +780,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (lookupUser && passwordMatchedOnServer) {
         const isRegAdmin = lookupUser.email.toLowerCase() === REGULAR_ADMIN_EMAIL.toLowerCase();
         const resolvedRoles: Role[] = isRegAdmin
-          ? ["admin", "user"]
+          ? (Array.from(new Set([...(lookupUser.roles || []), "admin", "user"])) as Role[])
           : lookupUser.roles?.length
           ? (Array.from(new Set([...lookupUser.roles, "user"])) as Role[])
           : ["user"];
@@ -722,20 +793,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           displayName: lookupUser.full_name || lookupUser.email.split("@")[0],
           photoURL: lookupUser.photo_url || null,
           emailVerified: true,
+          customRoleId: lCustomId,
+          customRoleName: lCustomName,
         };
 
         const sess: VerifiedSessionData = {
           user: appU,
           roles: resolvedRoles,
           username: lookupUser.username || lookupUser.email.split("@")[0],
+          customRoleId: lCustomId,
+          customRoleName: lCustomName,
         };
         writeVerifiedSession(sess);
         setVerifiedSession(sess);
+        setRoles(resolvedRoles);
+        setCustomRoleId(lCustomId);
+        setCustomRoleName(lCustomName);
 
         const staffFlag =
           resolvedRoles.includes("admin") ||
           resolvedRoles.includes("editor") ||
-          resolvedRoles.includes("moderator");
+          resolvedRoles.includes("moderator") ||
+          Boolean(lCustomId);
 
         return { user: appU, roles: resolvedRoles, isStaff: staffFlag };
       }
@@ -801,7 +880,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await recordUserCredential({
       uid,
       email: effectiveEmail,
-      password: params.password,
       full_name: cleanFullName,
       username: cleanUname,
       phone: cleanPhone,
@@ -941,7 +1019,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await recordUserCredential({
       uid: current.uid,
       email: cleanEmail,
-      password: params.password,
       full_name: cleanFullName,
       username: cleanUname,
       phone: cleanPhone,
@@ -1104,6 +1181,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     ? (Array.from(new Set([...baseRoles, "admin", "moderator", "editor", "user"])) as Role[])
     : baseRoles;
 
+  const effectiveCustomRoleId =
+    customRoleId ?? verifiedSession?.customRoleId ?? effectiveUser?.customRoleId ?? null;
+  const effectiveCustomRoleName =
+    customRoleName ?? verifiedSession?.customRoleName ?? effectiveUser?.customRoleName ?? null;
+
   const isMainAdmin = isBootstrappedMain;
   const isAdmin = isBootstrappedMain || effectiveRoles.includes("admin");
   const isEditor =
@@ -1111,13 +1193,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     effectiveRoles.includes("editor") ||
     effectiveRoles.includes("admin");
   const isModerator = isBootstrappedMain || effectiveRoles.includes("moderator");
-  const isStaff = isBootstrappedMain || isAdmin || isEditor || isModerator;
+  const isStaff =
+    isBootstrappedMain || isAdmin || isEditor || isModerator || Boolean(effectiveCustomRoleId);
 
   const value: AuthCtx = {
     user: effectiveUser,
     firebaseUser,
     session: effectiveUser ? { user: effectiveUser } : null,
     roles: effectiveRoles,
+    customRoleId: effectiveCustomRoleId,
+    customRoleName: effectiveCustomRoleName,
     loading,
     isAdmin,
     isModerator,
@@ -1132,6 +1217,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isFirebaseVerifiedAdmin,
     isFirebaseVerifiedSuperAdmin,
     signOut: async () => {
+      const currentUid = auth.currentUser?.uid || effectiveUser?.uid;
+      if (currentUid) {
+        try {
+          const { unregisterDevicePushToken } = await import("@/lib/district-platform");
+          await unregisterDevicePushToken(currentUid).catch(() => {});
+        } catch {
+          // ignore
+        }
+      }
       try {
         sessionStorage.removeItem(SUPER_ADMIN_SESSION_KEY);
         localStorage.removeItem(SUPER_ADMIN_SESSION_KEY);
@@ -1144,6 +1238,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setFirebaseUser(null);
       setUser(null);
       setRoles([]);
+      setCustomRoleId(null);
+      setCustomRoleName(null);
       setUsername(null);
       try {
         await firebaseSignOut(auth);
