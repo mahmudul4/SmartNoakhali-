@@ -60,9 +60,9 @@ const PRESET_CONFIGS: Record<
     initialQuality: 0.82,
   },
   banner: {
-    maxWidth: 1920,
-    maxHeight: 1080,
-    targetMaxSizeBytes: 550 * 1024, // ~550 KB
+    maxWidth: 1440,
+    maxHeight: 810,
+    targetMaxSizeBytes: 165 * 1024, // ~165 KB (~220 KB Base64 — fast load & Firestore-safe)
     initialQuality: 0.82,
   },
   chat: {
@@ -73,7 +73,7 @@ const PRESET_CONFIGS: Record<
   },
 };
 
-const MAX_INPUT_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB raw limit
+const MAX_INPUT_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB raw limit
 
 /**
  * Validates the image file before processing
@@ -90,7 +90,7 @@ export function validateImageFile(file: File): { ok: boolean; error?: string } {
   if (file.size > MAX_INPUT_FILE_SIZE_BYTES) {
     return {
       ok: false,
-      error: `ছবির সাইজ (${(file.size / (1024 * 1024)).toFixed(1)} MB) অনেক বড়। সর্বোচ্চ ৫০ MB পর্যন্ত ফাইল প্রসেস করা সম্ভব।`,
+      error: `ছবির সাইজ (${(file.size / (1024 * 1024)).toFixed(1)} MB) অনেক বড়। সর্বোচ্চ ২৫ MB পর্যন্ত ছবি আপলোড করা যাবে।`,
     };
   }
 
@@ -318,8 +318,10 @@ export async function processAndCompressImage(
     targetH = Math.max(Math.round(origH * ratio), 1);
   }
 
-  // Fast-path: if image is already small (<= 200 KB), within dimensions, and not square cropped
-  const isAlreadySmall = file.size <= 200 * 1024 && origW <= maxWidth && origH <= maxHeight && !squareCrop;
+  // Fast-path: if image is already within target bytes & dimensions, and WebP/JPEG
+  const fastPathMaxBytes = Math.min(180 * 1024, targetMaxSizeBytes);
+  const isAlreadySmall =
+    file.size <= fastPathMaxBytes && origW <= maxWidth && origH <= maxHeight && !squareCrop;
   if (isAlreadySmall && (file.type === "image/webp" || file.type === "image/jpeg")) {
     const previewUrl = URL.createObjectURL(file);
     return {
@@ -335,23 +337,49 @@ export async function processAndCompressImage(
     };
   }
 
-  let canvas: HTMLCanvasElement;
-  if (targetW === origW && targetH === origH && !squareCrop) {
-    // Single-pass direct canvas for speed
-    canvas = document.createElement("canvas");
-    canvas.width = targetW;
-    canvas.height = targetH;
-    const ctx = canvas.getContext("2d");
-    if (ctx) {
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(img, 0, 0, targetW, targetH);
-    } else {
-      canvas = stepDownResize(img, targetW, targetH, srcX, srcY, srcW, srcH);
+  const renderResizedCanvas = async (w: number, h: number): Promise<HTMLCanvasElement> => {
+    if (w === origW && h === origH && !squareCrop) {
+      const directCanvas = document.createElement("canvas");
+      directCanvas.width = w;
+      directCanvas.height = h;
+      const directCtx = directCanvas.getContext("2d");
+      if (directCtx) {
+        directCtx.imageSmoothingEnabled = true;
+        directCtx.imageSmoothingQuality = "high";
+        directCtx.drawImage(img, 0, 0, w, h);
+        return directCanvas;
+      }
     }
-  } else {
-    canvas = stepDownResize(img, targetW, targetH, srcX, srcY, srcW, srcH);
-  }
+
+    // Hardware-accelerated browser decode + resize when not square cropping
+    if (!squareCrop && typeof createImageBitmap === "function" && file.type !== "image/svg+xml") {
+      try {
+        const bitmap = await createImageBitmap(file, {
+          resizeWidth: w,
+          resizeHeight: h,
+          resizeQuality: "high",
+        });
+        try {
+          const bmpCanvas = document.createElement("canvas");
+          bmpCanvas.width = w;
+          bmpCanvas.height = h;
+          const bmpCtx = bmpCanvas.getContext("2d");
+          if (bmpCtx) {
+            bmpCtx.drawImage(bitmap, 0, 0, w, h);
+            return bmpCanvas;
+          }
+        } finally {
+          bitmap.close();
+        }
+      } catch {
+        // Fallback to progressive step-down canvas resize
+      }
+    }
+
+    return stepDownResize(img, w, h, srcX, srcY, srcW, srcH);
+  };
+
+  let canvas = await renderResizedCanvas(targetW, targetH);
   const hasAlpha = preserveTransparency && hasTransparencyCheck(canvas);
 
   const canWebP = supportsWebPExport();
@@ -380,14 +408,14 @@ export async function processAndCompressImage(
 
   // Dynamic optimization loop if output exceeds target file size
   let attempts = 0;
-  while (finalBlob.size > targetMaxSizeBytes && attempts < 4 && currentQuality > minQuality) {
+  while (finalBlob.size > targetMaxSizeBytes && attempts < 5 && currentQuality > minQuality) {
     attempts++;
-    currentQuality = Math.max(currentQuality - 0.10, minQuality);
-    // If still very large, reduce dimensions by 15%
+    currentQuality = Math.max(currentQuality - 0.1, minQuality);
+    // Reduce dimensions slightly if still over target size
     if (attempts >= 2) {
-      targetW = Math.max(Math.round(targetW * 0.85), 100);
+      targetW = Math.max(Math.round(targetW * 0.85), 160);
       targetH = Math.max(Math.round(targetH * 0.85), 100);
-      canvas = stepDownResize(img, targetW, targetH, srcX, srcY, srcW, srcH);
+      canvas = await renderResizedCanvas(targetW, targetH);
     }
     finalBlob = await exportBlob(canvas, currentQuality);
   }
@@ -418,6 +446,39 @@ export async function processAndCompressImage(
     height: targetH,
     format,
   };
+}
+
+/**
+ * Re-compresses an oversized legacy data: URL cleanly into a WebP data: URL under targetMaxBytes.
+ */
+export async function compressDataUrlToWebP(
+  dataUrl: string,
+  targetMaxBytes = 165 * 1024
+): Promise<string> {
+  if (!dataUrl || !dataUrl.startsWith("data:")) return dataUrl;
+  const response = await fetch(dataUrl);
+  const blob = await response.blob();
+  const ext = blob.type.includes("png") ? "png" : blob.type.includes("webp") ? "webp" : "jpg";
+  const tempFile = new File([blob], `banner_asset.${ext}`, {
+    type: blob.type || "image/jpeg",
+    lastModified: Date.now(),
+  });
+  const processed = await processAndCompressImage(tempFile, {
+    preset: "banner",
+    targetMaxSizeBytes: targetMaxBytes,
+    minQuality: 0.45,
+  });
+  try {
+    URL.revokeObjectURL(processed.previewUrl);
+  } catch {
+    // ignore
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || dataUrl));
+    reader.onerror = () => reject(new Error("ছবি এনকোড করা যায়নি।"));
+    reader.readAsDataURL(processed.blob);
+  });
 }
 
 /**

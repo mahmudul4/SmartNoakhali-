@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import {
   Phone,
   Droplet,
@@ -30,6 +31,7 @@ import {
   useHeroBannerConfig,
   useHomepageConfig,
   useWebsiteContentConfig,
+  DEFAULT_HERO_BANNER_ITEM,
   type HomepageQuickAction,
 } from "@/lib/store";
 import type { Category, Division } from "@/data/categories";
@@ -111,24 +113,90 @@ function Index() {
   const { homepageConfig } = useHomepageConfig();
   const { contentConfig } = useWebsiteContentConfig();
 
+  const displayBanners = useMemo(
+    () => (activeBanners.length > 0 ? activeBanners : [DEFAULT_HERO_BANNER_ITEM]),
+    [activeBanners]
+  );
+
   const [heroSlideIdx, setHeroSlideIdx] = useState(0);
+  const [slideDirection, setSlideDirection] = useState<1 | -1>(1);
   const [heroPaused, setHeroPaused] = useState(false);
+  const [manualPaused, setManualPaused] = useState(false);
+  const manualPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartX = useRef<number | null>(null);
 
-  useEffect(() => {
-    if (heroSlideIdx >= activeBanners.length) {
-      setHeroSlideIdx(0);
+  const pauseAfterManualInteraction = useCallback(() => {
+    setManualPaused(true);
+    if (manualPauseTimerRef.current) {
+      clearTimeout(manualPauseTimerRef.current);
     }
-  }, [activeBanners.length, heroSlideIdx]);
+    manualPauseTimerRef.current = setTimeout(() => {
+      setManualPaused(false);
+    }, 6500);
+  }, []);
 
   useEffect(() => {
-    if (activeBanners.length <= 1 || !carousel.autoRotate || heroPaused) return;
+    return () => {
+      if (manualPauseTimerRef.current) {
+        clearTimeout(manualPauseTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (heroSlideIdx >= displayBanners.length) {
+      setHeroSlideIdx(0);
+    }
+  }, [displayBanners.length, heroSlideIdx]);
+
+  const goToNextSlide = useCallback(
+    (fromManual = false) => {
+      if (displayBanners.length <= 1) return;
+      if (fromManual) pauseAfterManualInteraction();
+      setSlideDirection(1);
+      setHeroSlideIdx((prev) => (prev + 1) % displayBanners.length);
+    },
+    [displayBanners.length, pauseAfterManualInteraction]
+  );
+
+  const goToPrevSlide = useCallback(() => {
+    if (displayBanners.length <= 1) return;
+    pauseAfterManualInteraction();
+    setSlideDirection(-1);
+    setHeroSlideIdx((prev) => (prev - 1 + displayBanners.length) % displayBanners.length);
+  }, [displayBanners.length, pauseAfterManualInteraction]);
+
+  const goToSpecificSlide = useCallback(
+    (targetIdx: number) => {
+      if (displayBanners.length <= 1 || targetIdx === heroSlideIdx) return;
+      pauseAfterManualInteraction();
+      setSlideDirection(targetIdx > heroSlideIdx ? 1 : -1);
+      setHeroSlideIdx(targetIdx);
+    },
+    [displayBanners.length, heroSlideIdx, pauseAfterManualInteraction]
+  );
+
+  useEffect(() => {
+    if (displayBanners.length <= 1 || !carousel.autoRotate || heroPaused || manualPaused) return;
     const ms = Math.max(2000, (carousel.intervalSeconds || 5) * 1000);
     const id = setInterval(() => {
-      setHeroSlideIdx((prev) => (prev + 1) % activeBanners.length);
+      setSlideDirection(1);
+      setHeroSlideIdx((prev) => (prev + 1) % displayBanners.length);
     }, ms);
     return () => clearInterval(id);
-  }, [activeBanners.length, carousel.autoRotate, carousel.intervalSeconds, heroPaused]);
+  }, [displayBanners.length, carousel.autoRotate, carousel.intervalSeconds, heroPaused, manualPaused]);
+
+  // Preload the next sequential slide's image to make slide changes instant
+  useEffect(() => {
+    if (displayBanners.length <= 1) return;
+    const nextBanner = displayBanners[(heroSlideIdx + 1) % displayBanners.length];
+    if (!nextBanner || nextBanner.backgroundMode !== "image") return;
+    const urls = [nextBanner.desktopImageUrl, nextBanner.mobileImageUrl].filter(Boolean);
+    for (const url of urls) {
+      const preImg = new Image();
+      preImg.src = url;
+    }
+  }, [displayBanners, heroSlideIdx]);
 
   useEffect(() => {
     if (contentConfig.seoTitle?.trim()) {
@@ -173,7 +241,7 @@ function Index() {
       .filter((sec) => sec.items.length > 0);
   }, [divisions, filteredCategories]);
 
-  const currentHeroBanner = activeBanners[heroSlideIdx] ?? activeBanners[0] ?? null;
+  const currentHeroBanner = displayBanners[heroSlideIdx] ?? displayBanners[0];
   const desktopHeroImg = currentHeroBanner
     ? currentHeroBanner.desktopImageUrl || currentHeroBanner.mobileImageUrl
     : "";
@@ -236,30 +304,33 @@ function Index() {
         </HeroActionLink>
       )}
 
-      {/* Dynamic Multi-Banner Hero Section / Carousel */}
+      {/* Dynamic Multi-Banner Hero Section / Sequential Slider */}
       {homepageConfig.showHero !== false && currentHeroBanner && (
         <section
+          aria-roledescription={displayBanners.length > 1 ? "carousel" : undefined}
+          aria-label="হিরো ব্যানার"
           onMouseEnter={() => {
             if (carousel.pauseOnHover) setHeroPaused(true);
           }}
           onMouseLeave={() => setHeroPaused(false)}
+          onFocusCapture={() => {
+            if (carousel.pauseOnHover) setHeroPaused(true);
+          }}
+          onBlurCapture={() => setHeroPaused(false)}
           onTouchStart={(e) => {
             touchStartX.current = e.touches[0]?.clientX ?? null;
           }}
           onTouchEnd={(e) => {
-            if (touchStartX.current === null || activeBanners.length <= 1) return;
+            if (touchStartX.current === null || displayBanners.length <= 1) return;
             const endX = e.changedTouches[0]?.clientX ?? touchStartX.current;
             const delta = endX - touchStartX.current;
             touchStartX.current = null;
             if (Math.abs(delta) > 40) {
-              setHeroSlideIdx((prev) =>
-                delta < 0
-                  ? (prev + 1) % activeBanners.length
-                  : (prev - 1 + activeBanners.length) % activeBanners.length
-              );
+              if (delta < 0) goToNextSlide(true);
+              else goToPrevSlide();
             }
           }}
-          className={`relative overflow-hidden border border-emerald-300/20 p-5 shadow-[0_18px_40px_-14px_rgba(7,54,34,0.45)] transition-all duration-300 sm:p-7 ${
+          className={`relative overflow-hidden border border-emerald-300/20 p-5 shadow-[0_18px_40px_-14px_rgba(7,54,34,0.45)] transition-all duration-500 sm:p-7 ${
             currentHeroBanner.borderRadius || "rounded-[26px]"
           }`}
           style={{
@@ -270,169 +341,182 @@ function Index() {
             color: currentHeroBanner.headingColor || currentHeroBanner.textColor || "#ffffff",
           }}
         >
-          {hasHeroImage && (
-            <>
-              {mobileHeroImg && (
-                <img
-                  src={mobileHeroImg}
-                  alt={currentHeroBanner.headingLine1 || "Smart Noakhali"}
-                  className="pointer-events-none absolute inset-0 h-full w-full object-cover md:hidden"
-                  style={{ objectPosition: currentHeroBanner.imagePositionMobile || "center center" }}
-                />
-              )}
-              {desktopHeroImg && (
-                <img
-                  src={desktopHeroImg}
-                  alt={currentHeroBanner.headingLine1 || "Smart Noakhali"}
-                  className="pointer-events-none absolute inset-0 hidden h-full w-full object-cover md:block"
-                  style={{ objectPosition: currentHeroBanner.imagePositionDesktop || "center center" }}
-                />
-              )}
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-0"
-                style={{
-                  backgroundColor: currentHeroBanner.overlayColor || "#042316",
-                  opacity: Math.min(90, Math.max(0, currentHeroBanner.overlayOpacity ?? 55)) / 100,
-                }}
-              />
-            </>
-          )}
-
-          {currentHeroBanner.showDecorativeGlow !== false && (
-            <>
-              <div className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-amber-300/20 blur-3xl" />
-              <div className="pointer-events-none absolute -bottom-14 -left-10 h-44 w-44 rounded-full bg-emerald-300/20 blur-3xl" />
-              <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-            </>
-          )}
-
-          <div
-            className={`relative ${
-              currentHeroBanner.textAlign === "left"
-                ? "text-left"
-                : currentHeroBanner.textAlign === "right"
-                ? "text-right"
-                : "text-left sm:text-left"
-            }`}
-          >
-            {currentHeroBanner.badgeText.trim() && (
-              <span
-                className="inline-flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1 text-[11px] font-semibold tracking-wide backdrop-blur-sm"
-                style={{
-                  color: currentHeroBanner.badgeColor || "#ffffff",
-                  backgroundColor: currentHeroBanner.badgeBgColor || "rgba(255,255,255,0.14)",
-                }}
-              >
-                <Droplet className="h-3 w-3 text-amber-300" /> {currentHeroBanner.badgeText}
-              </span>
-            )}
-
-            <h1
-              className="mt-3.5 font-bangla text-[24px] font-extrabold leading-[1.24] tracking-tight drop-shadow-xs sm:text-[32px]"
-              style={{
-                color: currentHeroBanner.headingColor || currentHeroBanner.textColor || "#ffffff",
-              }}
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={`${currentHeroBanner.id}_${heroSlideIdx}`}
+              initial={
+                displayBanners.length > 1
+                  ? { opacity: 0.15, x: slideDirection * 18 }
+                  : false
+              }
+              animate={{ opacity: 1, x: 0 }}
+              exit={
+                displayBanners.length > 1
+                  ? { opacity: 0.15, x: slideDirection * -18 }
+                  : undefined
+              }
+              transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+              className="static"
             >
-              {currentHeroBanner.headingLine1}
-              {currentHeroBanner.headingLine2 && (
+              {hasHeroImage && (
                 <>
-                  <br />
-                  {currentHeroBanner.headingLine2}
+                  {mobileHeroImg && (
+                    <img
+                      src={mobileHeroImg}
+                      alt={currentHeroBanner.headingLine1 || "Smart Noakhali"}
+                      className="pointer-events-none absolute inset-0 h-full w-full object-cover md:hidden"
+                      style={{ objectPosition: currentHeroBanner.imagePositionMobile || "center center" }}
+                    />
+                  )}
+                  {desktopHeroImg && (
+                    <img
+                      src={desktopHeroImg}
+                      alt={currentHeroBanner.headingLine1 || "Smart Noakhali"}
+                      className="pointer-events-none absolute inset-0 hidden h-full w-full object-cover md:block"
+                      style={{ objectPosition: currentHeroBanner.imagePositionDesktop || "center center" }}
+                    />
+                  )}
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0"
+                    style={{
+                      backgroundColor: currentHeroBanner.overlayColor || "#042316",
+                      opacity: Math.min(90, Math.max(0, currentHeroBanner.overlayOpacity ?? 55)) / 100,
+                    }}
+                  />
                 </>
               )}
-            </h1>
 
-            {currentHeroBanner.description.trim() && (
-              <p
-                className={`mt-2.5 max-w-xl text-[12.5px] leading-relaxed sm:text-sm ${
-                  currentHeroBanner.textAlign === "center" ? "mx-auto sm:mx-0" : ""
-                }`}
-                style={{
-                  color:
-                    currentHeroBanner.descriptionColor ||
-                    currentHeroBanner.subtextColor ||
-                    "#ecfdf5",
-                  opacity: 0.94,
-                }}
-              >
-                {currentHeroBanner.description}
-              </p>
-            )}
+              {currentHeroBanner.showDecorativeGlow !== false && (
+                <>
+                  <div className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-amber-300/20 blur-3xl" />
+                  <div className="pointer-events-none absolute -bottom-14 -left-10 h-44 w-44 rounded-full bg-emerald-300/20 blur-3xl" />
+                  <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+                </>
+              )}
 
-            {(currentHeroBanner.primaryButtonText.trim() ||
-              currentHeroBanner.secondaryButtonText.trim() ||
-              currentHeroBanner.optionalButtonText?.trim()) && (
               <div
-                className={`mt-5 flex flex-wrap items-center gap-2.5 ${
-                  currentHeroBanner.textAlign === "right" ? "justify-end" : "justify-start"
+                className={`relative z-10 ${
+                  currentHeroBanner.textAlign === "left"
+                    ? "text-left"
+                    : currentHeroBanner.textAlign === "right"
+                    ? "text-right"
+                    : "text-left sm:text-left"
                 }`}
               >
-                {currentHeroBanner.primaryButtonText.trim() && (
-                  <HeroActionLink
-                    href={currentHeroBanner.primaryButtonLink || "tel:999"}
-                    className="inline-flex min-h-[40px] items-center gap-2 rounded-full px-5 py-2.5 text-xs font-extrabold shadow-md transition hover:brightness-105 active:scale-95 sm:text-[13px]"
+                {currentHeroBanner.badgeText.trim() && (
+                  <span
+                    className="inline-flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1 text-[11px] font-semibold tracking-wide backdrop-blur-sm"
                     style={{
-                      backgroundColor: currentHeroBanner.primaryButtonBgColor || "#dc2626",
-                      color: currentHeroBanner.primaryButtonColor || "#ffffff",
+                      color: currentHeroBanner.badgeColor || "#ffffff",
+                      backgroundColor: currentHeroBanner.badgeBgColor || "rgba(255,255,255,0.14)",
                     }}
                   >
-                    <Phone className="h-3.5 w-3.5" /> {currentHeroBanner.primaryButtonText}
-                  </HeroActionLink>
+                    <Droplet className="h-3 w-3 text-amber-300" /> {currentHeroBanner.badgeText}
+                  </span>
                 )}
-                {currentHeroBanner.secondaryButtonText.trim() && (
-                  <HeroActionLink
-                    href={currentHeroBanner.secondaryButtonLink || "/submit-info"}
-                    className="inline-flex min-h-[40px] items-center gap-2 rounded-full border border-white/25 px-4.5 py-2.5 text-xs font-bold shadow-xs backdrop-blur-sm transition hover:brightness-95 active:scale-95 sm:text-[13px]"
+
+                <h1
+                  className="mt-3.5 font-bangla text-[24px] font-extrabold leading-[1.24] tracking-tight drop-shadow-xs sm:text-[32px]"
+                  style={{
+                    color: currentHeroBanner.headingColor || currentHeroBanner.textColor || "#ffffff",
+                  }}
+                >
+                  {currentHeroBanner.headingLine1}
+                  {currentHeroBanner.headingLine2 && (
+                    <>
+                      <br />
+                      {currentHeroBanner.headingLine2}
+                    </>
+                  )}
+                </h1>
+
+                {currentHeroBanner.description.trim() && (
+                  <p
+                    className={`mt-2.5 max-w-xl text-[12.5px] leading-relaxed sm:text-sm ${
+                      currentHeroBanner.textAlign === "center" ? "mx-auto sm:mx-0" : ""
+                    }`}
                     style={{
-                      backgroundColor: currentHeroBanner.secondaryButtonBgColor || "#ffffff",
-                      color: currentHeroBanner.secondaryButtonColor || "#064e3b",
+                      color:
+                        currentHeroBanner.descriptionColor ||
+                        currentHeroBanner.subtextColor ||
+                        "#ecfdf5",
+                      opacity: 0.94,
                     }}
                   >
-                    <Send className="h-3.5 w-3.5" /> {currentHeroBanner.secondaryButtonText}
-                  </HeroActionLink>
+                    {currentHeroBanner.description}
+                  </p>
                 )}
-                {currentHeroBanner.optionalButtonText?.trim() && (
-                  <HeroActionLink
-                    href={currentHeroBanner.optionalButtonLink || "/directory"}
-                    className="inline-flex min-h-[40px] items-center gap-2 rounded-full border border-white/25 px-4 py-2.5 text-xs font-bold backdrop-blur-sm transition hover:brightness-110 active:scale-95 sm:text-[13px]"
-                    style={{
-                      backgroundColor:
-                        currentHeroBanner.optionalButtonBgColor || "rgba(255,255,255,0.16)",
-                      color: currentHeroBanner.optionalButtonColor || "#ffffff",
-                    }}
+
+                {(currentHeroBanner.primaryButtonText.trim() ||
+                  currentHeroBanner.secondaryButtonText.trim() ||
+                  currentHeroBanner.optionalButtonText?.trim()) && (
+                  <div
+                    className={`mt-5 flex flex-wrap items-center gap-2.5 ${
+                      currentHeroBanner.textAlign === "right" ? "justify-end" : "justify-start"
+                    }`}
                   >
-                    {currentHeroBanner.optionalButtonText}
-                  </HeroActionLink>
+                    {currentHeroBanner.primaryButtonText.trim() && (
+                      <HeroActionLink
+                        href={currentHeroBanner.primaryButtonLink || "tel:999"}
+                        className="inline-flex min-h-[40px] items-center gap-2 rounded-full px-5 py-2.5 text-xs font-extrabold shadow-md transition hover:brightness-105 active:scale-95 sm:text-[13px]"
+                        style={{
+                          backgroundColor: currentHeroBanner.primaryButtonBgColor || "#dc2626",
+                          color: currentHeroBanner.primaryButtonColor || "#ffffff",
+                        }}
+                      >
+                        <Phone className="h-3.5 w-3.5" /> {currentHeroBanner.primaryButtonText}
+                      </HeroActionLink>
+                    )}
+                    {currentHeroBanner.secondaryButtonText.trim() && (
+                      <HeroActionLink
+                        href={currentHeroBanner.secondaryButtonLink || "/submit-info"}
+                        className="inline-flex min-h-[40px] items-center gap-2 rounded-full border border-white/25 px-4.5 py-2.5 text-xs font-bold shadow-xs backdrop-blur-sm transition hover:brightness-95 active:scale-95 sm:text-[13px]"
+                        style={{
+                          backgroundColor: currentHeroBanner.secondaryButtonBgColor || "#ffffff",
+                          color: currentHeroBanner.secondaryButtonColor || "#064e3b",
+                        }}
+                      >
+                        <Send className="h-3.5 w-3.5" /> {currentHeroBanner.secondaryButtonText}
+                      </HeroActionLink>
+                    )}
+                    {currentHeroBanner.optionalButtonText?.trim() && (
+                      <HeroActionLink
+                        href={currentHeroBanner.optionalButtonLink || "/directory"}
+                        className="inline-flex min-h-[40px] items-center gap-2 rounded-full border border-white/25 px-4 py-2.5 text-xs font-bold backdrop-blur-sm transition hover:brightness-110 active:scale-95 sm:text-[13px]"
+                        style={{
+                          backgroundColor:
+                            currentHeroBanner.optionalButtonBgColor || "rgba(255,255,255,0.16)",
+                          color: currentHeroBanner.optionalButtonColor || "#ffffff",
+                        }}
+                      >
+                        {currentHeroBanner.optionalButtonText}
+                      </HeroActionLink>
+                    )}
+                  </div>
                 )}
               </div>
-            )}
-          </div>
+            </motion.div>
+          </AnimatePresence>
 
-          {/* Multi-Banner Carousel Controls */}
-          {activeBanners.length > 1 && (
+          {/* Sequential Carousel Controls (only shown when 2+ published banners exist) */}
+          {displayBanners.length > 1 && (
             <>
               {carousel.showArrows && (
-                <div className="mt-4 flex items-center justify-between gap-2 sm:mt-0">
+                <div className="relative z-20 mt-4 flex items-center justify-between gap-2 sm:mt-0">
                   <button
                     type="button"
                     aria-label="পূর্ববর্তী ব্যানার"
-                    onClick={() =>
-                      setHeroSlideIdx(
-                        (prev) => (prev - 1 + activeBanners.length) % activeBanners.length
-                      )
-                    }
-                    className="flex h-8 w-8 items-center justify-center rounded-full border border-white/25 bg-black/25 text-white backdrop-blur-sm transition hover:bg-black/40 sm:absolute sm:right-12 sm:top-4"
+                    onClick={goToPrevSlide}
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-white/25 bg-black/25 text-white backdrop-blur-sm transition hover:bg-black/45 active:scale-95 sm:absolute sm:right-12 sm:top-4"
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </button>
                   <button
                     type="button"
                     aria-label="পরবর্তী ব্যানার"
-                    onClick={() =>
-                      setHeroSlideIdx((prev) => (prev + 1) % activeBanners.length)
-                    }
-                    className="flex h-8 w-8 items-center justify-center rounded-full border border-white/25 bg-black/25 text-white backdrop-blur-sm transition hover:bg-black/40 sm:absolute sm:right-3 sm:top-4"
+                    onClick={() => goToNextSlide(true)}
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-white/25 bg-black/25 text-white backdrop-blur-sm transition hover:bg-black/45 active:scale-95 sm:absolute sm:right-3 sm:top-4"
                   >
                     <ChevronRight className="h-4 w-4" />
                   </button>
@@ -440,14 +524,15 @@ function Index() {
               )}
 
               {carousel.showDots && (
-                <div className="relative mt-4 flex items-center justify-center gap-1.5">
-                  {activeBanners.map((bItem, i) => (
+                <div className="relative z-20 mt-4 flex items-center justify-center gap-1.5">
+                  {displayBanners.map((bItem, i) => (
                     <button
                       key={bItem.id}
                       type="button"
                       aria-label={`ব্যানার ${i + 1}`}
-                      onClick={() => setHeroSlideIdx(i)}
-                      className={`h-2 rounded-full transition-all ${
+                      aria-current={i === heroSlideIdx ? "true" : undefined}
+                      onClick={() => goToSpecificSlide(i)}
+                      className={`h-2 rounded-full transition-all duration-300 ${
                         i === heroSlideIdx ? "w-6 bg-white" : "w-2 bg-white/40 hover:bg-white/65"
                       }`}
                     />

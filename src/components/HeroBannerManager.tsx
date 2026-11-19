@@ -31,11 +31,14 @@ import {
   AlignLeft,
   AlignCenter,
   AlignRight,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
+import { auth, isSuperAdminEmail } from "@/lib/firebase";
 import {
   useHeroBannerConfig,
+  deleteHeroImageAsset,
   DEFAULT_HERO_BANNER_ITEM,
   DEFAULT_HERO_CAROUSEL_SETTINGS,
   isBannerWithinSchedule,
@@ -49,7 +52,7 @@ import {
   uploadImageToFirebaseStorage,
   deleteStorageImageByUrl,
 } from "@/lib/imageUpload";
-import { validateImageFile } from "@/lib/imageProcessor";
+import { validateImageFile, formatFileSizeBn } from "@/lib/imageProcessor";
 import { recordSuperAdminAudit } from "@/lib/staff-audit";
 
 const FOCAL_POSITIONS: Array<{ value: HeroImageFocalPosition; label: string }> = [
@@ -225,8 +228,18 @@ function ColorInputField({
   );
 }
 
+type UploadStage = "validating" | "compressing" | "uploading" | "saving" | null;
+type UploadedImageMeta = { width: number; height: number; sizeBytes: number; format: string };
+
+const STAGE_LABEL_BN: Record<Exclude<UploadStage, null>, string> = {
+  validating: "ফাইল যাচাই হচ্ছে...",
+  compressing: "WebP অপ্টিমাইজ হচ্ছে...",
+  uploading: "ছবি আপলোড হচ্ছে...",
+  saving: "ব্যানারে যুক্ত হচ্ছে...",
+};
+
 export function HeroBannerManager() {
-  const { isMainAdmin } = useAuth();
+  const { isMainAdmin, firebaseUser } = useAuth();
   const { hasPermission } = useRolePermissions();
   const {
     banners,
@@ -245,6 +258,11 @@ export function HeroBannerManager() {
   const canEditColors = isMainAdmin || hasPermission("edit_banner_colors");
   const canPublish = isMainAdmin || hasPermission("publish_banners");
 
+  const activeFirebaseEmail = (firebaseUser || auth.currentUser)?.email;
+  const hasFirestoreSuperAdminSession = Boolean(
+    (firebaseUser || auth.currentUser) && isSuperAdminEmail(activeFirebaseEmail)
+  );
+
   const sortedBanners = useMemo(
     () => [...banners].sort((a, b) => a.order - b.order),
     [banners]
@@ -262,6 +280,7 @@ export function HeroBannerManager() {
   const [carouselDraft, setCarouselDraft] = useState<HeroCarouselSettings>(carousel);
   const [previewDevice, setPreviewDevice] = useState<"mobile" | "desktop">("mobile");
   const [saving, setSaving] = useState(false);
+  const [savingTarget, setSavingTarget] = useState<"draft" | "published" | null>(null);
   const [savingCarousel, setSavingCarousel] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [confirmDeleteBanner, setConfirmDeleteBanner] = useState<HeroBannerItem | null>(null);
@@ -269,14 +288,27 @@ export function HeroBannerManager() {
 
   const [uploadingDesktop, setUploadingDesktop] = useState(false);
   const [desktopProgress, setDesktopProgress] = useState(0);
+  const [desktopStage, setDesktopStage] = useState<UploadStage>(null);
+  const [desktopError, setDesktopError] = useState<string | null>(null);
+  const [lastDesktopFile, setLastDesktopFile] = useState<File | null>(null);
+  const [desktopMeta, setDesktopMeta] = useState<UploadedImageMeta | null>(null);
+
   const [uploadingMobile, setUploadingMobile] = useState(false);
   const [mobileProgress, setMobileProgress] = useState(0);
+  const [mobileStage, setMobileStage] = useState<UploadStage>(null);
+  const [mobileError, setMobileError] = useState<string | null>(null);
+  const [lastMobileFile, setLastMobileFile] = useState<File | null>(null);
+  const [mobileMeta, setMobileMeta] = useState<UploadedImageMeta | null>(null);
 
   const desktopInputRef = useRef<HTMLInputElement | null>(null);
   const mobileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setDraft(selectedSaved);
+    setDesktopError(null);
+    setMobileError(null);
+    setDesktopMeta(null);
+    setMobileMeta(null);
   }, [selectedSaved]);
 
   useEffect(() => {
@@ -301,11 +333,12 @@ export function HeroBannerManager() {
   const isCarouselDirty = JSON.stringify(carouselDraft) !== JSON.stringify(carousel);
 
   async function handleCreateNewBanner() {
+    if (saving || resetting) return;
     setSaving(true);
     try {
       const created = await addBanner({
         name: `প্রমোশনাল ব্যানার #${sortedBanners.length + 1}`,
-        status: canPublish ? "published" : "draft",
+        status: "draft",
         visible: true,
       });
       setSelectedId(created.id);
@@ -314,9 +347,9 @@ export function HeroBannerManager() {
         module: "hero_banners",
         target_id: created.id,
         target_label: created.name,
-        summary: `নতুন হিরো ব্যানার তৈরি: ${created.name}`,
+        summary: `নতুন হিরো ব্যানার ড্রাফট তৈরি: ${created.name}`,
       });
-      toast.success(`"${created.name}" যুক্ত হয়েছে — এখন কাস্টমাইজ করে সংরক্ষণ করুন।`);
+      toast.success(`"${created.name}" ড্রাফট হিসেবে তৈরি হয়েছে — কাস্টমাইজ করে প্রকাশ করুন।`);
     } catch (err: any) {
       toast.error(err?.message || "নতুন ব্যানার তৈরি করা যায়নি");
     } finally {
@@ -325,6 +358,7 @@ export function HeroBannerManager() {
   }
 
   async function handleDuplicate(b: HeroBannerItem) {
+    if (saving || resetting) return;
     setSaving(true);
     try {
       const copyItem = await duplicateBanner(b.id);
@@ -340,12 +374,13 @@ export function HeroBannerManager() {
   }
 
   async function executeDeleteBanner(b: HeroBannerItem) {
-    setConfirmDeleteBanner(null);
+    if (saving || resetting) return;
     setSaving(true);
     try {
       await deleteBanner(b.id);
       if (b.desktopImageUrl) void deleteStorageImageByUrl(b.desktopImageUrl);
       if (b.mobileImageUrl) void deleteStorageImageByUrl(b.mobileImageUrl);
+      setConfirmDeleteBanner(null);
       const remaining = sortedBanners.filter((x) => x.id !== b.id);
       if (remaining[0]) setSelectedId(remaining[0].id);
       void recordSuperAdminAudit({
@@ -355,7 +390,7 @@ export function HeroBannerManager() {
         target_label: b.name,
         summary: `হিরো ব্যানার মুছে ফেলা হয়েছে: ${b.name}`,
       });
-      toast.success(`"${b.name}" মুছে ফেলা হয়েছে।`);
+      toast.success(`"${b.name}" স্থায়ীভাবে মুছে ফেলা হয়েছে।`);
     } catch (err: any) {
       toast.error(err?.message || "ব্যানার মুছে ফেলা যায়নি");
     } finally {
@@ -367,14 +402,90 @@ export function HeroBannerManager() {
     if (!canPublish) {
       return toast.error("ব্যানার প্রকাশ/ড্রাফট পরিবর্তনের অনুমতি নেই");
     }
+    if (saving || resetting) return;
     const nextStatus = b.status === "published" ? "draft" : "published";
+    setSaving(true);
     try {
-      await saveBanner({ ...b, status: nextStatus });
+      await saveBanner({
+        ...b,
+        status: nextStatus,
+        visible: nextStatus === "published" ? true : b.visible,
+      });
       toast.success(
         nextStatus === "published" ? `"${b.name}" লাইভ প্রকাশিত হয়েছে` : `"${b.name}" ড্রাফট করা হয়েছে`
       );
     } catch (err: any) {
       toast.error(err?.message || "স্ট্যাটাস পরিবর্তন ব্যর্থ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function processBannerImageUpload(file: File, target: "desktop" | "mobile") {
+    const setBusy = target === "desktop" ? setUploadingDesktop : setUploadingMobile;
+    const setProgress = target === "desktop" ? setDesktopProgress : setMobileProgress;
+    const setStage = target === "desktop" ? setDesktopStage : setMobileStage;
+    const setError = target === "desktop" ? setDesktopError : setMobileError;
+    const setLastFile = target === "desktop" ? setLastDesktopFile : setLastMobileFile;
+    const setMeta = target === "desktop" ? setDesktopMeta : setMobileMeta;
+
+    setLastFile(file);
+    setError(null);
+
+    const validation = validateImageFile(file);
+    if (!validation.ok) {
+      const msg = validation.error || "অবৈধ ইমেজ ফাইল";
+      setError(msg);
+      toast.error(msg);
+      return;
+    }
+
+    setBusy(true);
+    setStage("validating");
+    setProgress(5);
+    try {
+      const result = await uploadImageToFirebaseStorage(file, {
+        category: "banner",
+        entityId: draft.id || "hero_banner",
+        allowClientFallback: false,
+        onStageChange: (stage) => setStage(stage),
+        onProgress: (p) => setProgress(p),
+      });
+
+      try {
+        URL.revokeObjectURL(result.processed.previewUrl);
+      } catch {
+        // ignore
+      }
+
+      setDraft((prev) => ({
+        ...prev,
+        backgroundMode: "image",
+        ...(target === "desktop"
+          ? { desktopImageUrl: result.downloadUrl }
+          : { mobileImageUrl: result.downloadUrl }),
+      }));
+      setMeta({
+        width: result.processed.width,
+        height: result.processed.height,
+        sizeBytes: result.processed.compressedSizeBytes,
+        format: result.processed.format,
+      });
+      setLastFile(null);
+
+      toast.success(
+        target === "desktop"
+          ? `ডেস্কটপ ছবি অপ্টিমাইজ ও আপলোড হয়েছে (${formatFileSizeBn(result.processed.compressedSizeBytes)})! স্থায়ী করতে সেভ বাটন চাপুন।`
+          : `মোবাইল ছবি অপ্টিমাইজ ও আপলোড হয়েছে (${formatFileSizeBn(result.processed.compressedSizeBytes)})! স্থায়ী করতে সেভ বাটন চাপুন।`
+      );
+    } catch (err: any) {
+      const msg = err?.message || "হিরো ব্যানার ছবি আপলোড ব্যর্থ হয়েছে";
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setBusy(false);
+      setStage(null);
+      setTimeout(() => setProgress(0), 500);
     }
   }
 
@@ -389,44 +500,7 @@ export function HeroBannerManager() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-
-    const validation = validateImageFile(file);
-    if (!validation.ok) {
-      toast.error(validation.error || "অবৈধ ইমেজ ফাইল");
-      return;
-    }
-
-    const setBusy = target === "desktop" ? setUploadingDesktop : setUploadingMobile;
-    const setProgress = target === "desktop" ? setDesktopProgress : setMobileProgress;
-
-    setBusy(true);
-    setProgress(5);
-    try {
-      const result = await uploadImageToFirebaseStorage(file, {
-        category: "banner",
-        entityId: draft.id || "hero_banner",
-        onProgress: (p) => setProgress(p),
-      });
-
-      setDraft((prev) => ({
-        ...prev,
-        backgroundMode: "image",
-        ...(target === "desktop"
-          ? { desktopImageUrl: result.downloadUrl }
-          : { mobileImageUrl: result.downloadUrl }),
-      }));
-
-      toast.success(
-        target === "desktop"
-          ? "ডেস্কটপ/প্রধান হিরো ছবি আপলোড হয়েছে! স্থায়ী করতে 'সংরক্ষণ করুন' চাপুন।"
-          : "মোবাইল হিরো ছবি আপলোড হয়েছে! স্থায়ী করতে 'সংরক্ষণ করুন' চাপুন।"
-      );
-    } catch (err: any) {
-      toast.error(err?.message || "হিরো ব্যানার ছবি আপলোড ব্যর্থ হয়েছে");
-    } finally {
-      setBusy(false);
-      setTimeout(() => setProgress(0), 600);
-    }
+    await processBannerImageUpload(file, target);
   }
 
   async function handleRemoveImage(target: "desktop" | "mobile") {
@@ -437,6 +511,15 @@ export function HeroBannerManager() {
       targetUrl !== (target === "desktop" ? selectedSaved.desktopImageUrl : selectedSaved.mobileImageUrl)
     ) {
       void deleteStorageImageByUrl(targetUrl);
+    }
+    if (target === "desktop") {
+      setDesktopError(null);
+      setLastDesktopFile(null);
+      setDesktopMeta(null);
+    } else {
+      setMobileError(null);
+      setLastMobileFile(null);
+      setMobileMeta(null);
     }
     setDraft((prev) => {
       const nextDesktop = target === "desktop" ? "" : prev.desktopImageUrl;
@@ -451,21 +534,26 @@ export function HeroBannerManager() {
             : prev.backgroundMode,
       };
     });
-    toast.info("ছবিটি ড্রাফট থেকে সরানো হয়েছে — চূড়ান্ত করতে সংরক্ষণ করুন।");
+    toast.info("ছবিটি ড্রাফট থেকে সরানো হয়েছে — স্থায়ী করতে সেভ বাটনে ক্লিক করুন।");
   }
 
-  async function handleSave() {
+  async function handleSave(targetStatus?: "draft" | "published") {
+    if (saving || resetting) return;
+    if (uploadingDesktop || uploadingMobile) {
+      toast.error("ছবি আপলোড সম্পন্ন হওয়া পর্যন্ত অনুগ্রহ করে অপেক্ষা করুন।");
+      return;
+    }
     if (!draft.headingLine1.trim() && !draft.headingLine2.trim()) {
       toast.error("হিরো ব্যানারের শিরোনাম সম্পূর্ণ ফাঁকা রাখা যাবে না।");
       return;
     }
-    if (
-      draft.desktopImageUrl.trim().startsWith("data:") ||
-      draft.mobileImageUrl.trim().startsWith("data:")
-    ) {
-      toast.error("ব্যানারে সরাসরি Base64 ছবি সংরক্ষণ করা যাবে না। অনুগ্রহ করে ছবি আপলোড বাটন ব্যবহার করুন।");
+
+    const nextStatus = targetStatus ?? draft.status;
+    if (nextStatus === "published" && !canPublish) {
+      toast.error("ব্যানার প্রকাশ করার অনুমতি নেই।");
       return;
     }
+
     const bgHex =
       draft.backgroundMode === "solid"
         ? draft.solidColor
@@ -484,36 +572,57 @@ export function HeroBannerManager() {
       );
       return;
     }
+
     setSaving(true);
+    setSavingTarget(nextStatus);
     try {
-      if (selectedSaved.desktopImageUrl && selectedSaved.desktopImageUrl !== draft.desktopImageUrl) {
-        void deleteStorageImageByUrl(selectedSaved.desktopImageUrl);
-      }
-      if (selectedSaved.mobileImageUrl && selectedSaved.mobileImageUrl !== draft.mobileImageUrl) {
-        void deleteStorageImageByUrl(selectedSaved.mobileImageUrl);
-      }
       const nextToSave: HeroBannerItem = {
         ...draft,
+        status: nextStatus,
+        visible: targetStatus === "published" ? true : draft.visible,
         textColor: draft.headingColor || draft.textColor,
         subtextColor: draft.descriptionColor || draft.subtextColor,
       };
+
+      // Confirm Firestore save BEFORE deleting previously replaced image assets
       await saveBanner(nextToSave);
+
+      if (selectedSaved.desktopImageUrl && selectedSaved.desktopImageUrl !== draft.desktopImageUrl) {
+        void deleteStorageImageByUrl(selectedSaved.desktopImageUrl);
+        if (!draft.desktopImageUrl || !draft.desktopImageUrl.startsWith("data:")) {
+          void deleteHeroImageAsset(draft.id, "desktop");
+        }
+      }
+      if (selectedSaved.mobileImageUrl && selectedSaved.mobileImageUrl !== draft.mobileImageUrl) {
+        void deleteStorageImageByUrl(selectedSaved.mobileImageUrl);
+        if (!draft.mobileImageUrl || !draft.mobileImageUrl.startsWith("data:")) {
+          void deleteHeroImageAsset(draft.id, "mobile");
+        }
+      }
+
       void recordSuperAdminAudit({
         action: "update",
         module: "hero_banners",
         target_id: draft.id,
         target_label: draft.name,
-        summary: `হিরো ব্যানার আপডেট ও সেভ করা হয়েছে: ${draft.name} (${draft.status})`,
+        summary: `হিরো ব্যানার ${nextStatus === "published" ? "প্রকাশ ও সেভ" : "ড্রাফট সেভ"}: ${draft.name}`,
       });
-      toast.success(`"${draft.name}" সফলভাবে সংরক্ষণ ও সিঙ্ক হয়েছে!`);
+
+      toast.success(
+        nextStatus === "published"
+          ? `"${draft.name}" সফলভাবে সেভ ও লাইভ প্রকাশিত হয়েছে!`
+          : `"${draft.name}" ড্রাফট হিসেবে সফলভাবে সংরক্ষিত হয়েছে!`
+      );
     } catch (err: any) {
       toast.error(err?.message || "হিরো ব্যানার সংরক্ষণ করা যায়নি।");
     } finally {
       setSaving(false);
+      setSavingTarget(null);
     }
   }
 
   async function handleSaveCarousel() {
+    if (savingCarousel || saving) return;
     setSavingCarousel(true);
     try {
       await saveCarouselSettings(carouselDraft);
@@ -526,6 +635,7 @@ export function HeroBannerManager() {
   }
 
   async function executeRestoreDefaults() {
+    if (resetting || saving) return;
     setConfirmRestoreModal(false);
     setResetting(true);
     try {
@@ -578,14 +688,31 @@ export function HeroBannerManager() {
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              disabled={saving}
+              disabled={saving || resetting}
               onClick={() => void handleCreateNewBanner()}
               className="inline-flex items-center gap-1.5 rounded-full bg-gradient-hero px-4 py-2 text-xs font-bold text-primary-foreground shadow-card transition hover:brightness-105 active:scale-95 disabled:opacity-60"
             >
-              <Plus className="h-3.5 w-3.5" /> নতুন ব্যানার যোগ করুন
+              {saving && !savingTarget ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Plus className="h-3.5 w-3.5" />
+              )}
+              <span>নতুন ব্যানার যোগ করুন</span>
             </button>
           </div>
         </div>
+
+        {!hasFirestoreSuperAdminSession && (
+          <div className="flex items-start gap-2.5 rounded-2xl border border-amber-500/40 bg-amber-50/90 px-3.5 py-2.5 text-xs text-amber-950">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+            <div className="min-w-0 flex-1 leading-relaxed">
+              <p className="font-bold">ডাটাবেজ সংযোগ সতর্কতা (Super Admin Firebase Auth প্রয়োজন)</p>
+              <p className="mt-0.5 text-[11px] text-amber-900">
+                Firestore নিরাপত্তা নীতিমালা অনুযায়ী হিরো ব্যানার তৈরি, সেভ ও প্রকাশ করতে মূল সুপার অ্যাডমিন অ্যাকাউন্টে (Firebase Auth) সক্রিয় লগইন থাকা প্রয়োজন।
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Carousel Global Controls */}
         <div className="rounded-2xl border border-border/80 bg-card/90 p-3.5 space-y-2.5">
@@ -1084,13 +1211,13 @@ export function HeroBannerManager() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {/* Desktop Image Card */}
           <div className="rounded-2xl border border-border/80 bg-background/70 p-4 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5">
                 <Monitor className="h-4 w-4 text-primary" />
                 <span className="text-xs font-bold text-foreground">প্রধান / ডেস্কটপ হিরো ছবি</span>
               </div>
               <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
-                JPG, PNG, WebP
+                JPG, PNG, WebP • সর্বোচ্চ ২৫ MB
               </span>
             </div>
 
@@ -1103,7 +1230,20 @@ export function HeroBannerManager() {
                     className="h-full w-full object-cover"
                     style={{ objectPosition: draft.imagePositionDesktop }}
                   />
+                  {uploadingDesktop && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/55 px-3 text-center text-white backdrop-blur-xs">
+                      <Loader2 className="mb-1 h-5 w-5 animate-spin" />
+                      <span className="text-[11px] font-bold">
+                        {desktopStage ? STAGE_LABEL_BN[desktopStage] : "আপলোড হচ্ছে..."} {desktopProgress}%
+                      </span>
+                    </div>
+                  )}
                 </div>
+                {desktopMeta && (
+                  <p className="text-[10.5px] font-semibold text-emerald-700">
+                    অপ্টিমাইজড: {desktopMeta.width}×{desktopMeta.height} • {desktopMeta.format.toUpperCase()} • {formatFileSizeBn(desktopMeta.sizeBytes)}
+                  </p>
+                )}
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
@@ -1111,11 +1251,12 @@ export function HeroBannerManager() {
                     onClick={() => desktopInputRef.current?.click()}
                     className="inline-flex items-center gap-1 rounded-xl border border-primary/30 bg-primary/10 px-3 py-1.5 text-[11px] font-bold text-primary hover:bg-primary/15 disabled:opacity-50"
                   >
-                    <UploadCloud className="h-3.5 w-3.5" /> ছবি পরিবর্তন করুন
+                    {uploadingDesktop ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UploadCloud className="h-3.5 w-3.5" />}
+                    <span>{uploadingDesktop ? "আপলোড হচ্ছে..." : "ছবি পরিবর্তন করুন"}</span>
                   </button>
                   <button
                     type="button"
-                    disabled={!canUploadImages}
+                    disabled={!canUploadImages || uploadingDesktop}
                     onClick={() => void handleRemoveImage("desktop")}
                     className="inline-flex items-center gap-1 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-[11px] font-bold text-rose-700 hover:bg-rose-500/15 disabled:opacity-50"
                   >
@@ -1133,13 +1274,15 @@ export function HeroBannerManager() {
                 {uploadingDesktop ? (
                   <>
                     <Loader2 className="mb-1.5 h-6 w-6 animate-spin text-primary" />
-                    <span className="text-xs font-bold text-primary">আপলোড হচ্ছে... {desktopProgress}%</span>
+                    <span className="text-xs font-bold text-primary">
+                      {desktopStage ? STAGE_LABEL_BN[desktopStage] : "আপলোড হচ্ছে..."} {desktopProgress}%
+                    </span>
                   </>
                 ) : (
                   <>
                     <UploadCloud className="mb-1.5 h-6 w-6 text-primary" />
                     <span className="text-xs font-bold text-foreground">ডেস্কটপ / প্রধান ব্যানার ছবি আপলোড করুন</span>
-                    <span className="mt-0.5 text-[10px] text-muted-foreground">প্রস্তাবিত অনুপাত ১৬:৯</span>
+                    <span className="mt-0.5 text-[10px] text-muted-foreground">প্রস্তাবিত অনুপাত ১৬:৯ (স্বয়ংক্রিয় WebP)</span>
                   </>
                 )}
               </button>
@@ -1148,14 +1291,31 @@ export function HeroBannerManager() {
             <input
               ref={desktopInputRef}
               type="file"
-              accept="image/jpeg,image/jpg,image/png,image/webp"
+              accept="image/jpeg,image/jpg,image/png,image/webp,image/avif,image/gif"
               onChange={(e) => void handleImageUpload(e, "desktop")}
               className="hidden"
             />
 
             {uploadingDesktop && desktopProgress > 0 && (
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                <div className="h-full bg-primary transition-all duration-300" style={{ width: `${desktopProgress}%` }} />
+              <div className="space-y-1">
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                  <div className="h-full bg-primary transition-all duration-300" style={{ width: `${desktopProgress}%` }} />
+                </div>
+              </div>
+            )}
+
+            {desktopError && (
+              <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-800">
+                <span className="min-w-0 flex-1 font-medium">{desktopError}</span>
+                {lastDesktopFile && !uploadingDesktop && (
+                  <button
+                    type="button"
+                    onClick={() => void processBannerImageUpload(lastDesktopFile, "desktop")}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-rose-600 px-2.5 py-1 text-[10.5px] font-bold text-white hover:bg-rose-700"
+                  >
+                    <RefreshCw className="h-3 w-3" /> পুনরায় চেষ্টা
+                  </button>
+                )}
               </div>
             )}
 
@@ -1179,7 +1339,7 @@ export function HeroBannerManager() {
 
           {/* Mobile Image Card */}
           <div className="rounded-2xl border border-border/80 bg-background/70 p-4 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5">
                 <Smartphone className="h-4 w-4 text-primary" />
                 <span className="text-xs font-bold text-foreground">মোবাইল ব্যানার ছবি (ঐচ্ছিক)</span>
@@ -1198,7 +1358,20 @@ export function HeroBannerManager() {
                     className="h-full w-full object-cover"
                     style={{ objectPosition: draft.imagePositionMobile }}
                   />
+                  {uploadingMobile && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/55 px-3 text-center text-white backdrop-blur-xs">
+                      <Loader2 className="mb-1 h-5 w-5 animate-spin" />
+                      <span className="text-[11px] font-bold">
+                        {mobileStage ? STAGE_LABEL_BN[mobileStage] : "আপলোড হচ্ছে..."} {mobileProgress}%
+                      </span>
+                    </div>
+                  )}
                 </div>
+                {mobileMeta && (
+                  <p className="text-[10.5px] font-semibold text-emerald-700">
+                    অপ্টিমাইজড: {mobileMeta.width}×{mobileMeta.height} • {mobileMeta.format.toUpperCase()} • {formatFileSizeBn(mobileMeta.sizeBytes)}
+                  </p>
+                )}
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
@@ -1206,11 +1379,12 @@ export function HeroBannerManager() {
                     onClick={() => mobileInputRef.current?.click()}
                     className="inline-flex items-center gap-1 rounded-xl border border-primary/30 bg-primary/10 px-3 py-1.5 text-[11px] font-bold text-primary hover:bg-primary/15 disabled:opacity-50"
                   >
-                    <UploadCloud className="h-3.5 w-3.5" /> পরিবর্তন করুন
+                    {uploadingMobile ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UploadCloud className="h-3.5 w-3.5" />}
+                    <span>{uploadingMobile ? "আপলোড হচ্ছে..." : "পরিবর্তন করুন"}</span>
                   </button>
                   <button
                     type="button"
-                    disabled={!canUploadImages}
+                    disabled={!canUploadImages || uploadingMobile}
                     onClick={() => void handleRemoveImage("mobile")}
                     className="inline-flex items-center gap-1 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-[11px] font-bold text-rose-700 hover:bg-rose-500/15 disabled:opacity-50"
                   >
@@ -1228,7 +1402,9 @@ export function HeroBannerManager() {
                 {uploadingMobile ? (
                   <>
                     <Loader2 className="mb-1.5 h-6 w-6 animate-spin text-primary" />
-                    <span className="text-xs font-bold text-primary">আপলোড হচ্ছে... {mobileProgress}%</span>
+                    <span className="text-xs font-bold text-primary">
+                      {mobileStage ? STAGE_LABEL_BN[mobileStage] : "আপলোড হচ্ছে..."} {mobileProgress}%
+                    </span>
                   </>
                 ) : (
                   <>
@@ -1243,14 +1419,31 @@ export function HeroBannerManager() {
             <input
               ref={mobileInputRef}
               type="file"
-              accept="image/jpeg,image/jpg,image/png,image/webp"
+              accept="image/jpeg,image/jpg,image/png,image/webp,image/avif,image/gif"
               onChange={(e) => void handleImageUpload(e, "mobile")}
               className="hidden"
             />
 
             {uploadingMobile && mobileProgress > 0 && (
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                <div className="h-full bg-primary transition-all duration-300" style={{ width: `${mobileProgress}%` }} />
+              <div className="space-y-1">
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                  <div className="h-full bg-primary transition-all duration-300" style={{ width: `${mobileProgress}%` }} />
+                </div>
+              </div>
+            )}
+
+            {mobileError && (
+              <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-800">
+                <span className="min-w-0 flex-1 font-medium">{mobileError}</span>
+                {lastMobileFile && !uploadingMobile && (
+                  <button
+                    type="button"
+                    onClick={() => void processBannerImageUpload(lastMobileFile, "mobile")}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-rose-600 px-2.5 py-1 text-[10.5px] font-bold text-white hover:bg-rose-700"
+                  >
+                    <RefreshCw className="h-3 w-3" /> পুনরায় চেষ্টা
+                  </button>
+                )}
               </div>
             )}
 
@@ -1605,18 +1798,44 @@ export function HeroBannerManager() {
         </div>
       </div>
 
-      {/* Bottom Sticky Save / Cancel / Restore Footer */}
+      {/* Bottom Sticky Save / Publish / Cancel / Restore Footer */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-primary/25 bg-card p-4 shadow-card">
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            disabled={saving || resetting}
-            onClick={() => void handleSave()}
-            className="inline-flex items-center gap-1.5 rounded-full bg-gradient-hero px-5 py-2.5 text-xs font-extrabold text-primary-foreground shadow-elevated transition hover:brightness-105 active:scale-95 disabled:opacity-60"
+            disabled={saving || resetting || uploadingDesktop || uploadingMobile}
+            onClick={() => void handleSave("draft")}
+            className="inline-flex items-center gap-1.5 rounded-full border border-primary/35 bg-primary/10 px-4 py-2.5 text-xs font-bold text-primary-deep transition hover:bg-primary/15 active:scale-95 disabled:opacity-60"
           >
-            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-            <span>{saving ? "সংরক্ষণ হচ্ছে..." : "এই ব্যানারটি সংরক্ষণ করুন"}</span>
+            {saving && savingTarget === "draft" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Save className="h-3.5 w-3.5" />
+            )}
+            <span>{saving && savingTarget === "draft" ? "ড্রাফট সেভ হচ্ছে..." : "ড্রাফট সেভ করুন"}</span>
           </button>
+
+          {canPublish && (
+            <button
+              type="button"
+              disabled={saving || resetting || uploadingDesktop || uploadingMobile}
+              onClick={() => void handleSave("published")}
+              className="inline-flex items-center gap-1.5 rounded-full bg-gradient-hero px-5 py-2.5 text-xs font-extrabold text-primary-foreground shadow-elevated transition hover:brightness-105 active:scale-95 disabled:opacity-60"
+            >
+              {saving && savingTarget === "published" ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Send className="h-3.5 w-3.5" />
+              )}
+              <span>
+                {saving && savingTarget === "published"
+                  ? "প্রকাশ হচ্ছে..."
+                  : draft.status === "published"
+                  ? "আপডেট ও প্রকাশ করুন"
+                  : "সেভ ও প্রকাশ করুন"}
+              </span>
+            </button>
+          )}
 
           {isDirty && (
             <button
@@ -1656,7 +1875,7 @@ export function HeroBannerManager() {
       {confirmDeleteBanner && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-xs"
-          onClick={() => setConfirmDeleteBanner(null)}
+          onClick={() => !saving && setConfirmDeleteBanner(null)}
         >
           <div
             className="w-full max-w-sm rounded-3xl border border-border bg-card p-5 shadow-elevated space-y-3"
@@ -1672,17 +1891,20 @@ export function HeroBannerManager() {
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
+                disabled={saving}
                 onClick={() => setConfirmDeleteBanner(null)}
-                className="rounded-xl border border-border px-3.5 py-2 text-xs font-bold text-foreground hover:bg-muted"
+                className="rounded-xl border border-border px-3.5 py-2 text-xs font-bold text-foreground hover:bg-muted disabled:opacity-50"
               >
                 বাতিল
               </button>
               <button
                 type="button"
+                disabled={saving}
                 onClick={() => void executeDeleteBanner(confirmDeleteBanner)}
-                className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-rose-700"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-rose-700 disabled:opacity-60"
               >
-                হ্যাঁ, মুছে ফেলুন
+                {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                <span>{saving ? "মুছছে..." : "হ্যাঁ, মুছে ফেলুন"}</span>
               </button>
             </div>
           </div>

@@ -1,6 +1,5 @@
 import {
   ref,
-  uploadBytes,
   uploadBytesResumable,
   getDownloadURL,
   deleteObject,
@@ -30,12 +29,57 @@ export interface ImageUploadOptions {
   timeoutMs?: number;
   abortSignal?: AbortSignal;
   customPath?: string;
+  allowClientFallback?: boolean;
 }
 
 export interface ImageUploadResult {
   downloadUrl: string;
   storagePath: string;
   processed: ProcessedImageResult;
+}
+
+let cachedBucketStatus: "unknown" | "available" | "unavailable" = "unknown";
+let bucketProbeInFlight: Promise<boolean> | null = null;
+
+/**
+ * Probes once per session whether the configured Firebase Storage bucket actually exists.
+ * Prevents 10-second SDK retry stalls when the bucket has not been provisioned (HTTP 404).
+ */
+export async function probeStorageBucketAvailable(): Promise<boolean> {
+  if (cachedBucketStatus === "available") return true;
+  if (cachedBucketStatus === "unavailable") return false;
+  if (bucketProbeInFlight) return bucketProbeInFlight;
+
+  const bucket = (storage.app.options.storageBucket || "").trim();
+  if (!bucket) {
+    cachedBucketStatus = "unavailable";
+    return false;
+  }
+
+  bucketProbeInFlight = (async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1800);
+    try {
+      const res = await fetch(
+        `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o?maxResults=1`,
+        { method: "GET", signal: controller.signal }
+      );
+      if (res.status === 404) {
+        cachedBucketStatus = "unavailable";
+        return false;
+      }
+      cachedBucketStatus = "available";
+      return true;
+    } catch {
+      // Transient network error/timeout: don't permanently mark unavailable
+      return true;
+    } finally {
+      clearTimeout(timer);
+      bucketProbeInFlight = null;
+    }
+  })();
+
+  return bucketProbeInFlight;
 }
 
 /**
@@ -76,36 +120,57 @@ export function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = reject;
+    reader.onerror = () => reject(new Error("ছবি এনকোড করা সম্ভব হয়নি।"));
     reader.readAsDataURL(blob);
   });
 }
 
+function mapUploadErrorMessage(err: any): string {
+  const code = String(err?.code || "");
+  if (err?.message === "আপলোড বাতিল করা হয়েছে।") return err.message;
+  if (err?.message === "STORAGE_TIMEOUT") {
+    return "আপলোড সময়সীমা শেষ হয়েছে। ইন্টারনেট সংযোগ যাচাই করে পুনরায় চেষ্টা করুন।";
+  }
+  if (code === "storage/unauthorized" || code === "storage/unauthenticated") {
+    return "ছবি আপলোডের অনুমতি নেই। সুপার অ্যাডমিন হিসেবে লগইন যাচাই করুন।";
+  }
+  if (code === "storage/quota-exceeded") {
+    return "Firebase Storage কোটা পূর্ণ হয়েছে।";
+  }
+  if (code === "storage/retry-limit-exceeded" || code === "storage/canceled") {
+    return "নেটওয়ার্ক সমস্যার কারণে ছবি আপলোড সম্পন্ন হয়নি। পুনরায় চেষ্টা করুন।";
+  }
+  return err?.message || "ছবি আপলোড ব্যর্থ হয়েছে। পুনরায় চেষ্টা করুন।";
+}
+
 /**
- * Compress an image and upload directly to Firebase Storage with live progress.
+ * Compress an image and upload directly to Firebase Storage with live resumable progress,
+ * or fast firestore_asset encoding if the project's Storage bucket is not yet provisioned.
  */
 export async function uploadImageToFirebaseStorage(
   file: File,
   options: ImageUploadOptions
 ): Promise<ImageUploadResult> {
-  const timeoutMs = options.timeoutMs ?? 15000;
+  const timeoutMs = options.timeoutMs ?? 20000;
+  const allowFallback = options.allowClientFallback !== false;
 
   if (options.abortSignal?.aborted) {
     throw new Error("আপলোড বাতিল করা হয়েছে।");
   }
 
-  // 1. Validating
+  // 1. Validating & auth session
   options.onStageChange?.("validating");
-
-  // 1. Ensure authentication session exists (signs in anonymously if visitor)
+  options.onProgress?.(8);
   const fbUser = await ensureFirebaseAuthUser();
 
   if (options.abortSignal?.aborted) {
     throw new Error("আপলোড বাতিল করা হয়েছে।");
   }
 
-  // 2. Compress & optimize the image
+  // 2. Compress & optimize image + probe bucket availability concurrently
   options.onStageChange?.("compressing");
+  options.onProgress?.(16);
+
   const compressionPreset =
     options.compression?.preset ||
     (options.category === "profile" || options.category === "staff_avatar"
@@ -118,17 +183,34 @@ export async function uploadImageToFirebaseStorage(
       ? "chat"
       : "content");
 
-  const processed = await processAndCompressImage(file, {
-    preset: compressionPreset,
-    ...options.compression,
-  });
+  const [processed, bucketAvailable] = await Promise.all([
+    processAndCompressImage(file, {
+      preset: compressionPreset,
+      ...options.compression,
+    }),
+    probeStorageBucketAvailable(),
+  ]);
 
   if (options.abortSignal?.aborted) {
     throw new Error("আপলোড বাতিল করা হয়েছে।");
   }
 
+  // Fast exit when Firebase Storage bucket returns 404 (not yet provisioned in console)
+  if (!bucketAvailable) {
+    options.onStageChange?.("saving");
+    options.onProgress?.(85);
+    const dataUrl = await blobToDataUrl(processed.blob);
+    options.onProgress?.(100);
+    return {
+      downloadUrl: dataUrl,
+      storagePath: "firestore_asset",
+      processed,
+    };
+  }
+
   // 3. Build target Firebase Storage reference
   options.onStageChange?.("uploading");
+  options.onProgress?.(25);
   const resolvedEntityId =
     options.entityId ||
     (options.category === "profile" || options.category === "staff_avatar"
@@ -146,47 +228,112 @@ export async function uploadImageToFirebaseStorage(
       uploadedBy: auth.currentUser?.uid || "anonymous",
       originalName: file.name,
       category: options.category,
+      width: String(processed.width),
+      height: String(processed.height),
+      format: processed.format,
       originalSize: file.size.toString(),
       compressedSize: processed.compressedSizeBytes.toString(),
       uploadedAt: new Date().toISOString(),
     },
   };
 
-  // 4. Fast direct upload with progress reporting & safe fallback
-  const attemptFirebaseUpload = async (): Promise<ImageUploadResult> => {
-    options.onProgress?.(30);
-    const snapshot = await uploadBytes(storageRef, processed.blob, metadata);
-    options.onProgress?.(80);
-    options.onStageChange?.("saving");
-    const downloadUrl = await getDownloadURL(snapshot.ref);
-    options.onProgress?.(100);
-    return {
-      downloadUrl,
-      storagePath,
-      processed,
-    };
-  };
+  // 4. Resumable upload with real byte-level progress + cancellation + timeout
+  const attemptFirebaseUpload = (): Promise<ImageUploadResult> =>
+    new Promise((resolve, reject) => {
+      const task = uploadBytesResumable(storageRef, processed.blob, metadata);
+      let settled = false;
 
-  const timeoutLimit = Math.min(timeoutMs, 10000);
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error("STORAGE_TIMEOUT"));
-    }, timeoutLimit);
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          try {
+            task.cancel();
+          } catch {
+            // ignore
+          }
+          reject(new Error("STORAGE_TIMEOUT"));
+        }
+      }, timeoutMs);
 
-    if (options.abortSignal) {
-      options.abortSignal.addEventListener("abort", () => {
-        clearTimeout(timer);
-        reject(new Error("আপলোড বাতিল করা হয়েছে।"));
-      }, { once: true });
-    }
-  });
+      const onAbort = () => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          try {
+            task.cancel();
+          } catch {
+            // ignore
+          }
+          reject(new Error("আপলোড বাতিল করা হয়েছে।"));
+        }
+      };
+
+      if (options.abortSignal) {
+        options.abortSignal.addEventListener("abort", onAbort, { once: true });
+      }
+
+      task.on(
+        "state_changed",
+        (snapshot) => {
+          if (snapshot.totalBytes > 0) {
+            const pct = 25 + Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 68);
+            options.onProgress?.(Math.min(93, Math.max(25, pct)));
+          }
+        },
+        (err) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          options.abortSignal?.removeEventListener("abort", onAbort);
+          reject(err);
+        },
+        async () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          options.abortSignal?.removeEventListener("abort", onAbort);
+          try {
+            options.onStageChange?.("saving");
+            options.onProgress?.(95);
+            const downloadUrl = await getDownloadURL(task.snapshot.ref);
+            options.onProgress?.(100);
+            resolve({
+              downloadUrl,
+              storagePath,
+              processed,
+            });
+          } catch (urlErr) {
+            reject(urlErr);
+          }
+        }
+      );
+    });
 
   try {
-    return await Promise.race([attemptFirebaseUpload(), timeoutPromise]);
+    return await attemptFirebaseUpload();
   } catch (err: any) {
     if (err?.message === "আপলোড বাতিল করা হয়েছে।") {
       throw err;
     }
+    // If bucket returned 404 dynamically during upload, mark unavailable and encode cleanly
+    const rawMsg = String(err?.message || err?.serverResponse || "");
+    if (err?.code === "storage/bucket-not-found" || rawMsg.includes("404") || rawMsg.includes("bucket does not exist")) {
+      cachedBucketStatus = "unavailable";
+      options.onStageChange?.("saving");
+      options.onProgress?.(95);
+      const dataUrl = await blobToDataUrl(processed.blob);
+      options.onProgress?.(100);
+      return {
+        downloadUrl: dataUrl,
+        storagePath: "firestore_asset",
+        processed,
+      };
+    }
+
+    if (!allowFallback) {
+      throw new Error(mapUploadErrorMessage(err));
+    }
+
     console.warn("[Firebase Storage notice: falling back to client-optimized format]", err);
     options.onStageChange?.("saving");
     options.onProgress?.(100);

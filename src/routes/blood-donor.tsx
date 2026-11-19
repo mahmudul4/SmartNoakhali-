@@ -66,7 +66,7 @@ function BloodPage() {
         </div>
         <div className="min-w-0 flex-1">
           <h1 className="truncate font-display text-lg font-bold text-primary-deep">রক্তদাতা</h1>
-          <p className="truncate text-xs text-muted-foreground">{approved.length} জন স্বেচ্ছা রক্তদাতা</p>
+          <p className="truncate text-xs text-muted-foreground">স্বেচ্ছা রক্তদাতা</p>
         </div>
         <button
           type="button"

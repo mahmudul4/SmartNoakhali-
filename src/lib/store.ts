@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
   collection,
   doc,
@@ -31,6 +31,7 @@ import {
 } from "@/data/categories";
 import defaultLogoUrl from "@/assets/logo.png";
 import { clearBinaryFromIdb, saveBinaryToIdb, sanitizeAppFileName } from "@/lib/pwa";
+import { compressDataUrlToWebP } from "@/lib/imageProcessor";
 
 export const defaultLogo: string = defaultLogoUrl;
 
@@ -94,6 +95,15 @@ export async function upsertSettingDoc(
   payloadValue: string,
   options?: { visible?: boolean; allowStaff?: boolean }
 ) {
+  const trimmedRaw = typeof payloadValue === "string" ? payloadValue.trim() : "";
+  if (
+    (settingId === HERO_BANNER_CONFIG_ID || settingId.startsWith("hero_img_")) &&
+    trimmedRaw.length > 295000
+  ) {
+    throw new Error(
+      "হিরো ব্যানারের ডাটা সাইজ ২৯৫ KB সীমা অতিক্রম করেছে। অনুগ্রহ করে ছবি পুনরায় অপ্টিমাইজ করে চেষ্টা করুন।"
+    );
+  }
   // Never exceed 295,000 bytes to ensure Firestore 1MB document limit is never exceeded
   const cleanUrl = sanitizeString(payloadValue, 295000, "");
   const isVisible = options?.visible !== false;
@@ -3366,27 +3376,214 @@ export function isBannerWithinSchedule(b: HeroBannerItem, nowMs = Date.now()): b
   return true;
 }
 
+const HERO_IMG_SETTING_PREFIX = "sn-setting://";
+const heroImgCache = new Map<string, string>();
+const heroDataUrlToKeyCache = new Map<string, string>();
+
+function buildHeroImgSettingKey(bannerId: string, slot: "desktop" | "mobile"): string {
+  const safeId = (bannerId || "banner")
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 48);
+  return `hero_img_${safeId || "banner"}_${slot}`;
+}
+
+function hydrateHeroImageSyncFromLocal(url: string): string {
+  if (!url || !url.startsWith(HERO_IMG_SETTING_PREFIX)) return url;
+  const key = url.slice(HERO_IMG_SETTING_PREFIX.length).trim();
+  if (!key) return "";
+  const cached = heroImgCache.get(key);
+  if (cached) return cached;
+  try {
+    const localVal = localStorage.getItem(`sn_${key}`);
+    if (localVal) {
+      heroImgCache.set(key, localVal);
+      heroDataUrlToKeyCache.set(localVal, key);
+      return localVal;
+    }
+  } catch {
+    // ignore
+  }
+  return "";
+}
+
+function hydratePayloadSyncFromLocal(raw: HeroBannersStorePayload): HeroBannersStorePayload {
+  return {
+    ...raw,
+    banners: raw.banners.map((b) => ({
+      ...b,
+      desktopImageUrl: hydrateHeroImageSyncFromLocal(b.desktopImageUrl),
+      mobileImageUrl: hydrateHeroImageSyncFromLocal(b.mobileImageUrl),
+    })),
+  };
+}
+
+async function resolveHeroImageRef(url: string): Promise<string> {
+  if (!url || !url.startsWith(HERO_IMG_SETTING_PREFIX)) return url;
+  const key = url.slice(HERO_IMG_SETTING_PREFIX.length).trim();
+  if (!/^hero_img_[a-zA-Z0-9_-]+$/.test(key)) return "";
+
+  const memHit = heroImgCache.get(key);
+  if (memHit) return memHit;
+
+  try {
+    const snap = await getDoc(doc(db, "settings", key));
+    if (snap.exists()) {
+      const val = snap.data()?.logo_url;
+      if (typeof val === "string" && val.trim()) {
+        heroImgCache.set(key, val);
+        heroDataUrlToKeyCache.set(val, key);
+        try {
+          localStorage.setItem(`sn_${key}`, val);
+        } catch {
+          // ignore quota error
+        }
+        return val;
+      }
+    }
+  } catch {
+    // fallback to localStorage cache if offline
+  }
+
+  return hydrateHeroImageSyncFromLocal(url);
+}
+
+async function hydrateHeroBannersPayload(
+  raw: HeroBannersStorePayload
+): Promise<HeroBannersStorePayload> {
+  const hydratedBanners = await Promise.all(
+    raw.banners.map(async (b) => {
+      const [desktopUrl, mobileUrl] = await Promise.all([
+        resolveHeroImageRef(b.desktopImageUrl),
+        resolveHeroImageRef(b.mobileImageUrl),
+      ]);
+      return {
+        ...b,
+        desktopImageUrl: desktopUrl,
+        mobileImageUrl: mobileUrl,
+      };
+    })
+  );
+  return {
+    ...raw,
+    banners: hydratedBanners,
+  };
+}
+
+async function offloadHeroImageIfNeeded(
+  bannerId: string,
+  slot: "desktop" | "mobile",
+  rawUrl: string
+): Promise<{ storedRef: string; displayUrl: string }> {
+  const trimmed = (rawUrl || "").trim();
+  if (!trimmed) return { storedRef: "", displayUrl: "" };
+
+  // External / Firebase Storage HTTPS URLs don't need Firestore asset offloading
+  if (!trimmed.startsWith("data:")) {
+    return { storedRef: trimmed, displayUrl: trimmed };
+  }
+
+  const settingKey = buildHeroImgSettingKey(bannerId, slot);
+  const existingKeyForData = heroDataUrlToKeyCache.get(trimmed);
+  if (existingKeyForData === settingKey && heroImgCache.get(settingKey) === trimmed) {
+    // Unchanged embedded image — avoid redundant Firestore asset write
+    return {
+      storedRef: `${HERO_IMG_SETTING_PREFIX}${settingKey}`,
+      displayUrl: trimmed,
+    };
+  }
+
+  let finalDataUrl = trimmed;
+  if (finalDataUrl.length > 250000) {
+    finalDataUrl = await compressDataUrlToWebP(finalDataUrl, 165 * 1024);
+  }
+  if (finalDataUrl.length > 290000) {
+    throw new Error(
+      "ব্যানার ছবিটি অতিরিক্ত বড়। অনুগ্রহ করে আরও ছোট বা কম রেজোলিউশনের ছবি আপলোড করুন।"
+    );
+  }
+
+  await upsertSettingDoc(settingKey, finalDataUrl, { visible: true });
+  heroImgCache.set(settingKey, finalDataUrl);
+  heroDataUrlToKeyCache.set(finalDataUrl, settingKey);
+  try {
+    localStorage.setItem(`sn_${settingKey}`, finalDataUrl);
+  } catch {
+    // ignore quota error
+  }
+
+  return {
+    storedRef: `${HERO_IMG_SETTING_PREFIX}${settingKey}`,
+    displayUrl: finalDataUrl,
+  };
+}
+
+export async function deleteHeroImageAsset(
+  bannerId: string,
+  slot: "desktop" | "mobile"
+): Promise<void> {
+  const settingKey = buildHeroImgSettingKey(bannerId, slot);
+  const cachedVal = heroImgCache.get(settingKey);
+  if (cachedVal) {
+    heroDataUrlToKeyCache.delete(cachedVal);
+  }
+  heroImgCache.delete(settingKey);
+  try {
+    localStorage.removeItem(`sn_${settingKey}`);
+  } catch {
+    // ignore
+  }
+  try {
+    await deleteDoc(doc(db, "settings", settingKey));
+  } catch {
+    // ignore missing doc or offline cleanup
+  }
+}
+
 export function useHeroBannerConfig() {
   const [payload, setPayload] = useState<HeroBannersStorePayload>(() => {
     try {
       const cached = localStorage.getItem(LOCAL_HERO_BANNER_KEY);
-      return (
-        parseHeroBannersPayload(cached) ?? {
-          banners: [DEFAULT_HERO_BANNER_ITEM],
-          carousel: DEFAULT_HERO_CAROUSEL_SETTINGS,
-        }
-      );
+      const parsed = parseHeroBannersPayload(cached);
+      if (parsed) {
+        return hydratePayloadSyncFromLocal(parsed);
+      }
     } catch {
-      return {
-        banners: [DEFAULT_HERO_BANNER_ITEM],
-        carousel: DEFAULT_HERO_CAROUSEL_SETTINGS,
-      };
+      // ignore
     }
+    return {
+      banners: [DEFAULT_HERO_BANNER_ITEM],
+      carousel: DEFAULT_HERO_CAROUSEL_SETTINGS,
+    };
   });
   const [loading, setLoading] = useState(true);
+  const payloadRef = useRef<HeroBannersStorePayload>(payload);
+  payloadRef.current = payload;
 
   useEffect(() => {
     let active = true;
+    let firestoreApplied = false;
+    let applySeq = 0;
+
+    const applyParsedPayload = async (
+      parsed: HeroBannersStorePayload | null,
+      source: "firestore" | "api"
+    ) => {
+      if (!active || !parsed) return;
+      if (source === "api" && firestoreApplied) return;
+      if (source === "firestore") firestoreApplied = true;
+
+      const mySeq = ++applySeq;
+      const hydrated = await hydrateHeroBannersPayload(parsed);
+      if (!active || mySeq !== applySeq) return;
+
+      payloadRef.current = hydrated;
+      setPayload(hydrated);
+      try {
+        localStorage.setItem(LOCAL_HERO_BANNER_KEY, JSON.stringify(parsed));
+      } catch {
+        // ignore
+      }
+    };
 
     getDoc(doc(db, "settings", HERO_BANNER_CONFIG_ID))
       .then((snap) => {
@@ -3394,10 +3591,7 @@ export function useHeroBannerConfig() {
         if (snap.exists()) {
           const parsed = parseHeroBannersPayload(snap.data()?.logo_url);
           if (parsed) {
-            setPayload(parsed);
-            try {
-              localStorage.setItem(LOCAL_HERO_BANNER_KEY, JSON.stringify(parsed));
-            } catch {}
+            void applyParsedPayload(parsed, "firestore");
           }
         }
         setLoading(false);
@@ -3409,14 +3603,11 @@ export function useHeroBannerConfig() {
     fetch(`/api/content?collection=settings&id=${HERO_BANNER_CONFIG_ID}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (!active) return;
+        if (!active || firestoreApplied) return;
         if (d?.item?.logo_url) {
           const parsed = parseHeroBannersPayload(d.item.logo_url);
           if (parsed) {
-            setPayload(parsed);
-            try {
-              localStorage.setItem(LOCAL_HERO_BANNER_KEY, JSON.stringify(parsed));
-            } catch {}
+            void applyParsedPayload(parsed, "api");
           }
         }
       })
@@ -3429,10 +3620,7 @@ export function useHeroBannerConfig() {
         if (snap.exists()) {
           const parsed = parseHeroBannersPayload(snap.data()?.logo_url);
           if (parsed) {
-            setPayload(parsed);
-            try {
-              localStorage.setItem(LOCAL_HERO_BANNER_KEY, JSON.stringify(parsed));
-            } catch {}
+            void applyParsedPayload(parsed, "firestore");
           }
         }
         setLoading(false);
@@ -3449,24 +3637,74 @@ export function useHeroBannerConfig() {
   }, []);
 
   const persistBannersPayload = useCallback(async (nextPayload: HeroBannersStorePayload) => {
-    const cleanPayload: HeroBannersStorePayload = {
-      banners: nextPayload.banners.map((b, idx) =>
-        normalizeHeroBannerItem({ ...b, order: idx, updatedAt: new Date().toISOString() }, idx)
-      ),
-      carousel: {
-        ...DEFAULT_HERO_CAROUSEL_SETTINGS,
-        ...nextPayload.carousel,
-        intervalSeconds: Math.min(20, Math.max(2, Number(nextPayload.carousel?.intervalSeconds ?? 5))),
-      },
-      updatedAt: new Date().toISOString(),
+    if (!auth.currentUser || !isSuperAdminEmail(auth.currentUser.email)) {
+      throw new Error(
+        "হিরো ব্যানার ডাটাবেজে সেভ করতে মূল সুপার অ্যাডমিন অ্যাকাউন্টে (Firebase Auth) লগইন থাকা প্রয়োজন।"
+      );
+    }
+
+    const nowIso = new Date().toISOString();
+    const normalizedBanners = nextPayload.banners.map((b, idx) =>
+      normalizeHeroBannerItem({ ...b, order: idx, updatedAt: nowIso }, idx)
+    );
+
+    const processedPairs = await Promise.all(
+      normalizedBanners.map(async (b) => {
+        const [desktopRes, mobileRes] = await Promise.all([
+          offloadHeroImageIfNeeded(b.id, "desktop", b.desktopImageUrl),
+          offloadHeroImageIfNeeded(b.id, "mobile", b.mobileImageUrl),
+        ]);
+        return {
+          stored: {
+            ...b,
+            desktopImageUrl: desktopRes.storedRef,
+            mobileImageUrl: mobileRes.storedRef,
+          },
+          display: {
+            ...b,
+            desktopImageUrl: desktopRes.displayUrl,
+            mobileImageUrl: mobileRes.displayUrl,
+          },
+        };
+      })
+    );
+
+    const cleanCarousel: HeroCarouselSettings = {
+      ...DEFAULT_HERO_CAROUSEL_SETTINGS,
+      ...nextPayload.carousel,
+      intervalSeconds: Math.min(20, Math.max(2, Number(nextPayload.carousel?.intervalSeconds ?? 5))),
     };
-    const serialized = JSON.stringify(cleanPayload);
+
+    const storagePayload: HeroBannersStorePayload = {
+      banners: processedPairs.map((p) => p.stored),
+      carousel: cleanCarousel,
+      updatedAt: nowIso,
+    };
+
+    const displayPayload: HeroBannersStorePayload = {
+      banners: processedPairs.map((p) => p.display),
+      carousel: cleanCarousel,
+      updatedAt: nowIso,
+    };
+
+    const serialized = JSON.stringify(storagePayload);
+    if (serialized.length > 290000) {
+      throw new Error(
+        "মোট ব্যানার কনফিগারেশন সাইজ সীমা অতিক্রম করেছে। অনুগ্রহ করে পুরোনো অব্যবহৃত ব্যানার কমিয়ে চেষ্টা করুন।"
+      );
+    }
+
+    // Confirm Firestore write BEFORE mutating local cache or React state
+    await upsertSettingDoc(HERO_BANNER_CONFIG_ID, serialized, { visible: true });
+
     try {
       localStorage.setItem(LOCAL_HERO_BANNER_KEY, serialized);
-    } catch {}
-    setPayload(cleanPayload);
-    await upsertSettingDoc(HERO_BANNER_CONFIG_ID, serialized, { visible: true });
-    return cleanPayload;
+    } catch {
+      // ignore quota error
+    }
+    payloadRef.current = displayPayload;
+    setPayload(displayPayload);
+    return displayPayload;
   }, []);
 
   const activeBanners = useMemo(
@@ -3481,41 +3719,45 @@ export function useHeroBannerConfig() {
 
   const saveBanner = useCallback(
     async (item: HeroBannerItem) => {
-      const idx = payload.banners.findIndex((b) => b.id === item.id);
+      const current = payloadRef.current;
+      const idx = current.banners.findIndex((b) => b.id === item.id);
       const nextList =
         idx >= 0
-          ? payload.banners.map((b, i) => (i === idx ? item : b))
-          : [...payload.banners, { ...item, order: payload.banners.length }];
-      return persistBannersPayload({ ...payload, banners: nextList });
+          ? current.banners.map((b, i) => (i === idx ? item : b))
+          : [...current.banners, { ...item, order: current.banners.length }];
+      return persistBannersPayload({ ...current, banners: nextList });
     },
-    [payload, persistBannersPayload]
+    [persistBannersPayload]
   );
 
   const addBanner = useCallback(
     async (partial?: Partial<HeroBannerItem>) => {
-      const nextIndex = payload.banners.length + 1;
+      const current = payloadRef.current;
+      const nextIndex = current.banners.length + 1;
       const newBanner = normalizeHeroBannerItem(
         {
           ...DEFAULT_HERO_BANNER_ITEM,
           ...partial,
+          status: partial?.status === "published" ? "published" : "draft",
           id: `hero_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
           name: partial?.name || `নতুন হিরো ব্যানার #${nextIndex}`,
-          order: payload.banners.length,
+          order: current.banners.length,
         },
-        payload.banners.length
+        current.banners.length
       );
       await persistBannersPayload({
-        ...payload,
-        banners: [...payload.banners, newBanner],
+        ...current,
+        banners: [...current.banners, newBanner],
       });
       return newBanner;
     },
-    [payload, persistBannersPayload]
+    [persistBannersPayload]
   );
 
   const duplicateBanner = useCallback(
     async (bannerId: string) => {
-      const src = payload.banners.find((b) => b.id === bannerId);
+      const current = payloadRef.current;
+      const src = current.banners.find((b) => b.id === bannerId);
       if (!src) return null;
       const copyItem = normalizeHeroBannerItem(
         {
@@ -3523,49 +3765,57 @@ export function useHeroBannerConfig() {
           id: `hero_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
           name: `${src.name} (কপি)`,
           status: "draft",
-          order: payload.banners.length,
+          order: current.banners.length,
         },
-        payload.banners.length
+        current.banners.length
       );
       await persistBannersPayload({
-        ...payload,
-        banners: [...payload.banners, copyItem],
+        ...current,
+        banners: [...current.banners, copyItem],
       });
       return copyItem;
     },
-    [payload, persistBannersPayload]
+    [persistBannersPayload]
   );
 
   const deleteBanner = useCallback(
     async (bannerId: string) => {
-      if (payload.banners.length <= 1) {
+      const current = payloadRef.current;
+      if (current.banners.length <= 1) {
         throw new Error("অন্তত একটি প্রধান হিরো ব্যানার রাখা আবশ্যক।");
       }
-      const nextList = payload.banners.filter((b) => b.id !== bannerId);
-      return persistBannersPayload({ ...payload, banners: nextList });
+      const nextList = current.banners.filter((b) => b.id !== bannerId);
+      const saved = await persistBannersPayload({ ...current, banners: nextList });
+      void Promise.all([
+        deleteHeroImageAsset(bannerId, "desktop"),
+        deleteHeroImageAsset(bannerId, "mobile"),
+      ]);
+      return saved;
     },
-    [payload, persistBannersPayload]
+    [persistBannersPayload]
   );
 
   const reorderBanners = useCallback(
     async (bannerId: string, direction: "up" | "down") => {
-      const sorted = [...payload.banners].sort((a, b) => a.order - b.order);
+      const current = payloadRef.current;
+      const sorted = [...current.banners].sort((a, b) => a.order - b.order);
       const idx = sorted.findIndex((b) => b.id === bannerId);
-      if (idx < 0) return payload;
+      if (idx < 0) return current;
       const targetIdx = direction === "up" ? idx - 1 : idx + 1;
-      if (targetIdx < 0 || targetIdx >= sorted.length) return payload;
+      if (targetIdx < 0 || targetIdx >= sorted.length) return current;
       const [moved] = sorted.splice(idx, 1);
       sorted.splice(targetIdx, 0, moved);
-      return persistBannersPayload({ ...payload, banners: sorted });
+      return persistBannersPayload({ ...current, banners: sorted });
     },
-    [payload, persistBannersPayload]
+    [persistBannersPayload]
   );
 
   const saveCarouselSettings = useCallback(
     async (carousel: HeroCarouselSettings) => {
-      return persistBannersPayload({ ...payload, carousel });
+      const current = payloadRef.current;
+      return persistBannersPayload({ ...current, carousel });
     },
-    [payload, persistBannersPayload]
+    [persistBannersPayload]
   );
 
   const saveHeroBannerConfig = useCallback(
@@ -3579,10 +3829,21 @@ export function useHeroBannerConfig() {
   );
 
   const resetHeroBannerConfig = useCallback(async () => {
-    return persistBannersPayload({
+    const current = payloadRef.current;
+    const oldIds = current.banners.map((b) => b.id);
+    const result = await persistBannersPayload({
       banners: [DEFAULT_HERO_BANNER_ITEM],
       carousel: DEFAULT_HERO_CAROUSEL_SETTINGS,
     });
+    for (const oldId of oldIds) {
+      if (oldId !== DEFAULT_HERO_BANNER_ITEM.id) {
+        void Promise.all([
+          deleteHeroImageAsset(oldId, "desktop"),
+          deleteHeroImageAsset(oldId, "mobile"),
+        ]);
+      }
+    }
+    return result;
   }, [persistBannersPayload]);
 
   return {
