@@ -55,7 +55,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
-import { auth, SUPER_ADMIN_EMAIL } from "@/lib/firebase";
+import { auth, SUPER_ADMIN_EMAIL, isSuperAdminEmail } from "@/lib/firebase";
 import { sendBrowserNotification } from "@/lib/notifications";
 import { CATEGORY_ICONS, CATEGORY_TINTS } from "@/data/categories";
 import {
@@ -1106,7 +1106,7 @@ function Dashboard({
         )}
 
         {tab === "donors" && (isMainAdmin || hasPermission("create_edit_content") || hasPermission("publish_content")) && (
-          <DonorsAdminPanel donors={donors} />
+          <DonorsAdminPanel donors={donors} isMainAdmin={isMainAdmin} />
         )}
 
         {tab === "events" && (isMainAdmin || hasPermission("create_edit_content") || hasPermission("publish_content")) && (
@@ -5464,7 +5464,20 @@ function ExpensesAdminPanel({
 // ============================================================================
 // Blood Donors CRUD
 // ============================================================================
-function DonorsAdminPanel({ donors }: { donors: ReturnType<typeof useCloudDonors> }) {
+function DonorsAdminPanel({
+  donors,
+  isMainAdmin,
+}: {
+  donors: ReturnType<typeof useCloudDonors>;
+  isMainAdmin: boolean;
+}) {
+  const { isMainAdmin: authIsMainAdmin, user } = useAuth();
+  const canBulkImportDonors = Boolean(
+    isMainAdmin &&
+      authIsMainAdmin &&
+      isSuperAdminEmail(user?.email) &&
+      (!auth.currentUser?.email || isSuperAdminEmail(auth.currentUser.email))
+  );
   const [editing, setEditing] = useState<DonorRow | null>(null);
   const [busy, setBusy] = useState(false);
   const [approvingAll, setApprovingAll] = useState(false);
@@ -5549,14 +5562,16 @@ function DonorsAdminPanel({ donors }: { donors: ReturnType<typeof useCloudDonors
             রক্তদাতা পরিচালনা ({filtered.length} জন)
           </p>
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setImportModalOpen(true)}
-              className="flex items-center gap-1.5 rounded-full bg-rose-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-rose-700"
-            >
-              <Upload className="h-3.5 w-3.5" />
-              বাল্ক ইম্পোর্ট (Pasted text)
-            </button>
+            {canBulkImportDonors && (
+              <button
+                type="button"
+                onClick={() => setImportModalOpen(true)}
+                className="flex items-center gap-1.5 rounded-full bg-rose-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-rose-700"
+              >
+                <Upload className="h-3.5 w-3.5" />
+                বাল্ক ইম্পোর্ট (Pasted text)
+              </button>
+            )}
             {pendingItems.length > 0 && (
               <button
                 type="button"
@@ -5816,11 +5831,13 @@ function DonorsAdminPanel({ donors }: { donors: ReturnType<typeof useCloudDonors
         </div>
       )}
 
-      <DonorImportModal
-        open={importModalOpen}
-        onClose={() => setImportModalOpen(false)}
-        existingDonors={donors.items}
-      />
+      {canBulkImportDonors && (
+        <DonorImportModal
+          open={importModalOpen}
+          onClose={() => setImportModalOpen(false)}
+          existingDonors={donors.items}
+        />
+      )}
     </div>
   );
 }

@@ -5,7 +5,7 @@ import {
   serverTimestamp,
   writeBatch,
 } from "firebase/firestore";
-import { auth, db, sanitizeString } from "@/lib/firebase";
+import { auth, db, isSuperAdminEmail, sanitizeString } from "@/lib/firebase";
 import type { BloodGroupType, DonorRow, ModerationStatus } from "@/lib/cloud";
 
 export const DEFAULT_DONOR_SOURCE_URL = "/assets/aistudio/Pasted_text_2__9f1f02cb.txt";
@@ -523,9 +523,9 @@ export async function executeBloodDonorBatchImport(
   } = opts;
 
   const u = auth.currentUser;
-  if (!u || !u.uid) {
+  if (!u || !u.uid || !isSuperAdminEmail(u.email)) {
     throw new Error(
-      "Firestore-এ রক্তদাতা ইম্পোর্ট করতে অনুগ্রহ করে প্রথমে সুপার অ্যাডমিন/অ্যাডমিন Google বা পাসওয়ার্ড অ্যাকাউন্ট দিয়ে সাইন-ইন করুন।"
+      "রক্তদাতা বাল্ক ইম্পোর্ট শুধুমাত্র অনুমোদিত মেইন সুপার অ্যাডমিনের জন্য সংরক্ষিত।"
     );
   }
 

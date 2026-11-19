@@ -411,16 +411,27 @@ service cloud.firestore {
       allow get: if isValidId(donorId) && (resource == null || existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isEditor());
       allow list: if existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isMainAdmin() || isBootstrappedOrdinaryAdmin();
       allow create: if isValidId(donorId) && isSignedIn() && (
-        isEditor() ||
-        (incoming().author_id == request.auth.uid && incoming().status == 'pending')
+        isMainAdmin() || (
+          !donorId.matches('^imp_bd_.*') &&
+          !('import_source' in incoming()) &&
+          !('source_row' in incoming()) && (
+            isEditor() ||
+            (incoming().author_id == request.auth.uid && incoming().status == 'pending')
+          )
+        )
       );
       allow update: if isValidId(donorId) && (
-        isEditor() || (
-          isSignedIn() &&
-          existing().author_id == request.auth.uid &&
-          existing().status == 'pending' &&
-          incoming().status == 'pending' &&
-          incoming().author_id == existing().author_id
+        isMainAdmin() || (
+          !('import_source' in incoming().diff(existing()).affectedKeys()) &&
+          !('source_row' in incoming().diff(existing()).affectedKeys()) && (
+            isEditor() || (
+              isSignedIn() &&
+              existing().author_id == request.auth.uid &&
+              existing().status == 'pending' &&
+              incoming().status == 'pending' &&
+              incoming().author_id == existing().author_id
+            )
+          )
         )
       );
       allow delete: if isValidId(donorId) && isMainAdmin();

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   onAuthStateChanged,
   signInWithPopup,
@@ -211,6 +211,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     readVerifiedSession()
   );
   const [loading, setLoading] = useState(true);
+  const googleAuthCheckPromiseRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     let unsubProfile: (() => void) | null = null;
@@ -244,6 +245,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      if (googleAuthCheckPromiseRef.current) {
+        await googleAuthCheckPromiseRef.current.catch(() => {});
+        if (auth.currentUser?.uid !== fbUser.uid) {
+          return;
+        }
+      }
+
       if (!isSuperAdminEmail(fbUser.email)) {
         try {
           sessionStorage.removeItem(SUPER_ADMIN_SESSION_KEY);
@@ -265,6 +273,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const vaultRoles: Role[] = Array.isArray(vaultEntry?.roles)
         ? (vaultEntry.roles as Role[])
         : [];
+
+      const isGoogleOnlyProvider =
+        fbUser.providerData.length > 0 &&
+        fbUser.providerData.every((p) => p?.providerId === "google.com");
+
+      let firestoreStaffAuthorized = false;
+      if (isGoogleOnlyProvider && !isSuper && !isRegularBootstrappedAdmin) {
+        try {
+          const [uSnap, aSnap] = await Promise.all([
+            getDoc(doc(db, "users", fbUser.uid)),
+            getDoc(doc(db, "admins", fbUser.uid)).catch(() => null),
+          ]);
+          const uData = uSnap.exists() ? uSnap.data() : null;
+          const uRoles = Array.isArray(uData?.roles) ? (uData.roles as string[]) : [];
+          const uNotSuspended = uData?.suspended !== true;
+          const hasStaffUserDoc =
+            uNotSuspended &&
+            (uRoles.some((r) => r === "admin" || r === "editor" || r === "moderator") ||
+              (typeof uData?.custom_role_id === "string" && uData.custom_role_id.trim().length > 0));
+          firestoreStaffAuthorized = Boolean((aSnap && aSnap.exists()) || hasStaffUserDoc);
+        } catch {
+          // ignore read fallback
+        }
+      }
+
+      const vaultStaffAuthorized =
+        vaultEntry?.suspended !== true &&
+        (vaultRoles.some((r) => r === "admin" || r === "editor" || r === "moderator") ||
+          Boolean(vaultEntry?.custom_role_id));
+
+      if (
+        isGoogleOnlyProvider &&
+        !isSuper &&
+        !isRegularBootstrappedAdmin &&
+        !firestoreStaffAuthorized &&
+        !vaultStaffAuthorized
+      ) {
+        writeVerifiedSession(null);
+        setVerifiedSession(null);
+        setFirebaseUser(null);
+        setUser(null);
+        setRoles([]);
+        setCustomRoleId(null);
+        setCustomRoleName(null);
+        setUsername(null);
+        setLoading(false);
+        await firebaseSignOut(auth).catch(() => {});
+        return;
+      }
 
       const currentVerified = readVerifiedSession();
       const sessionRoles: Role[] = Array.isArray(currentVerified?.roles)
@@ -416,63 +473,106 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loginHintEmail?: string,
     options?: { requireStaff?: boolean; requireSuperAdmin?: boolean }
   ): Promise<AppUser> {
+    // General public users cannot initiate or authenticate with Google Login
+    if (!options?.requireStaff && !options?.requireSuperAdmin) {
+      throw new Error(
+        "সাধারণ ব্যবহারকারীদের জন্য Google লগইন বন্ধ করা হয়েছে। অনুগ্রহ করে ইমেইল বা মোবাইল নাম্বার এবং পাসওয়ার্ড ব্যবহার করে লগইন করুন।"
+      );
+    }
+
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({
       prompt: "select_account",
       ...(loginHintEmail ? { login_hint: loginHintEmail } : {}),
     });
 
+    let resolveGoogleGate!: () => void;
+    const gatePromise = new Promise<void>((resolve) => {
+      resolveGoogleGate = resolve;
+    });
+    googleAuthCheckPromiseRef.current = gatePromise;
+
     try {
       const result = await signInWithPopup(auth, provider);
       const fbUser = result.user;
       const email = fbUser.email || "";
-
-      if (options?.requireSuperAdmin && !isSuperAdminEmail(email)) {
-        await firebaseSignOut(auth);
-        throw new Error("অননুমোদিত অ্যাকাউন্ট। শুধুমাত্র প্রধান সুপার এডমিনের প্রবেশাধিকার রয়েছে।");
-      }
-
-      // Check if this Google user has roles pre-assigned by Super Admin in Vault
-      const vault = await syncVaultFromCloud();
       const emailLower = email.trim().toLowerCase();
-      const vaultEntry = vault[fbUser.uid] || (emailLower ? vault[emailLower] : undefined);
       const isSuper = isSuperAdminEmail(email);
       const isRegAdmin = emailLower === REGULAR_ADMIN_EMAIL.toLowerCase();
 
-      // STRICT SECURITY RULE: Regular Google Sign-In defaults strictly to ["user"].
-      // Google Sign-In CANNOT grant or escalate to admin/moderator/editor unless explicitly in vault
-      const resolvedRoles: Role[] = isSuper
-        ? ["admin", "moderator", "editor", "user"]
-        : isRegAdmin
-        ? (Array.from(new Set([...(vaultEntry?.roles || []), "admin", "user"])) as Role[])
-        : vaultEntry?.roles?.length
-        ? (Array.from(new Set([...vaultEntry.roles, "user"])) as Role[])
-        : ["user"];
-
-      const gCustomRoleId = vaultEntry?.custom_role_id || null;
-      const gCustomRoleName = vaultEntry?.custom_role_name || null;
-
-      if (
-        options?.requireStaff &&
-        !isSuper &&
-        !isRegAdmin &&
-        !resolvedRoles.includes("admin") &&
-        !resolvedRoles.includes("editor") &&
-        !resolvedRoles.includes("moderator") &&
-        !gCustomRoleId
-      ) {
-        await firebaseSignOut(auth);
-        throw new Error("শুধুমাত্র অনুমোদিত অ্যাডমিন ও অপারেটরদের জন্য প্রবেশাধিকার রয়েছে।");
+      if (options?.requireSuperAdmin && !isSuper) {
+        await firebaseSignOut(auth).catch(() => {});
+        throw new Error("অননুমোদিত অ্যাকাউন্ট। শুধুমাত্র প্রধান সুপার এডমিনের প্রবেশাধিকার রয়েছে।");
       }
 
-      const cleanDisplayName = fbUser.displayName || email.split("@")[0] || "User";
+      // Verify staff/admin privileges from trusted Vault and Firestore records BEFORE creating any profile/session
+      const [vault, userSnap, adminSnap] = await Promise.all([
+        syncVaultFromCloud(),
+        getDoc(doc(db, "users", fbUser.uid)).catch(() => null),
+        getDoc(doc(db, "admins", fbUser.uid)).catch(() => null),
+      ]);
+
+      const vaultEntry = vault[fbUser.uid] || (emailLower ? vault[emailLower] : undefined);
+      const userData = userSnap && userSnap.exists() ? userSnap.data() : null;
+      const hasAdminDoc = Boolean(adminSnap && adminSnap.exists());
+
+      const isSuspended =
+        !isSuper && (userData?.suspended === true || vaultEntry?.suspended === true);
+      if (isSuspended) {
+        await firebaseSignOut(auth).catch(() => {});
+        throw new Error("আপনার অ্যাকাউন্টটি স্থগিত করা হয়েছে। অনুগ্রহ করে সুপার এডমিনের সাথে যোগাযোগ করুন।");
+      }
+
+      const firestoreRoles: Role[] = Array.isArray(userData?.roles)
+        ? (userData.roles as Role[])
+        : [];
+      const vaultRoles: Role[] = Array.isArray(vaultEntry?.roles)
+        ? (vaultEntry.roles as Role[])
+        : [];
+
+      const mergedCandidateRoles: Role[] = isSuper
+        ? ["admin", "moderator", "editor", "user"]
+        : isRegAdmin
+        ? (Array.from(new Set([...firestoreRoles, ...vaultRoles, "admin", "user"])) as Role[])
+        : (Array.from(new Set([...firestoreRoles, ...vaultRoles])) as Role[]);
+
+      const gCustomRoleId =
+        (typeof userData?.custom_role_id === "string" && userData.custom_role_id.trim()) ||
+        vaultEntry?.custom_role_id ||
+        null;
+      const gCustomRoleName =
+        (typeof userData?.custom_role_name === "string" && userData.custom_role_name.trim()) ||
+        vaultEntry?.custom_role_name ||
+        null;
+
+      const hasTrustedStaffRole =
+        isSuper ||
+        isRegAdmin ||
+        hasAdminDoc ||
+        mergedCandidateRoles.includes("admin") ||
+        mergedCandidateRoles.includes("editor") ||
+        mergedCandidateRoles.includes("moderator") ||
+        Boolean(gCustomRoleId);
+
+      if (!hasTrustedStaffRole) {
+        await firebaseSignOut(auth).catch(() => {});
+        throw new Error(
+          "সাধারণ ব্যবহারকারীদের জন্য Google লগইন বন্ধ করা হয়েছে। শুধুমাত্র অনুমোদিত অ্যাডমিন ও স্টাফদের প্রবেশাধিকার রয়েছে।"
+        );
+      }
+
+      const resolvedRoles: Role[] = Array.from(new Set([...mergedCandidateRoles, "user"])) as Role[];
+      const cleanDisplayName = fbUser.displayName || email.split("@")[0] || "Staff";
       const cleanUsername = sanitizeString(
-        vaultEntry?.username || email.split("@")[0] || "user",
+        vaultEntry?.username ||
+          (typeof userData?.username === "string" ? userData.username : "") ||
+          email.split("@")[0] ||
+          "staff",
         60,
-        "user"
+        "staff"
       );
 
-      // Ensure profile doc exists in Firestore (/users/{uid})
+      // Ensure profile doc exists in Firestore (/users/{uid}) only for verified staff/admins
       try {
         await ensureCurrentUserProfileDoc(fbUser, {
           full_name: cleanDisplayName,
@@ -480,7 +580,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           phone: fbUser.phoneNumber || undefined,
         });
       } catch (err) {
-        console.warn("Google user profile doc notice:", err);
+        console.warn("Admin Google profile doc notice:", err);
       }
 
       // Record credentials in vault and session
@@ -549,6 +649,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       throw new Error(err?.message || "Google দিয়ে লগইন ব্যর্থ হয়েছে।");
+    } finally {
+      resolveGoogleGate();
+      if (googleAuthCheckPromiseRef.current === gatePromise) {
+        googleAuthCheckPromiseRef.current = null;
+      }
     }
   }
 

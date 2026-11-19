@@ -13,7 +13,8 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { auth } from "@/lib/firebase";
+import { auth, isSuperAdminEmail } from "@/lib/firebase";
+import { useAuth } from "@/lib/auth";
 import type { DonorRow, ModerationStatus } from "@/lib/cloud";
 import { recordStaffActivity, recordSuperAdminAudit } from "@/lib/staff-audit";
 import {
@@ -68,6 +69,13 @@ export function DonorImportModal({
   onClose,
   existingDonors,
 }: DonorImportModalProps) {
+  const { isMainAdmin, user } = useAuth();
+  const isAuthorizedSuperAdmin = Boolean(
+    isMainAdmin &&
+      isSuperAdminEmail(user?.email) &&
+      (!auth.currentUser?.email || isSuperAdminEmail(auth.currentUser.email))
+  );
+
   const [rawText, setRawText] = useState<string>("");
   const [sourceLabel, setSourceLabel] = useState<string>("Pasted text(2).txt");
   const [loadingSource, setLoadingSource] = useState(false);
@@ -87,6 +95,7 @@ export function DonorImportModal({
   const [report, setReport] = useState<BloodDonorReconciliationReport | null>(null);
 
   async function loadDefaultSource() {
+    if (!isAuthorizedSuperAdmin) return;
     setLoadingSource(true);
     setSourceError(null);
     try {
@@ -108,10 +117,10 @@ export function DonorImportModal({
   }
 
   useEffect(() => {
-    if (open && !rawText && !loadingSource) {
+    if (open && isAuthorizedSuperAdmin && !rawText && !loadingSource) {
       void loadDefaultSource();
     }
-  }, [open]);
+  }, [open, isAuthorizedSuperAdmin]);
 
   function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -201,13 +210,13 @@ export function DonorImportModal({
 
   async function runImport(recordsSubset?: ParsedDonorSourceRecord[]) {
     if (!analysis || importing) return;
+    if (!isAuthorizedSuperAdmin || !auth.currentUser || !isSuperAdminEmail(auth.currentUser.email)) {
+      toast.error("রক্তদাতা বাল্ক ইম্পোর্ট শুধুমাত্র প্রধান সুপার অ্যাডমিনের জন্য সংরক্ষিত।");
+      return;
+    }
     const targetList = recordsSubset ?? selectedRecordsToWrite;
     if (targetList.length === 0) {
       toast.error("ইম্পোর্ট করার জন্য কোনো বৈধ রেকর্ড নির্বাচিত নেই");
-      return;
-    }
-    if (!auth.currentUser) {
-      toast.error("অনুগ্রহ করে প্রথমে সুপার অ্যাডমিন/অ্যাডমিন অ্যাকাউন্ট দিয়ে Firebase-এ সাইন-ইন করুন");
       return;
     }
 
@@ -294,9 +303,11 @@ export function DonorImportModal({
     URL.revokeObjectURL(url);
   }
 
-  if (!open) return null;
+  if (!open || !isAuthorizedSuperAdmin) return null;
 
-  const isFirebaseSignedIn = Boolean(auth.currentUser?.uid);
+  const isFirebaseSignedIn = Boolean(
+    auth.currentUser?.uid && isSuperAdminEmail(auth.currentUser.email)
+  );
 
   return (
     <div
@@ -372,9 +383,9 @@ export function DonorImportModal({
             <div className="flex items-start gap-2.5 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-900">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
               <div>
-                <p className="font-bold">সক্রিয় Firebase সেশন পাওয়া যায়নি</p>
+                <p className="font-bold">সক্রিয় সুপার অ্যাডমিন Firebase সেশন পাওয়া যায়নি</p>
                 <p>
-                  প্রিভিউ ও যাচাই চলছে, তবে Firestore-এ সংরক্ষণ করতে সুপার অ্যাডমিন Google বা পাসওয়ার্ড অ্যাকাউন্টে সাইন-ইন থাকা প্রয়োজন।
+                  প্রিভিউ ও যাচাই চলছে, তবে Firestore-এ সংরক্ষণ করতে প্রধান সুপার অ্যাডমিন অ্যাকাউন্টে পাসওয়ার্ড দিয়ে সাইন-ইন থাকা প্রয়োজন।
                 </p>
               </div>
             </div>

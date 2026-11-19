@@ -32,6 +32,7 @@ import {
   useHomepageConfig,
   useWebsiteContentConfig,
   DEFAULT_HERO_BANNER_ITEM,
+  type HeroBannerItem,
   type HomepageQuickAction,
 } from "@/lib/store";
 import type { Category, Division } from "@/data/categories";
@@ -106,20 +107,216 @@ function HeroActionLink({
   );
 }
 
+const HERO_STAGE_HEIGHT_CLASS =
+  "h-[316px] min-[380px]:h-[304px] sm:h-[296px] md:h-[308px]";
+
 const HERO_SLIDE_VARIANTS = {
   enter: (dir: number) => ({
     x: dir >= 0 ? "100%" : "-100%",
     opacity: 1,
+    zIndex: 2,
   }),
   center: {
     x: "0%",
     opacity: 1,
+    zIndex: 2,
   },
   exit: (dir: number) => ({
-    x: dir >= 0 ? "-100%" : "100%",
+    x: dir >= 0 ? "-28%" : "28%",
     opacity: 1,
+    zIndex: 1,
   }),
 };
+
+function HeroBannerSlide({
+  banner,
+  slideDirection,
+  hasControls,
+}: {
+  banner: HeroBannerItem;
+  slideDirection: 1 | -1;
+  hasControls: boolean;
+}) {
+  const desktopImg = banner.desktopImageUrl || banner.mobileImageUrl;
+  const mobileImg = banner.mobileImageUrl || banner.desktopImageUrl;
+  const hasImage = Boolean(
+    banner.backgroundMode === "image" && (desktopImg || mobileImg)
+  );
+
+  return (
+    <motion.div
+      custom={slideDirection}
+      variants={HERO_SLIDE_VARIANTS}
+      initial="enter"
+      animate="center"
+      exit="exit"
+      transition={{
+        x: { duration: 0.44, ease: [0.22, 1, 0.36, 1] },
+      }}
+      className={`absolute inset-0 flex h-full w-full flex-col justify-center overflow-hidden p-5 sm:p-7 ${
+        hasControls ? "pb-14 sm:pb-12" : ""
+      }`}
+      style={{
+        willChange: "transform",
+        backfaceVisibility: "hidden",
+        WebkitBackfaceVisibility: "hidden",
+        background:
+          banner.backgroundMode === "image"
+            ? "#0b2e1f"
+            : banner.backgroundMode === "solid"
+            ? banner.solidColor
+            : `linear-gradient(135deg, ${banner.gradientFrom} 0%, ${banner.gradientVia} 50%, ${banner.gradientTo} 100%)`,
+        color: banner.headingColor || banner.textColor || "#ffffff",
+      }}
+    >
+      {hasImage && (
+        <>
+          {mobileImg && (
+            <img
+              src={mobileImg}
+              alt={banner.headingLine1 || "Smart Noakhali"}
+              loading="eager"
+              decoding="sync"
+              draggable={false}
+              className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover md:hidden"
+              style={{
+                objectPosition: banner.imagePositionMobile || "center center",
+              }}
+            />
+          )}
+          {desktopImg && (
+            <img
+              src={desktopImg}
+              alt={banner.headingLine1 || "Smart Noakhali"}
+              loading="eager"
+              decoding="sync"
+              draggable={false}
+              className="pointer-events-none absolute inset-0 hidden h-full w-full select-none object-cover md:block"
+              style={{
+                objectPosition: banner.imagePositionDesktop || "center center",
+              }}
+            />
+          )}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0"
+            style={{
+              backgroundColor: banner.overlayColor || "#042316",
+              opacity: Math.min(90, Math.max(0, banner.overlayOpacity ?? 55)) / 100,
+            }}
+          />
+        </>
+      )}
+
+      {banner.showDecorativeGlow !== false && (
+        <>
+          <div className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-amber-300/20 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-14 -left-10 h-44 w-44 rounded-full bg-emerald-300/20 blur-3xl" />
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+        </>
+      )}
+
+      <div
+        className={`relative z-10 ${
+          banner.textAlign === "left"
+            ? "text-left"
+            : banner.textAlign === "right"
+            ? "text-right"
+            : "text-left sm:text-left"
+        }`}
+      >
+        {banner.badgeText.trim() && (
+          <span
+            className="inline-flex max-w-full items-center gap-1.5 truncate rounded-full border border-white/15 px-3 py-1 text-[11px] font-semibold tracking-wide backdrop-blur-sm"
+            style={{
+              color: banner.badgeColor || "#ffffff",
+              backgroundColor: banner.badgeBgColor || "rgba(255,255,255,0.14)",
+            }}
+          >
+            <Droplet className="h-3 w-3 shrink-0 text-amber-300" />{" "}
+            <span className="truncate">{banner.badgeText}</span>
+          </span>
+        )}
+
+        <h1
+          className="mt-2.5 font-bangla text-[23px] min-[380px]:text-[24px] font-extrabold leading-[1.22] tracking-tight drop-shadow-xs sm:mt-3 sm:text-[31px]"
+          style={{
+            color: banner.headingColor || banner.textColor || "#ffffff",
+          }}
+        >
+          {banner.headingLine1}
+          {banner.headingLine2 && (
+            <>
+              <br />
+              {banner.headingLine2}
+            </>
+          )}
+        </h1>
+
+        {banner.description.trim() && (
+          <p
+            className={`mt-2 max-w-xl text-[12.5px] leading-relaxed line-clamp-3 sm:line-clamp-2 sm:text-sm ${
+              banner.textAlign === "center" ? "mx-auto sm:mx-0" : ""
+            }`}
+            style={{
+              color: banner.descriptionColor || banner.subtextColor || "#ecfdf5",
+              opacity: 0.94,
+            }}
+          >
+            {banner.description}
+          </p>
+        )}
+
+        {(banner.primaryButtonText.trim() ||
+          banner.secondaryButtonText.trim() ||
+          banner.optionalButtonText?.trim()) && (
+          <div
+            className={`mt-3.5 flex flex-wrap items-center gap-2 sm:mt-4 sm:gap-2.5 ${
+              banner.textAlign === "right" ? "justify-end" : "justify-start"
+            }`}
+          >
+            {banner.primaryButtonText.trim() && (
+              <HeroActionLink
+                href={banner.primaryButtonLink || "tel:999"}
+                className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full px-4.5 py-2 text-xs font-extrabold shadow-md transition hover:brightness-105 active:scale-95 sm:min-h-[40px] sm:gap-2 sm:px-5 sm:py-2.5 sm:text-[13px]"
+                style={{
+                  backgroundColor: banner.primaryButtonBgColor || "#dc2626",
+                  color: banner.primaryButtonColor || "#ffffff",
+                }}
+              >
+                <Phone className="h-3.5 w-3.5 shrink-0" /> {banner.primaryButtonText}
+              </HeroActionLink>
+            )}
+            {banner.secondaryButtonText.trim() && (
+              <HeroActionLink
+                href={banner.secondaryButtonLink || "/submit-info"}
+                className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-white/25 px-4 py-2 text-xs font-bold shadow-xs backdrop-blur-sm transition hover:brightness-95 active:scale-95 sm:min-h-[40px] sm:gap-2 sm:px-4.5 sm:py-2.5 sm:text-[13px]"
+                style={{
+                  backgroundColor: banner.secondaryButtonBgColor || "#ffffff",
+                  color: banner.secondaryButtonColor || "#064e3b",
+                }}
+              >
+                <Send className="h-3.5 w-3.5 shrink-0" /> {banner.secondaryButtonText}
+              </HeroActionLink>
+            )}
+            {banner.optionalButtonText?.trim() && (
+              <HeroActionLink
+                href={banner.optionalButtonLink || "/directory"}
+                className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-white/25 px-3.5 py-2 text-xs font-bold backdrop-blur-sm transition hover:brightness-110 active:scale-95 sm:min-h-[40px] sm:gap-2 sm:px-4 sm:py-2.5 sm:text-[13px]"
+                style={{
+                  backgroundColor: banner.optionalButtonBgColor || "rgba(255,255,255,0.16)",
+                  color: banner.optionalButtonColor || "#ffffff",
+                }}
+              >
+                {banner.optionalButtonText}
+              </HeroActionLink>
+            )}
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+}
 
 function Index() {
   const { categories } = useCategories();
@@ -140,6 +337,7 @@ function Index() {
   const [manualPaused, setManualPaused] = useState(false);
   const manualPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
 
   const pauseAfterManualInteraction = useCallback(() => {
     setManualPaused(true);
@@ -274,16 +472,8 @@ function Index() {
   }, [divisions, filteredCategories]);
 
   const currentHeroBanner = displayBanners[heroSlideIdx] ?? displayBanners[0];
-  const desktopHeroImg = currentHeroBanner
-    ? currentHeroBanner.desktopImageUrl || currentHeroBanner.mobileImageUrl
-    : "";
-  const mobileHeroImg = currentHeroBanner
-    ? currentHeroBanner.mobileImageUrl || currentHeroBanner.desktopImageUrl
-    : "";
-  const hasHeroImage = Boolean(
-    currentHeroBanner &&
-      currentHeroBanner.backgroundMode === "image" &&
-      (desktopHeroImg || mobileHeroImg)
+  const hasHeroControls = Boolean(
+    displayBanners.length > 1 && (carousel.showArrows || carousel.showDots)
   );
 
   const visibleQuickActions = useMemo(
@@ -341,7 +531,7 @@ function Index() {
         (heroLoading ? (
           <div
             aria-label="হিরো ব্যানার লোড হচ্ছে"
-            className="min-h-[224px] w-full animate-pulse rounded-[26px] border border-border/60 bg-muted/40 shadow-[0_18px_40px_-14px_rgba(7,54,34,0.18)] sm:min-h-[246px]"
+            className={`${HERO_STAGE_HEIGHT_CLASS} w-full animate-pulse rounded-[26px] border border-border/60 bg-muted/40 shadow-[0_18px_40px_-14px_rgba(7,54,34,0.18)]`}
           />
         ) : (
           currentHeroBanner && (
@@ -358,247 +548,52 @@ function Index() {
               onBlurCapture={() => setHeroPaused(false)}
               onTouchStart={(e) => {
                 touchStartX.current = e.touches[0]?.clientX ?? null;
+                touchStartY.current = e.touches[0]?.clientY ?? null;
               }}
               onTouchEnd={(e) => {
                 if (touchStartX.current === null || displayBanners.length <= 1) return;
                 const endX = e.changedTouches[0]?.clientX ?? touchStartX.current;
-                const delta = endX - touchStartX.current;
+                const endY = e.changedTouches[0]?.clientY ?? (touchStartY.current ?? 0);
+                const deltaX = endX - touchStartX.current;
+                const deltaY = endY - (touchStartY.current ?? endY);
                 touchStartX.current = null;
-                if (Math.abs(delta) > 40) {
-                  if (delta < 0) goToNextSlide(true);
+                touchStartY.current = null;
+                if (Math.abs(deltaX) > 40 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+                  if (deltaX < 0) goToNextSlide(true);
                   else goToPrevSlide();
                 }
               }}
-              className={`relative overflow-hidden border border-emerald-300/20 shadow-[0_18px_40px_-14px_rgba(7,54,34,0.45)] ${
+              className={`relative overflow-hidden border border-emerald-300/20 bg-[#073622] shadow-[0_18px_40px_-14px_rgba(7,54,34,0.45)] ${
                 currentHeroBanner.borderRadius || "rounded-[26px]"
               }`}
             >
-              <div className="relative grid overflow-hidden">
+              <div className={`relative w-full overflow-hidden ${HERO_STAGE_HEIGHT_CLASS}`}>
                 <AnimatePresence initial={false} custom={slideDirection}>
-                  <motion.div
-                    key={heroSlideIdx}
-                    custom={slideDirection}
-                    variants={HERO_SLIDE_VARIANTS}
-                    initial="enter"
-                    animate="center"
-                    exit="exit"
-                    transition={{
-                      x: { duration: 0.42, ease: [0.22, 1, 0.36, 1] },
-                    }}
-                    className={`col-start-1 row-start-1 relative h-full w-full overflow-hidden p-5 sm:p-7 ${
-                      displayBanners.length > 1
-                        ? carousel.showArrows && carousel.showDots
-                          ? "pb-[88px] sm:pb-12"
-                          : carousel.showArrows
-                          ? "pb-14 sm:pb-7"
-                          : carousel.showDots
-                          ? "pb-14 sm:pb-12"
-                          : ""
-                        : ""
-                    }`}
-                    style={{
-                      background:
-                        currentHeroBanner.backgroundMode === "image"
-                          ? "#111827"
-                          : currentHeroBanner.backgroundMode === "solid"
-                          ? currentHeroBanner.solidColor
-                          : `linear-gradient(135deg, ${currentHeroBanner.gradientFrom} 0%, ${currentHeroBanner.gradientVia} 50%, ${currentHeroBanner.gradientTo} 100%)`,
-                      color:
-                        currentHeroBanner.headingColor || currentHeroBanner.textColor || "#ffffff",
-                    }}
-                  >
-                    {hasHeroImage && (
-                      <>
-                        {mobileHeroImg && (
-                          <img
-                            src={mobileHeroImg}
-                            alt={currentHeroBanner.headingLine1 || "Smart Noakhali"}
-                            loading="eager"
-                            decoding="sync"
-                            className="pointer-events-none absolute inset-0 h-full w-full object-cover md:hidden"
-                            style={{
-                              objectPosition:
-                                currentHeroBanner.imagePositionMobile || "center center",
-                            }}
-                          />
-                        )}
-                        {desktopHeroImg && (
-                          <img
-                            src={desktopHeroImg}
-                            alt={currentHeroBanner.headingLine1 || "Smart Noakhali"}
-                            loading="eager"
-                            decoding="sync"
-                            className="pointer-events-none absolute inset-0 hidden h-full w-full object-cover md:block"
-                            style={{
-                              objectPosition:
-                                currentHeroBanner.imagePositionDesktop || "center center",
-                            }}
-                          />
-                        )}
-                        <div
-                          aria-hidden="true"
-                          className="pointer-events-none absolute inset-0"
-                          style={{
-                            backgroundColor: currentHeroBanner.overlayColor || "#042316",
-                            opacity:
-                              Math.min(90, Math.max(0, currentHeroBanner.overlayOpacity ?? 55)) /
-                              100,
-                          }}
-                        />
-                      </>
-                    )}
-
-                    {currentHeroBanner.showDecorativeGlow !== false && (
-                      <>
-                        <div className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-amber-300/20 blur-3xl" />
-                        <div className="pointer-events-none absolute -bottom-14 -left-10 h-44 w-44 rounded-full bg-emerald-300/20 blur-3xl" />
-                        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-                      </>
-                    )}
-
-                    <div
-                      className={`relative z-10 ${
-                        currentHeroBanner.textAlign === "left"
-                          ? "text-left"
-                          : currentHeroBanner.textAlign === "right"
-                          ? "text-right"
-                          : "text-left sm:text-left"
-                      }`}
-                    >
-                      {currentHeroBanner.badgeText.trim() && (
-                        <span
-                          className="inline-flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1 text-[11px] font-semibold tracking-wide backdrop-blur-sm"
-                          style={{
-                            color: currentHeroBanner.badgeColor || "#ffffff",
-                            backgroundColor:
-                              currentHeroBanner.badgeBgColor || "rgba(255,255,255,0.14)",
-                          }}
-                        >
-                          <Droplet className="h-3 w-3 text-amber-300" />{" "}
-                          {currentHeroBanner.badgeText}
-                        </span>
-                      )}
-
-                      <h1
-                        className="mt-3.5 font-bangla text-[24px] font-extrabold leading-[1.24] tracking-tight drop-shadow-xs sm:text-[32px]"
-                        style={{
-                          color:
-                            currentHeroBanner.headingColor ||
-                            currentHeroBanner.textColor ||
-                            "#ffffff",
-                        }}
-                      >
-                        {currentHeroBanner.headingLine1}
-                        {currentHeroBanner.headingLine2 && (
-                          <>
-                            <br />
-                            {currentHeroBanner.headingLine2}
-                          </>
-                        )}
-                      </h1>
-
-                      {currentHeroBanner.description.trim() && (
-                        <p
-                          className={`mt-2.5 max-w-xl text-[12.5px] leading-relaxed sm:text-sm ${
-                            currentHeroBanner.textAlign === "center" ? "mx-auto sm:mx-0" : ""
-                          }`}
-                          style={{
-                            color:
-                              currentHeroBanner.descriptionColor ||
-                              currentHeroBanner.subtextColor ||
-                              "#ecfdf5",
-                            opacity: 0.94,
-                          }}
-                        >
-                          {currentHeroBanner.description}
-                        </p>
-                      )}
-
-                      {(currentHeroBanner.primaryButtonText.trim() ||
-                        currentHeroBanner.secondaryButtonText.trim() ||
-                        currentHeroBanner.optionalButtonText?.trim()) && (
-                        <div
-                          className={`mt-5 flex flex-wrap items-center gap-2.5 ${
-                            currentHeroBanner.textAlign === "right"
-                              ? "justify-end"
-                              : "justify-start"
-                          }`}
-                        >
-                          {currentHeroBanner.primaryButtonText.trim() && (
-                            <HeroActionLink
-                              href={currentHeroBanner.primaryButtonLink || "tel:999"}
-                              className="inline-flex min-h-[40px] items-center gap-2 rounded-full px-5 py-2.5 text-xs font-extrabold shadow-md transition hover:brightness-105 active:scale-95 sm:text-[13px]"
-                              style={{
-                                backgroundColor:
-                                  currentHeroBanner.primaryButtonBgColor || "#dc2626",
-                                color: currentHeroBanner.primaryButtonColor || "#ffffff",
-                              }}
-                            >
-                              <Phone className="h-3.5 w-3.5" />{" "}
-                              {currentHeroBanner.primaryButtonText}
-                            </HeroActionLink>
-                          )}
-                          {currentHeroBanner.secondaryButtonText.trim() && (
-                            <HeroActionLink
-                              href={currentHeroBanner.secondaryButtonLink || "/submit-info"}
-                              className="inline-flex min-h-[40px] items-center gap-2 rounded-full border border-white/25 px-4.5 py-2.5 text-xs font-bold shadow-xs backdrop-blur-sm transition hover:brightness-95 active:scale-95 sm:text-[13px]"
-                              style={{
-                                backgroundColor:
-                                  currentHeroBanner.secondaryButtonBgColor || "#ffffff",
-                                color: currentHeroBanner.secondaryButtonColor || "#064e3b",
-                              }}
-                            >
-                              <Send className="h-3.5 w-3.5" />{" "}
-                              {currentHeroBanner.secondaryButtonText}
-                            </HeroActionLink>
-                          )}
-                          {currentHeroBanner.optionalButtonText?.trim() && (
-                            <HeroActionLink
-                              href={currentHeroBanner.optionalButtonLink || "/directory"}
-                              className="inline-flex min-h-[40px] items-center gap-2 rounded-full border border-white/25 px-4 py-2.5 text-xs font-bold backdrop-blur-sm transition hover:brightness-110 active:scale-95 sm:text-[13px]"
-                              style={{
-                                backgroundColor:
-                                  currentHeroBanner.optionalButtonBgColor ||
-                                  "rgba(255,255,255,0.16)",
-                                color: currentHeroBanner.optionalButtonColor || "#ffffff",
-                              }}
-                            >
-                              {currentHeroBanner.optionalButtonText}
-                            </HeroActionLink>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
+                  <HeroBannerSlide
+                    key={`${currentHeroBanner.id}_${heroSlideIdx}`}
+                    banner={currentHeroBanner}
+                    slideDirection={slideDirection}
+                    hasControls={hasHeroControls}
+                  />
                 </AnimatePresence>
               </div>
 
-              {/* Sequential Carousel Controls (kept stationary outside slide transition) */}
-              {displayBanners.length > 1 && (carousel.showArrows || carousel.showDots) && (
-                <div className="pointer-events-none absolute inset-x-5 bottom-4 z-20 flex flex-col gap-3.5 sm:inset-0 sm:block">
+              {/* Sequential Carousel Controls (stationary outside slide transition) */}
+              {hasHeroControls && (
+                <div className="pointer-events-none absolute inset-x-4 bottom-3 z-20 flex items-center justify-between gap-2 sm:inset-0 sm:block">
                   {carousel.showArrows && (
-                    <div className="flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        aria-label="পূর্ববর্তী ব্যানার"
-                        onClick={goToPrevSlide}
-                        className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-white/25 bg-black/25 text-white backdrop-blur-sm transition hover:bg-black/45 active:scale-95 sm:absolute sm:right-12 sm:top-4"
-                      >
-                        <ChevronLeft className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        aria-label="পরবর্তী ব্যানার"
-                        onClick={() => goToNextSlide(true)}
-                        className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-white/25 bg-black/25 text-white backdrop-blur-sm transition hover:bg-black/45 active:scale-95 sm:absolute sm:right-3 sm:top-4"
-                      >
-                        <ChevronRight className="h-4 w-4" />
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      aria-label="পূর্ববর্তী ব্যানার"
+                      onClick={goToPrevSlide}
+                      className="pointer-events-auto order-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/25 bg-black/25 text-white backdrop-blur-sm transition hover:bg-black/45 active:scale-95 sm:absolute sm:right-12 sm:top-4"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
                   )}
 
                   {carousel.showDots && (
-                    <div className="pointer-events-auto flex items-center justify-center gap-1.5 sm:absolute sm:inset-x-0 sm:bottom-5">
+                    <div className="pointer-events-auto order-2 flex flex-1 items-center justify-center gap-1.5 sm:absolute sm:inset-x-0 sm:bottom-4">
                       {displayBanners.map((bItem, i) => (
                         <button
                           key={bItem.id}
@@ -612,6 +607,17 @@ function Index() {
                         />
                       ))}
                     </div>
+                  )}
+
+                  {carousel.showArrows && (
+                    <button
+                      type="button"
+                      aria-label="পরবর্তী ব্যানার"
+                      onClick={() => goToNextSlide(true)}
+                      className="pointer-events-auto order-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/25 bg-black/25 text-white backdrop-blur-sm transition hover:bg-black/45 active:scale-95 sm:absolute sm:right-3 sm:top-4"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
                   )}
                 </div>
               )}
