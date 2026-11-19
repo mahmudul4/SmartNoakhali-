@@ -138,3 +138,7 @@
 17. **Owner-Scoped Device Push Tokens (`/users/{userId}/device_tokens/{tokenId}`) & Preferences (`/users/{userId}/notification_preferences/{prefId}`)**:
     Strictly readable/writable only by `isOwner(userId)` (or `isMainAdmin()` for diagnostics/preferences), preventing cross-user push endpoint harvesting or token hijacking, and cleaned up on `signOut`.
 
+18. **Multi-Operator Live Chat Visibility & Suspended Staff Blocking (`/chat_threads/{threadId}` & `/messages/{messageId}`)**:
+    Authorized Admins, Moderators, Editors, and Custom Role operators query threads/messages strictly via `where("staff_uids", "array-contains", request.auth.uid)` (avoiding `get()`/`exists()` inside `allow list`), while single-document `get`/`create`/`update` gates reject suspended accounts via `isNonSuspendedStaffDoc(...)`. Customers query strictly by `user_id` / `customer_uid` / `thread_id`.
+
+

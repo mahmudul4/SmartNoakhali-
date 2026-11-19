@@ -44,23 +44,39 @@ service cloud.firestore {
         );
     }
 
-    // Ordinary / Secondary Admin (mr.bear444plus@gmail.com - requires verified email; never gains Main Admin privileges)
+    // Ordinary / Secondary Admin (mr.bear444plus@gmail.com - requires verified email or password sign-in; never gains Main Admin privileges)
     function isBootstrappedOrdinaryAdmin() {
-      return isVerifiedUser() &&
+      return isSignedIn() &&
         request.auth.token.email != null &&
-        request.auth.token.email.lower() == "mr.bear444plus@gmail.com";
+        request.auth.token.email.lower() == "mr.bear444plus@gmail.com" &&
+        (
+          request.auth.token.email_verified == true ||
+          request.auth.token.firebase.sign_in_provider == 'password'
+        );
     }
 
-    // Staff / Editor Check (non-Main Admin staff for content moderation only)
+    function isNonSuspendedStaffDoc(userDoc) {
+      return (!('suspended' in userDoc) || userDoc.suspended != true) && (
+        ('roles' in userDoc && userDoc.roles is list && (
+          'admin' in userDoc.roles ||
+          'editor' in userDoc.roles ||
+          'moderator' in userDoc.roles
+        )) ||
+        ('custom_role_id' in userDoc && userDoc.custom_role_id is string && userDoc.custom_role_id.size() > 0)
+      );
+    }
+
+    // Staff / Editor / Custom-Role Operator Check (NOTE: uses get/exists, so NEVER call inside allow list)
     function isEditor() {
       return isMainAdmin() ||
         isBootstrappedOrdinaryAdmin() || (
-          isVerifiedUser() &&
-          exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
-            'admin' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles ||
-            'editor' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles ||
-            'moderator' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles
-          )
+          isSignedIn() &&
+          (
+            request.auth.token.email_verified == true ||
+            request.auth.token.firebase.sign_in_provider == 'password'
+          ) &&
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          isNonSuspendedStaffDoc(get(/databases/$(database)/documents/users/$(request.auth.uid)).data)
         );
     }
 
@@ -549,25 +565,62 @@ service cloud.firestore {
     // 14. /chat_threads/{threadId} & Subcollection /messages
     // =========================================================
     match /chat_threads/{threadId} {
-      allow get: if isValidId(threadId) && ((resource == null && isSignedIn()) || (isSignedIn() && existing().user_id == request.auth.uid) || isEditor());
-      allow list: if (isSignedIn() && existing().user_id == request.auth.uid) || isMainAdmin() || isBootstrappedOrdinaryAdmin();
-      allow create: if isValidId(threadId) && isSignedIn() && incoming().user_id == request.auth.uid;
-      allow update: if isValidId(threadId) && ((isSignedIn() && existing().user_id == request.auth.uid) || isEditor());
+      allow get: if isValidId(threadId) && (
+        (resource == null && isSignedIn()) ||
+        (isSignedIn() && (existing().user_id == request.auth.uid || ('customer_uid' in existing() && existing().customer_uid == request.auth.uid))) ||
+        (isSignedIn() && 'staff_uids' in existing() && existing().staff_uids is list && request.auth.uid in existing().staff_uids) ||
+        (isSignedIn() && 'assigned_to_uid' in existing() && existing().assigned_to_uid == request.auth.uid) ||
+        isEditor()
+      );
+      allow list: if isMainAdmin() ||
+        isBootstrappedOrdinaryAdmin() ||
+        (isSignedIn() && existing().user_id == request.auth.uid) ||
+        (isSignedIn() && 'customer_uid' in existing() && existing().customer_uid == request.auth.uid) ||
+        (isSignedIn() && 'staff_uids' in existing() && existing().staff_uids is list && request.auth.uid in existing().staff_uids) ||
+        (isSignedIn() && 'assigned_to_uid' in existing() && existing().assigned_to_uid == request.auth.uid);
+      allow create: if isValidId(threadId) && isSignedIn() &&
+        incoming().user_id is string && (
+          incoming().user_id == request.auth.uid ||
+          ('customer_uid' in incoming() && incoming().customer_uid == request.auth.uid) ||
+          isEditor()
+        ) &&
+        (!('staff_uids' in incoming()) || (incoming().staff_uids is list && incoming().staff_uids.size() <= 50));
+      allow update: if isValidId(threadId) && isSignedIn() && (
+        (
+          (existing().user_id == request.auth.uid || ('customer_uid' in existing() && existing().customer_uid == request.auth.uid)) &&
+          incoming().user_id == existing().user_id
+        ) ||
+        ('staff_uids' in existing() && existing().staff_uids is list && request.auth.uid in existing().staff_uids) ||
+        ('assigned_to_uid' in existing() && existing().assigned_to_uid == request.auth.uid) ||
+        isEditor()
+      );
       allow delete: if isValidId(threadId) && isMainAdmin();
 
       match /messages/{messageId} {
         allow get: if isValidId(threadId) && isValidId(messageId) && (
-          (isSignedIn() && get(/databases/$(database)/documents/chat_threads/$(threadId)).data.user_id == request.auth.uid) ||
+          (isSignedIn() && (
+            get(/databases/$(database)/documents/chat_threads/$(threadId)).data.user_id == request.auth.uid ||
+            ('customer_uid' in get(/databases/$(database)/documents/chat_threads/$(threadId)).data && get(/databases/$(database)/documents/chat_threads/$(threadId)).data.customer_uid == request.auth.uid)
+          )) ||
+          (isSignedIn() && 'staff_uids' in get(/databases/$(database)/documents/chat_threads/$(threadId)).data && get(/databases/$(database)/documents/chat_threads/$(threadId)).data.staff_uids is list && request.auth.uid in get(/databases/$(database)/documents/chat_threads/$(threadId)).data.staff_uids) ||
           isEditor()
         );
-        allow list: if (isSignedIn() && existing().thread_id == request.auth.uid) || isMainAdmin() || isBootstrappedOrdinaryAdmin();
+        allow list: if isMainAdmin() ||
+          isBootstrappedOrdinaryAdmin() ||
+          (isSignedIn() && existing().thread_id == request.auth.uid) ||
+          (isSignedIn() && 'customer_uid' in existing() && existing().customer_uid == request.auth.uid) ||
+          (isSignedIn() && 'staff_uids' in existing() && existing().staff_uids is list && request.auth.uid in existing().staff_uids);
         allow create: if isValidId(threadId) && isValidId(messageId) && isSignedIn() &&
           incoming().thread_id == threadId &&
           incoming().sender_id == request.auth.uid && (
             get(/databases/$(database)/documents/chat_threads/$(threadId)).data.user_id == request.auth.uid ||
+            ('customer_uid' in get(/databases/$(database)/documents/chat_threads/$(threadId)).data && get(/databases/$(database)/documents/chat_threads/$(threadId)).data.customer_uid == request.auth.uid) ||
+            ('staff_uids' in get(/databases/$(database)/documents/chat_threads/$(threadId)).data && get(/databases/$(database)/documents/chat_threads/$(threadId)).data.staff_uids is list && request.auth.uid in get(/databases/$(database)/documents/chat_threads/$(threadId)).data.staff_uids) ||
             isEditor()
           );
-        allow update: if false;
+        allow update: if isValidId(threadId) && isValidId(messageId) && isMainAdmin() &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['staff_uids']) &&
+          incoming().staff_uids is list && incoming().staff_uids.size() <= 50;
         allow delete: if isValidId(threadId) && isValidId(messageId) && isMainAdmin();
       }
     }

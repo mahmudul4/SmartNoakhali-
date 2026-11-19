@@ -459,6 +459,31 @@ export function HeroBannerManager() {
       toast.error("হিরো ব্যানারের শিরোনাম সম্পূর্ণ ফাঁকা রাখা যাবে না।");
       return;
     }
+    if (
+      draft.desktopImageUrl.trim().startsWith("data:") ||
+      draft.mobileImageUrl.trim().startsWith("data:")
+    ) {
+      toast.error("ব্যানারে সরাসরি Base64 ছবি সংরক্ষণ করা যাবে না। অনুগ্রহ করে ছবি আপলোড বাটন ব্যবহার করুন।");
+      return;
+    }
+    const bgHex =
+      draft.backgroundMode === "solid"
+        ? draft.solidColor
+        : draft.backgroundMode === "image"
+        ? draft.overlayColor
+        : draft.gradientFrom;
+    const contrastChecks: Array<{ label: string; ratio: number | null }> = [
+      { label: "শিরোনাম ও ব্যাকগ্রাউন্ড", ratio: getContrastRatio(draft.headingColor || draft.textColor, bgHex) },
+      { label: "প্রাইমারি বাটন", ratio: getContrastRatio(draft.primaryButtonColor, draft.primaryButtonBgColor) },
+      { label: "সেকেন্ডারি বাটন", ratio: getContrastRatio(draft.secondaryButtonColor, draft.secondaryButtonBgColor) },
+    ];
+    const blockingContrast = contrastChecks.find((c) => c.ratio !== null && c.ratio < 2.2);
+    if (blockingContrast) {
+      toast.error(
+        `"${blockingContrast.label}" এর লেখা ও ব্যাকগ্রাউন্ডের রঙ প্রায় এক হওয়ায় পড়া যাচ্ছে না (${blockingContrast.ratio?.toFixed(1)}:1)। অনুগ্রহ করে ভিন্ন রঙ বেছে নিন।`
+      );
+      return;
+    }
     setSaving(true);
     try {
       if (selectedSaved.desktopImageUrl && selectedSaved.desktopImageUrl !== draft.desktopImageUrl) {

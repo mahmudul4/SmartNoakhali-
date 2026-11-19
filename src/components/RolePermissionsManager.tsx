@@ -365,10 +365,11 @@ export function RolePermissionsManager() {
     setUpdatingUserId(staff.id);
     try {
       await setUserCustomRole({
-        user_id: staff.id,
-        email: staff.email,
-        custom_role_id: targetCustom ? targetCustom.id : null,
-        custom_role_name: targetCustom ? targetCustom.name : null,
+        data: {
+          user_id: staff.id,
+          custom_role_id: targetCustom ? targetCustom.id : null,
+          custom_role_name: targetCustom ? targetCustom.name : null,
+        },
       });
       void recordSuperAdminAudit({
         action: "role_change",

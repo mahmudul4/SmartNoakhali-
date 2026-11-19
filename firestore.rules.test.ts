@@ -26,5 +26,7 @@ export const DIRTY_DOZEN_CASES: DirtyDozenCase[] = [
   { id: 12, name: "Oversized string / ID poisoning attack", collection: "blood_donors", operation: "create", expected: "PERMISSION_DENIED" },
   { id: 13, name: "Global notification mutation or unprivileged broadcast creation", collection: "user_notifications", operation: "create", expected: "PERMISSION_DENIED" },
   { id: 14, name: "Ordinary Admin tampering protected hero_banner_config", collection: "settings", operation: "update", expected: "PERMISSION_DENIED" },
+  { id: 15, name: "Suspended staff account accessing Live Chat thread", collection: "chat_threads", operation: "update", expected: "PERMISSION_DENIED" },
+  { id: 16, name: "Unprivileged user unfiltered listing of all chat_threads", collection: "chat_threads", operation: "list", expected: "PERMISSION_DENIED" },
 ];
 

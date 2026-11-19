@@ -27,6 +27,7 @@ import {
   isChatThreadDeleted,
   mergeServerChatDeletions,
   syncChatDeletionsFromFirestore,
+  backfillChatThreadsStaffUids,
 } from "@/lib/cloud";
 import { recordStaffActivity } from "@/lib/staff-audit";
 
@@ -638,6 +639,7 @@ export async function syncChatOperatorUidsSetting(): Promise<string[]> {
         },
         { merge: true }
       );
+      void backfillChatThreadsStaffUids(uids);
     } catch {
       // non-fatal
     }
@@ -1208,6 +1210,16 @@ export async function setUserRole(opts?: {
           await deleteDoc(adminRef).catch(() => {});
         }
       }
+      await syncChatOperatorUidsSetting();
+      void recordStaffActivity({
+        action_type: "user",
+        action_label: `ইউজারের রোল ${d.enable ? "যুক্ত" : "বাতিল"} করেছে (${d.role})`,
+        module: "users",
+        module_label: "ইউজার ম্যানেজমেন্ট",
+        target_id: d.user_id,
+        target_title: String(snap.data().email || vMeta?.email || d.user_id),
+        target_detail: `বর্তমান রোলসমূহ: ${finalDocRoles.join(", ")}`,
+      });
       return { ok: true };
     }
   }
@@ -1218,7 +1230,7 @@ export async function setUserRole(opts?: {
     roles: nextRoles,
   });
 
-  void syncChatOperatorUidsSetting();
+  await syncChatOperatorUidsSetting();
 
   void recordStaffActivity({
     action_type: "user",

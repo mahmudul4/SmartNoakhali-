@@ -81,9 +81,12 @@ function HeroActionLink({
   children: React.ReactNode;
 }) {
   const cleanHref = (href || "").trim();
-  if (cleanHref.startsWith("/")) {
+  const internalMatch = /^https?:\/\/(?:www\.)?smartnoakhali\.com(\/.*)?$/i.exec(cleanHref);
+  const spaPath = internalMatch ? internalMatch[1] || "/" : cleanHref;
+
+  if (spaPath.startsWith("/")) {
     return (
-      <Link to={cleanHref as "/"} className={className} style={style}>
+      <Link to={spaPath as "/"} className={className} style={style}>
         {children}
       </Link>
     );

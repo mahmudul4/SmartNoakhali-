@@ -306,6 +306,18 @@
           "maxLength": 300,
           "description": "Donor area or union."
         },
+        "upazila": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 80,
+          "description": "Parsed Noakhali upazila name."
+        },
+        "district": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 80,
+          "description": "Parsed district name."
+        },
         "age": {
           "type": "number",
           "description": "Donor age in years."
@@ -332,6 +344,16 @@
           "minLength": 7,
           "maxLength": 10,
           "description": "Moderation status."
+        },
+        "import_source": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 80,
+          "description": "Optional source dataset identifier for bulk-imported donors."
+        },
+        "source_row": {
+          "type": "number",
+          "description": "Original source row number when bulk-imported."
         },
         "createdAt": {
           "type": "string",
@@ -624,6 +646,13 @@
           "pattern": "^[a-zA-Z0-9_\\-]+$",
           "description": "Owner user UID."
         },
+        "customer_uid": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Active Firebase Auth UID of the customer/guest for rule-matched queries."
+        },
+        "user_name": { "type": "string", "maxLength": 150 },
+        "user_email": { "type": "string", "maxLength": 254 },
         "last_message_at": {
           "type": "string",
           "minLength": 1,
@@ -644,6 +673,23 @@
           "type": "number",
           "description": "Unread count for staff."
         },
+        "status": {
+          "type": "string",
+          "enum": ["new", "assigned", "in_progress", "waiting_customer", "resolved", "closed"],
+          "description": "Thread workflow status."
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["normal", "urgent", "high"],
+          "description": "Thread priority level."
+        },
+        "assigned_to_uid": { "type": "string", "maxLength": 128 },
+        "assigned_to_name": { "type": "string", "maxLength": 150 },
+        "assigned_role": { "type": "string", "maxLength": 120 },
+        "source": { "type": "string", "enum": ["direct", "ai_handoff"] },
+        "handoff_summary": { "type": "string", "maxLength": 1000 },
+        "staff_uids": { "type": "array" },
+        "reopened_at": { "type": "string", "maxLength": 64 },
         "createdAt": {
           "type": "string",
           "format": "date-time",
@@ -669,6 +715,11 @@
           "pattern": "^[a-zA-Z0-9_\\-]+$",
           "description": "Parent chat_threads document ID."
         },
+        "customer_uid": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Firebase Auth UID of the thread customer."
+        },
         "sender_id": {
           "type": "string",
           "minLength": 1,
@@ -683,6 +734,9 @@
           "maxLength": 5,
           "description": "Role of the sender."
         },
+        "sender_name": { "type": "string", "maxLength": 150 },
+        "sender_photo": { "type": "string", "maxLength": 500 },
+        "sender_role_label": { "type": "string", "maxLength": 120 },
         "body": {
           "type": "string",
           "minLength": 0,
@@ -695,6 +749,7 @@
           "maxLength": 300000,
           "description": "Optional image or audio attachment URL/data URL."
         },
+        "staff_uids": { "type": "array" },
         "createdAt": {
           "type": "string",
           "format": "date-time",

@@ -288,20 +288,27 @@ function ChatPage() {
         }),
       });
       const data = await resp.json().catch(() => ({}));
-      const replyText =
+      const baseText =
+        data.fallbackText ||
         data.text ||
         data.reply ||
         `স্মার্ট নোয়াখালী এআই সহকারী: আপনার অনুসন্ধানের জন্য নিচের জরুরি যোগাযোগ:\n• জাতীয় জরুরি সেবা: 📞 [999](tel:999)\n• নোয়াখালী জেনারেল হাসপাতাল: 📞 [01730-324794](tel:01730324794)\n• নোয়াখালী ফায়ার সার্ভিস: 📞 [01730-002444](tel:01730002444)\n• সুধারাম মডেল থানা: 📞 [01320-116035](tel:01320116035)\n\nসরাসরি সাপোর্টের সাথে কথা বলতে উপরের 'হিউম্যান সাপোর্ট' বাটনে ট্যাপ করুন।`;
+
+      const statusBanner = !resp.ok
+        ? resp.status === 429
+          ? "⚠️ **এআই সার্ভারে অতিরিক্ত চাপ (Rate Limit)** — তাৎক্ষণিক ডিরেক্টরি তথ্য দেখানো হচ্ছে:\n\n"
+          : "ℹ️ **তাৎক্ষণিক ডিরেক্টরি অনুসন্ধান মোড** (এআই মডেল সংযোগ অনুপলব্ধ):\n\n"
+        : "";
 
       setAiMessages((prev) => [
         ...prev,
         {
           id: `a_${Date.now()}`,
           role: "assistant",
-          text: replyText,
+          text: `${statusBanner}${baseText}`,
           created_at: new Date().toISOString(),
           matches: data.matches,
-          suggestHandoff: Boolean(data.suggestHandoff || aiConfig.autoSuggestHandoff),
+          suggestHandoff: Boolean(!resp.ok || data.suggestHandoff || aiConfig.autoSuggestHandoff),
         },
       ]);
       if (soundEnabled) playChatChime("receive");

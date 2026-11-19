@@ -18,6 +18,7 @@ const AUTH_USERS_PATH = path.join(DATA_DIR, "verified_users_store.json");
 const DELETED_USERS_PATH = path.join(DATA_DIR, "deleted_users.json");
 const OTP_SESSIONS_PATH = path.join(DATA_DIR, "otp_sessions.json");
 const OTP_CONFIG_PATH = path.join(DATA_DIR, "otp_gateway_config.json");
+const CHAT_OPERATORS_PATH = path.join(DATA_DIR, "chat_operators.json");
 
 if (!fs.existsSync(DOWNLOADS_DIR)) {
   fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
@@ -163,11 +164,59 @@ interface VerifiedUserRecord {
   verified_via: "email" | "phone" | "google";
   is_verified: boolean;
   roles: string[];
+  custom_role_id?: string | null;
+  custom_role_name?: string | null;
   photo_url?: string;
   designation?: string;
   suspended?: boolean;
   created_at: string;
   updated_at: string;
+}
+
+function readChatOperatorUids(): string[] {
+  const uids = new Set<string>(["super_admin_mahmudul"]);
+  try {
+    if (fs.existsSync(CHAT_OPERATORS_PATH)) {
+      const parsed = JSON.parse(fs.readFileSync(CHAT_OPERATORS_PATH, "utf-8"));
+      if (Array.isArray(parsed)) {
+        for (const u of parsed) {
+          if (typeof u === "string" && u.trim()) uids.add(u.trim());
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  const store = readVerifiedUsers();
+  const deletedSet = new Set(readDeletedUsers().map((x) => x.toLowerCase()));
+  for (const u of Object.values(store)) {
+    if (!u || u.suspended) continue;
+    const emLow = (u.email || "").toLowerCase();
+    const uidLow = (u.uid || "").toLowerCase();
+    if (deletedSet.has(emLow) || deletedSet.has(uidLow)) continue;
+    const roles = Array.isArray(u.roles) ? u.roles : [];
+    if (
+      roles.includes("admin") ||
+      roles.includes("editor") ||
+      roles.includes("moderator") ||
+      Boolean(u.custom_role_id)
+    ) {
+      if (u.uid) uids.add(u.uid);
+    }
+  }
+  return Array.from(uids).slice(0, 50);
+}
+
+function writeChatOperatorUids(uids: string[]) {
+  try {
+    const clean = Array.from(
+      new Set(["super_admin_mahmudul", ...uids.map((u) => String(u || "").trim()).filter(Boolean)])
+    ).slice(0, 50);
+    fs.writeFileSync(CHAT_OPERATORS_PATH, JSON.stringify(clean, null, 2), "utf-8");
+    return clean;
+  } catch {
+    return ["super_admin_mahmudul"];
+  }
 }
 
 function hashPassword(password: string): string {
@@ -1021,6 +1070,10 @@ async function startServer() {
         verified_via: body.verified_via || existing?.verified_via || "email",
         is_verified: body.is_verified ?? existing?.is_verified ?? true,
         roles: Array.isArray(body.roles) && body.roles.length > 0 ? body.roles : existing?.roles || ["user"],
+        custom_role_id:
+          body.custom_role_id !== undefined ? body.custom_role_id : existing?.custom_role_id ?? null,
+        custom_role_name:
+          body.custom_role_name !== undefined ? body.custom_role_name : existing?.custom_role_name ?? null,
         photo_url: body.photo_url !== undefined ? body.photo_url : existing?.photo_url,
         designation: body.designation !== undefined ? body.designation : existing?.designation,
         suspended: body.suspended !== undefined ? body.suspended : existing?.suspended ?? false,
@@ -1404,6 +1457,7 @@ async function startServer() {
 
       const mergedStaffUids = Array.from(
         new Set([
+          ...readChatOperatorUids(),
           ...(Array.isArray(existingThread?.staff_uids) ? existingThread.staff_uids : []),
           ...(Array.isArray(staff_uids) ? staff_uids : []),
           ...(assigned_to_uid ? [assigned_to_uid] : []),
@@ -1644,11 +1698,20 @@ async function startServer() {
           roles.includes("admin") ||
           roles.includes("editor") ||
           roles.includes("moderator") ||
-          Boolean((u as VerifiedUserRecord & { custom_role_id?: string }).custom_role_id)
+          Boolean(u.custom_role_id)
         );
       })
       .map((u) => stripSensitiveUserFields(u));
-    res.json({ ok: true, operators });
+    const uids = readChatOperatorUids();
+    res.json({ ok: true, uids, operators });
+  });
+
+  app.post("/api/chat/operators", (req, res) => {
+    const incoming = Array.isArray((req.body as { uids?: unknown })?.uids)
+      ? ((req.body as { uids: unknown[] }).uids.filter((x): x is string => typeof x === "string"))
+      : [];
+    const uids = writeChatOperatorUids(incoming);
+    res.json({ ok: true, uids });
   });
 
   // ============================================================================
@@ -2660,8 +2723,12 @@ async function startServer() {
       const apiKey = process.env.GEMINI_API_KEY;
       let replyText = "";
       let aiErrorStatus: string | null = null;
+      let upstreamHttpStatus = 502;
 
-      if (apiKey) {
+      if (!apiKey) {
+        aiErrorStatus = "GEMINI_API_KEY কনফিগার করা নেই";
+        upstreamHttpStatus = 503;
+      } else {
         try {
           const ai = new GoogleGenAI({
             apiKey,
@@ -2732,8 +2799,14 @@ ${contextSummary}`;
             },
           });
           replyText = (response.text || "").trim();
-        } catch (aiErr) {
-          aiErrorStatus = aiErr instanceof Error ? aiErr.message : "Gemini request failed";
+          if (!replyText) {
+            aiErrorStatus = "Gemini API খালি উত্তর পাঠিয়েছে";
+            upstreamHttpStatus = 502;
+          }
+        } catch (aiErr: unknown) {
+          const msg = aiErr instanceof Error ? aiErr.message : "Gemini request failed";
+          aiErrorStatus = msg;
+          upstreamHttpStatus = /(429|quota|rate.?limit|resource.?exhausted)/i.test(msg) ? 429 : 502;
           console.warn("Gemini API error:", aiErrorStatus);
         }
       }
@@ -2756,7 +2829,7 @@ ${contextSummary}`;
         return;
       }
 
-      // Deterministic directory lookup response (used when GEMINI_API_KEY is unset or upstream fails)
+      // Deterministic directory lookup payload returned with non-200 HTTP status so upstream AI outages/missing keys are never masked as 200 OK
       const fallbackParts: string[] = [];
       if (matchedFaqs.length > 0) {
         matchedFaqs.forEach((f) => {
@@ -2796,9 +2869,11 @@ ${contextSummary}`;
       );
 
       const finalText = fallbackParts.join("\n");
-      res.json({
-        ok: true,
+      res.status(upstreamHttpStatus).json({
+        ok: false,
+        error: aiErrorStatus || "এআই সেবা সাময়িকভাবে অনুপলব্ধ — ভেরিফায়েড ডিরেক্টরি তথ্য দেখানো হচ্ছে।",
         mode: apiKey ? "upstream_fallback" : "directory_lookup",
+        fallbackText: finalText,
         text: finalText,
         reply: finalText,
         suggestHandoff: true,

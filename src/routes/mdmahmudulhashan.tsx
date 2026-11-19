@@ -156,6 +156,7 @@ import { TaskManager } from "@/components/TaskManager";
 import { MediaLibraryManager, MediaPickerModal } from "@/components/MediaLibraryManager";
 import { DivisionAndCategoryTools } from "@/components/DivisionAndCategoryTools";
 import { HomepageContentManager } from "@/components/HomepageContentManager";
+import { DonorImportModal } from "@/components/DonorImportModal";
 import {
   InstitutionsAdminPanel,
   JobsAdminPanel,
@@ -5468,6 +5469,7 @@ function DonorsAdminPanel({ donors }: { donors: ReturnType<typeof useCloudDonors
   const [busy, setBusy] = useState(false);
   const [approvingAll, setApprovingAll] = useState(false);
   const [uploadingDonorPhoto, setUploadingDonorPhoto] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
   const [bloodFilter, setBloodFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -5528,6 +5530,7 @@ function DonorsAdminPanel({ donors }: { donors: ReturnType<typeof useCloudDonors
       phone: editing.phone,
       blood_group: editing.blood_group,
       address: editing.address,
+      age: editing.age != null ? Number(editing.age) : undefined,
       total_donations: Number(editing.total_donations) || 0,
       last_donation_date: editing.last_donation_date,
       photo_url: editing.photo_url || "",
@@ -5545,21 +5548,31 @@ function DonorsAdminPanel({ donors }: { donors: ReturnType<typeof useCloudDonors
           <p className="font-display text-sm font-bold text-primary-deep">
             রক্তদাতা পরিচালনা ({filtered.length} জন)
           </p>
-          {pendingItems.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              disabled={approvingAll}
-              onClick={() => void handleApproveAllPending()}
-              className="flex items-center gap-1 rounded-full bg-emerald-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
+              onClick={() => setImportModalOpen(true)}
+              className="flex items-center gap-1.5 rounded-full bg-rose-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-rose-700"
             >
-              {approvingAll ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <CheckCircle2 className="h-3.5 w-3.5" />
-              )}
-              সব অপেক্ষমাণ অনুমোদন ({pendingItems.length})
+              <Upload className="h-3.5 w-3.5" />
+              বাল্ক ইম্পোর্ট (Pasted text)
             </button>
-          )}
+            {pendingItems.length > 0 && (
+              <button
+                type="button"
+                disabled={approvingAll}
+                onClick={() => void handleApproveAllPending()}
+                className="flex items-center gap-1 rounded-full bg-emerald-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
+              >
+                {approvingAll ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                )}
+                সব অপেক্ষমাণ অনুমোদন ({pendingItems.length})
+              </button>
+            )}
+          </div>
         </div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           <select
@@ -5626,7 +5639,7 @@ function DonorsAdminPanel({ donors }: { donors: ReturnType<typeof useCloudDonors
                   </span>
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {d.phone} • মোট দান: {d.total_donations}
+                  {d.phone} • বয়স: {d.age ?? "—"} • মোট দান: {d.total_donations} • শেষ দান: {d.last_donation_date || "—"}
                 </p>
                 {d.address && <p className="text-xs text-muted-foreground">{d.address}</p>}
               </div>
@@ -5740,15 +5753,48 @@ function DonorsAdminPanel({ donors }: { donors: ReturnType<typeof useCloudDonors
               placeholder="ঠিকানা"
               className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
             />
-            <input
-              type="number"
-              value={editing.total_donations}
-              onChange={(e) =>
-                setEditing({ ...editing, total_donations: Number(e.target.value) })
-              }
-              placeholder="মোট রক্তদান সংখ্যা"
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
-            />
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block">
+                <span className="mb-1 block text-[11px] font-semibold text-muted-foreground">বয়স</span>
+                <input
+                  type="number"
+                  min={16}
+                  max={100}
+                  value={editing.age ?? ""}
+                  onChange={(e) =>
+                    setEditing({
+                      ...editing,
+                      age: e.target.value === "" ? null : Number(e.target.value),
+                    })
+                  }
+                  placeholder="বয়স"
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-[11px] font-semibold text-muted-foreground">মোট রক্তদান</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={500}
+                  value={editing.total_donations}
+                  onChange={(e) =>
+                    setEditing({ ...editing, total_donations: Number(e.target.value) })
+                  }
+                  placeholder="মোট রক্তদান সংখ্যা"
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+                />
+              </label>
+            </div>
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-semibold text-muted-foreground">শেষ রক্তদানের তারিখ</span>
+              <input
+                type="date"
+                value={editing.last_donation_date ?? ""}
+                onChange={(e) => setEditing({ ...editing, last_donation_date: e.target.value })}
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              />
+            </label>
             <div className="flex gap-2">
               <button
                 type="button"
@@ -5769,6 +5815,12 @@ function DonorsAdminPanel({ donors }: { donors: ReturnType<typeof useCloudDonors
           </div>
         </div>
       )}
+
+      <DonorImportModal
+        open={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        existingDonors={donors.items}
+      />
     </div>
   );
 }

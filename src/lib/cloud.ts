@@ -221,11 +221,15 @@ export interface DonorRow {
   phone: string;
   blood_group: BloodGroupType;
   address: string | null;
+  upazila?: string | null;
+  district?: string | null;
   age: number | null;
   last_donation_date: string | null;
   photo_url: string | null;
   total_donations: number;
   status: ModerationStatus;
+  import_source?: string | null;
+  source_row?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -287,7 +291,7 @@ export interface CategoryAccessRow {
   created_at: string;
 }
 
-export type ChatThreadStatus = "new" | "in_progress" | "waiting_customer" | "resolved" | "closed";
+export type ChatThreadStatus = "new" | "assigned" | "in_progress" | "waiting_customer" | "resolved" | "closed";
 export type ChatThreadPriority = "normal" | "high" | "urgent";
 
 export interface ChatThreadRow {
@@ -3333,6 +3337,41 @@ async function refreshChatOperatorUidsCache(force = false): Promise<string[]> {
   return list;
 }
 
+export async function backfillChatThreadsStaffUids(operatorUids: string[]): Promise<void> {
+  if (!isWriterAuthed() || operatorUids.length === 0) return;
+  try {
+    const cleanOps = Array.from(new Set(["super_admin_mahmudul", ...operatorUids].filter(Boolean))).slice(0, 24);
+    const threadsSnap = await getDocs(collection(db, "chat_threads")).catch(() => null);
+    if (!threadsSnap || threadsSnap.empty) return;
+
+    await Promise.all(
+      threadsSnap.docs.map(async (tDoc) => {
+        const data = tDoc.data();
+        const existingUids = Array.isArray(data.staff_uids) ? (data.staff_uids as string[]) : [];
+        const assignedUid = typeof data.assigned_to_uid === "string" && data.assigned_to_uid ? [data.assigned_to_uid] : [];
+        const merged = Array.from(new Set([...existingUids, ...cleanOps, ...assignedUid])).slice(0, 24);
+        if (merged.length !== existingUids.length || merged.some((u, i) => existingUids[i] !== u)) {
+          await updateDoc(doc(db, "chat_threads", tDoc.id), {
+            staff_uids: merged,
+          }).catch(() => {});
+          const msgSnap = await getDocs(collection(db, "chat_threads", tDoc.id, "messages")).catch(() => null);
+          if (msgSnap && !msgSnap.empty) {
+            await Promise.all(
+              msgSnap.docs.slice(-30).map((mDoc) =>
+                updateDoc(doc(db, "chat_threads", tDoc.id, "messages", mDoc.id), {
+                  staff_uids: merged,
+                }).catch(() => {})
+              )
+            );
+          }
+        }
+      })
+    );
+  } catch {
+    // non-fatal backfill
+  }
+}
+
 // ---------- Private chat: threads ----------
 export function useChatThreads() {
   const { user, isStaff, isMainAdmin } = useAuth();
@@ -3370,7 +3409,10 @@ export function useChatThreads() {
         : canAccessOperatorInbox && currentUid
         ? query(threadsCol, where("staff_uids", "array-contains", currentUid))
         : currentUid
-        ? query(threadsCol, where("user_id", "==", currentUid))
+        ? query(
+            threadsCol,
+            where(user?.id && user.id !== currentUid ? "customer_uid" : "user_id", "==", currentUid)
+          )
         : null;
 
       if (!q) {
@@ -3631,7 +3673,13 @@ export function useThreadMessages(threadId: string | null) {
   const [serverItems, setServerItems] = useState<PrivateMessageRow[]>([]);
   const [delState, setDelState] = useState<ChatDeletionState>(() => readLocalChatDeletions());
   const [loading, setLoading] = useState(true);
-  const { user } = useAuth();
+  const { user, isStaff, isMainAdmin } = useAuth();
+  const { hasPermission } = useRolePermissions();
+  const canOperatorListMessages =
+    isStaff ||
+    hasPermission("chat_view_all") ||
+    hasPermission("chat_view_assigned") ||
+    hasPermission("chat_reply");
 
   // Poll server messages for auxiliary compatibility in dev/express
   useEffect(() => {
@@ -3675,7 +3723,7 @@ export function useThreadMessages(threadId: string | null) {
     };
   }, [threadId]);
 
-  // Authoritative real-time Firestore messages subscription (properly cleans up on unmount/thread switch)
+  // Authoritative real-time Firestore messages subscription matching Firestore allow list rules cleanly
   useEffect(() => {
     if (!threadId) {
       setFsItems([]);
@@ -3685,11 +3733,25 @@ export function useThreadMessages(threadId: string | null) {
 
     let active = true;
     let unsub: (() => void) | null = null;
-    void ensureFirebaseAuthUser().then(() => {
+    void ensureFirebaseAuthUser().then((fbUser) => {
       if (!active) return;
       const msgsRef = collection(db, "chat_threads", threadId, "messages");
+      const currentUid = fbUser?.uid || user?.id || "";
+      const isFullSuper =
+        isMainAdmin ||
+        isSuperAdminEmail(fbUser?.email) ||
+        isBootstrappedAdminEmail(fbUser?.email);
+
+      const q = isFullSuper
+        ? query(msgsRef)
+        : canOperatorListMessages && currentUid
+        ? query(msgsRef, where("staff_uids", "array-contains", currentUid))
+        : currentUid && threadId !== currentUid
+        ? query(msgsRef, where("customer_uid", "==", currentUid))
+        : query(msgsRef, where("thread_id", "==", threadId));
+
       unsub = onSnapshot(
-        msgsRef,
+        q,
         (snap) => {
           if (!active) return;
           const list = snap.docs.map((d) => normalizeDoc<PrivateMessageRow>(d.id, d.data()));
@@ -3711,7 +3773,7 @@ export function useThreadMessages(threadId: string | null) {
         unsub = null;
       }
     };
-  }, [threadId]);
+  }, [threadId, user?.id, isMainAdmin, canOperatorListMessages]);
 
   const items = (() => {
     const merged: PrivateMessageRow[] = [
@@ -3808,6 +3870,7 @@ export function useThreadMessages(threadId: string | null) {
       if (!threadSnap || !threadSnap.exists()) {
         await setDoc(threadRef, {
           user_id: threadId,
+          customer_uid: sender_role === "user" ? activeUid : "",
           user_name:
             meta?.user_name ||
             (sender_role === "user" ? user?.displayName || "গ্রাহক" : "গ্রাহক"),
@@ -3870,6 +3933,9 @@ export function useThreadMessages(threadId: string | null) {
           staff_uids: mergedStaffUids,
           updatedAt: serverTimestamp(),
         };
+        if (sender_role === "user" && activeUid) {
+          updatePayload.customer_uid = activeUid;
+        }
         if (reopenedAt) {
           updatePayload.reopened_at = reopenedAt;
         }
@@ -3884,6 +3950,7 @@ export function useThreadMessages(threadId: string | null) {
 
       await setDoc(doc(db, "chat_threads", threadId, "messages", msgId), {
         thread_id: threadId,
+        customer_uid: sender_role === "user" ? activeUid : threadId,
         sender_id: activeUid,
         sender_role: sender_role === "staff" ? "staff" : "user",
         sender_name:
@@ -4130,6 +4197,7 @@ export async function handoffAiToLiveChat(params: {
       if (!tSnap || !tSnap.exists()) {
         await setDoc(threadRef, {
           user_id: threadId,
+          customer_uid: activeUid,
           user_name: userName || "গ্রাহক",
           user_email: userEmail || "",
           last_message_at: nowIso,
@@ -4154,6 +4222,7 @@ export async function handoffAiToLiveChat(params: {
           last_message_preview: sanitizeString(handoffMessage, 300, ""),
           user_name: userName || tData.user_name || "গ্রাহক",
           user_email: userEmail || tData.user_email || "",
+          customer_uid: activeUid,
           staff_unread: Math.min((Number(tData.staff_unread) || 0) + 1, 10000),
           status: "new",
           priority: "high",
@@ -4166,6 +4235,7 @@ export async function handoffAiToLiveChat(params: {
 
       await setDoc(doc(db, "chat_threads", threadId, "messages", msgId), {
         thread_id: threadId,
+        customer_uid: activeUid,
         sender_id: activeUid,
         sender_role: "user",
         sender_name: userName || "গ্রাহক",

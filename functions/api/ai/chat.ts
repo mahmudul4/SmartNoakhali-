@@ -185,7 +185,13 @@ export const onRequestPost = async (context: {
       .slice(0, 5);
 
     let generatedText = "";
-    if (apiKey) {
+    let aiErrorMsg: string | null = null;
+    let upstreamStatus = 502;
+
+    if (!apiKey) {
+      aiErrorMsg = "GEMINI_API_KEY কনফিগার করা নেই";
+      upstreamStatus = 503;
+    } else {
       try {
         const ai = new GoogleGenAI({
           apiKey,
@@ -256,8 +262,15 @@ ${contextSummary}`;
           },
         });
         generatedText = (response.text || "").trim();
-      } catch (err) {
-        console.warn("Edge Gemini call issue:", err instanceof Error ? err.message : err);
+        if (!generatedText) {
+          aiErrorMsg = "Gemini API খালি উত্তর পাঠিয়েছে";
+          upstreamStatus = 502;
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Gemini request failed";
+        aiErrorMsg = msg;
+        upstreamStatus = /(429|quota|rate.?limit|resource.?exhausted)/i.test(msg) ? 429 : 502;
+        console.warn("Edge Gemini call issue:", msg);
       }
     }
 
@@ -324,8 +337,10 @@ ${contextSummary}`;
     const finalFallback = fallbackParts.join("\n");
     return new Response(
       JSON.stringify({
-        ok: true,
+        ok: false,
+        error: aiErrorMsg || "এআই সেবা সাময়িকভাবে অনুপলব্ধ — ভেরিফায়েড ডিরেক্টরি তথ্য দেখানো হচ্ছে।",
         mode: apiKey ? "upstream_fallback" : "directory_lookup",
+        fallbackText: finalFallback,
         text: finalFallback,
         reply: finalFallback,
         suggestHandoff: true,
@@ -337,7 +352,7 @@ ${contextSummary}`;
         sources: [],
       }),
       {
-        status: 200,
+        status: upstreamStatus,
         headers: { "Content-Type": "application/json; charset=utf-8" },
       }
     );
