@@ -3540,22 +3540,30 @@ export async function deleteHeroImageAsset(
 }
 
 export function useHeroBannerConfig() {
-  const [payload, setPayload] = useState<HeroBannersStorePayload>(() => {
+  const initialHydrated = useMemo(() => {
     try {
       const cached = localStorage.getItem(LOCAL_HERO_BANNER_KEY);
       const parsed = parseHeroBannersPayload(cached);
       if (parsed) {
-        return hydratePayloadSyncFromLocal(parsed);
+        return {
+          hasCache: true,
+          payload: hydratePayloadSyncFromLocal(parsed),
+        };
       }
     } catch {
       // ignore
     }
     return {
-      banners: [DEFAULT_HERO_BANNER_ITEM],
-      carousel: DEFAULT_HERO_CAROUSEL_SETTINGS,
+      hasCache: false,
+      payload: {
+        banners: [DEFAULT_HERO_BANNER_ITEM],
+        carousel: DEFAULT_HERO_CAROUSEL_SETTINGS,
+      },
     };
-  });
-  const [loading, setLoading] = useState(true);
+  }, []);
+
+  const [payload, setPayload] = useState<HeroBannersStorePayload>(initialHydrated.payload);
+  const [loading, setLoading] = useState(!initialHydrated.hasCache);
   const payloadRef = useRef<HeroBannersStorePayload>(payload);
   payloadRef.current = payload;
 
@@ -3563,6 +3571,10 @@ export function useHeroBannerConfig() {
     let active = true;
     let firestoreApplied = false;
     let applySeq = 0;
+
+    const safetyTimer = setTimeout(() => {
+      if (active) setLoading(false);
+    }, 2500);
 
     const applyParsedPayload = async (
       parsed: HeroBannersStorePayload | null,
@@ -3586,15 +3598,15 @@ export function useHeroBannerConfig() {
     };
 
     getDoc(doc(db, "settings", HERO_BANNER_CONFIG_ID))
-      .then((snap) => {
+      .then(async (snap) => {
         if (!active) return;
         if (snap.exists()) {
           const parsed = parseHeroBannersPayload(snap.data()?.logo_url);
           if (parsed) {
-            void applyParsedPayload(parsed, "firestore");
+            await applyParsedPayload(parsed, "firestore");
           }
         }
-        setLoading(false);
+        if (active) setLoading(false);
       })
       .catch(() => {
         if (active) setLoading(false);
@@ -3602,12 +3614,13 @@ export function useHeroBannerConfig() {
 
     fetch(`/api/content?collection=settings&id=${HERO_BANNER_CONFIG_ID}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
+      .then(async (d) => {
         if (!active || firestoreApplied) return;
         if (d?.item?.logo_url) {
           const parsed = parseHeroBannersPayload(d.item.logo_url);
           if (parsed) {
-            void applyParsedPayload(parsed, "api");
+            await applyParsedPayload(parsed, "api");
+            if (active) setLoading(false);
           }
         }
       })
@@ -3615,15 +3628,15 @@ export function useHeroBannerConfig() {
 
     const unsubDirect = onSnapshot(
       doc(db, "settings", HERO_BANNER_CONFIG_ID),
-      (snap) => {
+      async (snap) => {
         if (!active) return;
         if (snap.exists()) {
           const parsed = parseHeroBannersPayload(snap.data()?.logo_url);
           if (parsed) {
-            void applyParsedPayload(parsed, "firestore");
+            await applyParsedPayload(parsed, "firestore");
           }
         }
-        setLoading(false);
+        if (active) setLoading(false);
       },
       () => {
         if (active) setLoading(false);
@@ -3632,6 +3645,7 @@ export function useHeroBannerConfig() {
 
     return () => {
       active = false;
+      clearTimeout(safetyTimer);
       unsubDirect();
     };
   }, []);

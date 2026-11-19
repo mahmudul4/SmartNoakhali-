@@ -106,10 +106,25 @@ function HeroActionLink({
   );
 }
 
+const HERO_SLIDE_VARIANTS = {
+  enter: (dir: number) => ({
+    x: dir >= 0 ? "100%" : "-100%",
+    opacity: 1,
+  }),
+  center: {
+    x: "0%",
+    opacity: 1,
+  },
+  exit: (dir: number) => ({
+    x: dir >= 0 ? "-100%" : "100%",
+    opacity: 1,
+  }),
+};
+
 function Index() {
   const { categories } = useCategories();
   const { divisions } = useDivisions();
-  const { activeBanners, carousel } = useHeroBannerConfig();
+  const { activeBanners, carousel, loading: heroLoading } = useHeroBannerConfig();
   const { homepageConfig } = useHomepageConfig();
   const { contentConfig } = useWebsiteContentConfig();
 
@@ -117,6 +132,7 @@ function Index() {
     () => (activeBanners.length > 0 ? activeBanners : [DEFAULT_HERO_BANNER_ITEM]),
     [activeBanners]
   );
+  const preloadedImgsRef = useRef<Map<string, HTMLImageElement>>(new Map());
 
   const [heroSlideIdx, setHeroSlideIdx] = useState(0);
   const [slideDirection, setSlideDirection] = useState<1 | -1>(1);
@@ -186,17 +202,33 @@ function Index() {
     return () => clearInterval(id);
   }, [displayBanners.length, carousel.autoRotate, carousel.intervalSeconds, heroPaused, manualPaused]);
 
-  // Preload the next sequential slide's image to make slide changes instant
+  // Preload and decode all active hero banner images persistently in memory to prevent frame delays
   useEffect(() => {
-    if (displayBanners.length <= 1) return;
-    const nextBanner = displayBanners[(heroSlideIdx + 1) % displayBanners.length];
-    if (!nextBanner || nextBanner.backgroundMode !== "image") return;
-    const urls = [nextBanner.desktopImageUrl, nextBanner.mobileImageUrl].filter(Boolean);
-    for (const url of urls) {
-      const preImg = new Image();
-      preImg.src = url;
+    if (heroLoading) return;
+    const cache = preloadedImgsRef.current;
+    const activeUrls = new Set<string>();
+    for (const banner of displayBanners) {
+      if (banner.backgroundMode !== "image") continue;
+      if (banner.desktopImageUrl) activeUrls.add(banner.desktopImageUrl);
+      if (banner.mobileImageUrl) activeUrls.add(banner.mobileImageUrl);
     }
-  }, [displayBanners, heroSlideIdx]);
+    for (const url of activeUrls) {
+      if (!cache.has(url)) {
+        const preImg = new Image();
+        preImg.decoding = "sync";
+        preImg.src = url;
+        if (typeof preImg.decode === "function") {
+          preImg.decode().catch(() => {});
+        }
+        cache.set(url, preImg);
+      }
+    }
+    for (const cachedUrl of Array.from(cache.keys())) {
+      if (!activeUrls.has(cachedUrl)) {
+        cache.delete(cachedUrl);
+      }
+    }
+  }, [displayBanners, heroLoading]);
 
   useEffect(() => {
     if (contentConfig.seoTitle?.trim()) {
@@ -305,244 +337,287 @@ function Index() {
       )}
 
       {/* Dynamic Multi-Banner Hero Section / Sequential Slider */}
-      {homepageConfig.showHero !== false && currentHeroBanner && (
-        <section
-          aria-roledescription={displayBanners.length > 1 ? "carousel" : undefined}
-          aria-label="হিরো ব্যানার"
-          onMouseEnter={() => {
-            if (carousel.pauseOnHover) setHeroPaused(true);
-          }}
-          onMouseLeave={() => setHeroPaused(false)}
-          onFocusCapture={() => {
-            if (carousel.pauseOnHover) setHeroPaused(true);
-          }}
-          onBlurCapture={() => setHeroPaused(false)}
-          onTouchStart={(e) => {
-            touchStartX.current = e.touches[0]?.clientX ?? null;
-          }}
-          onTouchEnd={(e) => {
-            if (touchStartX.current === null || displayBanners.length <= 1) return;
-            const endX = e.changedTouches[0]?.clientX ?? touchStartX.current;
-            const delta = endX - touchStartX.current;
-            touchStartX.current = null;
-            if (Math.abs(delta) > 40) {
-              if (delta < 0) goToNextSlide(true);
-              else goToPrevSlide();
-            }
-          }}
-          className={`relative overflow-hidden border border-emerald-300/20 p-5 shadow-[0_18px_40px_-14px_rgba(7,54,34,0.45)] transition-all duration-500 sm:p-7 ${
-            currentHeroBanner.borderRadius || "rounded-[26px]"
-          }`}
-          style={{
-            background:
-              currentHeroBanner.backgroundMode === "solid"
-                ? currentHeroBanner.solidColor
-                : `linear-gradient(135deg, ${currentHeroBanner.gradientFrom} 0%, ${currentHeroBanner.gradientVia} 50%, ${currentHeroBanner.gradientTo} 100%)`,
-            color: currentHeroBanner.headingColor || currentHeroBanner.textColor || "#ffffff",
-          }}
-        >
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div
-              key={`${currentHeroBanner.id}_${heroSlideIdx}`}
-              initial={
-                displayBanners.length > 1
-                  ? { opacity: 0.15, x: slideDirection * 18 }
-                  : false
-              }
-              animate={{ opacity: 1, x: 0 }}
-              exit={
-                displayBanners.length > 1
-                  ? { opacity: 0.15, x: slideDirection * -18 }
-                  : undefined
-              }
-              transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-              className="static"
+      {homepageConfig.showHero !== false &&
+        (heroLoading ? (
+          <div
+            aria-label="হিরো ব্যানার লোড হচ্ছে"
+            className="min-h-[224px] w-full animate-pulse rounded-[26px] border border-border/60 bg-muted/40 shadow-[0_18px_40px_-14px_rgba(7,54,34,0.18)] sm:min-h-[246px]"
+          />
+        ) : (
+          currentHeroBanner && (
+            <section
+              aria-roledescription={displayBanners.length > 1 ? "carousel" : undefined}
+              aria-label="হিরো ব্যানার"
+              onMouseEnter={() => {
+                if (carousel.pauseOnHover) setHeroPaused(true);
+              }}
+              onMouseLeave={() => setHeroPaused(false)}
+              onFocusCapture={() => {
+                if (carousel.pauseOnHover) setHeroPaused(true);
+              }}
+              onBlurCapture={() => setHeroPaused(false)}
+              onTouchStart={(e) => {
+                touchStartX.current = e.touches[0]?.clientX ?? null;
+              }}
+              onTouchEnd={(e) => {
+                if (touchStartX.current === null || displayBanners.length <= 1) return;
+                const endX = e.changedTouches[0]?.clientX ?? touchStartX.current;
+                const delta = endX - touchStartX.current;
+                touchStartX.current = null;
+                if (Math.abs(delta) > 40) {
+                  if (delta < 0) goToNextSlide(true);
+                  else goToPrevSlide();
+                }
+              }}
+              className={`relative overflow-hidden border border-emerald-300/20 shadow-[0_18px_40px_-14px_rgba(7,54,34,0.45)] ${
+                currentHeroBanner.borderRadius || "rounded-[26px]"
+              }`}
             >
-              {hasHeroImage && (
-                <>
-                  {mobileHeroImg && (
-                    <img
-                      src={mobileHeroImg}
-                      alt={currentHeroBanner.headingLine1 || "Smart Noakhali"}
-                      className="pointer-events-none absolute inset-0 h-full w-full object-cover md:hidden"
-                      style={{ objectPosition: currentHeroBanner.imagePositionMobile || "center center" }}
-                    />
-                  )}
-                  {desktopHeroImg && (
-                    <img
-                      src={desktopHeroImg}
-                      alt={currentHeroBanner.headingLine1 || "Smart Noakhali"}
-                      className="pointer-events-none absolute inset-0 hidden h-full w-full object-cover md:block"
-                      style={{ objectPosition: currentHeroBanner.imagePositionDesktop || "center center" }}
-                    />
-                  )}
-                  <div
-                    aria-hidden="true"
-                    className="pointer-events-none absolute inset-0"
-                    style={{
-                      backgroundColor: currentHeroBanner.overlayColor || "#042316",
-                      opacity: Math.min(90, Math.max(0, currentHeroBanner.overlayOpacity ?? 55)) / 100,
+              <div className="relative grid overflow-hidden">
+                <AnimatePresence initial={false} custom={slideDirection}>
+                  <motion.div
+                    key={heroSlideIdx}
+                    custom={slideDirection}
+                    variants={HERO_SLIDE_VARIANTS}
+                    initial="enter"
+                    animate="center"
+                    exit="exit"
+                    transition={{
+                      x: { duration: 0.42, ease: [0.22, 1, 0.36, 1] },
                     }}
-                  />
-                </>
-              )}
-
-              {currentHeroBanner.showDecorativeGlow !== false && (
-                <>
-                  <div className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-amber-300/20 blur-3xl" />
-                  <div className="pointer-events-none absolute -bottom-14 -left-10 h-44 w-44 rounded-full bg-emerald-300/20 blur-3xl" />
-                  <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-                </>
-              )}
-
-              <div
-                className={`relative z-10 ${
-                  currentHeroBanner.textAlign === "left"
-                    ? "text-left"
-                    : currentHeroBanner.textAlign === "right"
-                    ? "text-right"
-                    : "text-left sm:text-left"
-                }`}
-              >
-                {currentHeroBanner.badgeText.trim() && (
-                  <span
-                    className="inline-flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1 text-[11px] font-semibold tracking-wide backdrop-blur-sm"
-                    style={{
-                      color: currentHeroBanner.badgeColor || "#ffffff",
-                      backgroundColor: currentHeroBanner.badgeBgColor || "rgba(255,255,255,0.14)",
-                    }}
-                  >
-                    <Droplet className="h-3 w-3 text-amber-300" /> {currentHeroBanner.badgeText}
-                  </span>
-                )}
-
-                <h1
-                  className="mt-3.5 font-bangla text-[24px] font-extrabold leading-[1.24] tracking-tight drop-shadow-xs sm:text-[32px]"
-                  style={{
-                    color: currentHeroBanner.headingColor || currentHeroBanner.textColor || "#ffffff",
-                  }}
-                >
-                  {currentHeroBanner.headingLine1}
-                  {currentHeroBanner.headingLine2 && (
-                    <>
-                      <br />
-                      {currentHeroBanner.headingLine2}
-                    </>
-                  )}
-                </h1>
-
-                {currentHeroBanner.description.trim() && (
-                  <p
-                    className={`mt-2.5 max-w-xl text-[12.5px] leading-relaxed sm:text-sm ${
-                      currentHeroBanner.textAlign === "center" ? "mx-auto sm:mx-0" : ""
+                    className={`col-start-1 row-start-1 relative h-full w-full overflow-hidden p-5 sm:p-7 ${
+                      displayBanners.length > 1
+                        ? carousel.showArrows && carousel.showDots
+                          ? "pb-[88px] sm:pb-12"
+                          : carousel.showArrows
+                          ? "pb-14 sm:pb-7"
+                          : carousel.showDots
+                          ? "pb-14 sm:pb-12"
+                          : ""
+                        : ""
                     }`}
                     style={{
+                      background:
+                        currentHeroBanner.backgroundMode === "image"
+                          ? "#111827"
+                          : currentHeroBanner.backgroundMode === "solid"
+                          ? currentHeroBanner.solidColor
+                          : `linear-gradient(135deg, ${currentHeroBanner.gradientFrom} 0%, ${currentHeroBanner.gradientVia} 50%, ${currentHeroBanner.gradientTo} 100%)`,
                       color:
-                        currentHeroBanner.descriptionColor ||
-                        currentHeroBanner.subtextColor ||
-                        "#ecfdf5",
-                      opacity: 0.94,
+                        currentHeroBanner.headingColor || currentHeroBanner.textColor || "#ffffff",
                     }}
                   >
-                    {currentHeroBanner.description}
-                  </p>
-                )}
-
-                {(currentHeroBanner.primaryButtonText.trim() ||
-                  currentHeroBanner.secondaryButtonText.trim() ||
-                  currentHeroBanner.optionalButtonText?.trim()) && (
-                  <div
-                    className={`mt-5 flex flex-wrap items-center gap-2.5 ${
-                      currentHeroBanner.textAlign === "right" ? "justify-end" : "justify-start"
-                    }`}
-                  >
-                    {currentHeroBanner.primaryButtonText.trim() && (
-                      <HeroActionLink
-                        href={currentHeroBanner.primaryButtonLink || "tel:999"}
-                        className="inline-flex min-h-[40px] items-center gap-2 rounded-full px-5 py-2.5 text-xs font-extrabold shadow-md transition hover:brightness-105 active:scale-95 sm:text-[13px]"
-                        style={{
-                          backgroundColor: currentHeroBanner.primaryButtonBgColor || "#dc2626",
-                          color: currentHeroBanner.primaryButtonColor || "#ffffff",
-                        }}
-                      >
-                        <Phone className="h-3.5 w-3.5" /> {currentHeroBanner.primaryButtonText}
-                      </HeroActionLink>
+                    {hasHeroImage && (
+                      <>
+                        {mobileHeroImg && (
+                          <img
+                            src={mobileHeroImg}
+                            alt={currentHeroBanner.headingLine1 || "Smart Noakhali"}
+                            loading="eager"
+                            decoding="sync"
+                            className="pointer-events-none absolute inset-0 h-full w-full object-cover md:hidden"
+                            style={{
+                              objectPosition:
+                                currentHeroBanner.imagePositionMobile || "center center",
+                            }}
+                          />
+                        )}
+                        {desktopHeroImg && (
+                          <img
+                            src={desktopHeroImg}
+                            alt={currentHeroBanner.headingLine1 || "Smart Noakhali"}
+                            loading="eager"
+                            decoding="sync"
+                            className="pointer-events-none absolute inset-0 hidden h-full w-full object-cover md:block"
+                            style={{
+                              objectPosition:
+                                currentHeroBanner.imagePositionDesktop || "center center",
+                            }}
+                          />
+                        )}
+                        <div
+                          aria-hidden="true"
+                          className="pointer-events-none absolute inset-0"
+                          style={{
+                            backgroundColor: currentHeroBanner.overlayColor || "#042316",
+                            opacity:
+                              Math.min(90, Math.max(0, currentHeroBanner.overlayOpacity ?? 55)) /
+                              100,
+                          }}
+                        />
+                      </>
                     )}
-                    {currentHeroBanner.secondaryButtonText.trim() && (
-                      <HeroActionLink
-                        href={currentHeroBanner.secondaryButtonLink || "/submit-info"}
-                        className="inline-flex min-h-[40px] items-center gap-2 rounded-full border border-white/25 px-4.5 py-2.5 text-xs font-bold shadow-xs backdrop-blur-sm transition hover:brightness-95 active:scale-95 sm:text-[13px]"
-                        style={{
-                          backgroundColor: currentHeroBanner.secondaryButtonBgColor || "#ffffff",
-                          color: currentHeroBanner.secondaryButtonColor || "#064e3b",
-                        }}
-                      >
-                        <Send className="h-3.5 w-3.5" /> {currentHeroBanner.secondaryButtonText}
-                      </HeroActionLink>
-                    )}
-                    {currentHeroBanner.optionalButtonText?.trim() && (
-                      <HeroActionLink
-                        href={currentHeroBanner.optionalButtonLink || "/directory"}
-                        className="inline-flex min-h-[40px] items-center gap-2 rounded-full border border-white/25 px-4 py-2.5 text-xs font-bold backdrop-blur-sm transition hover:brightness-110 active:scale-95 sm:text-[13px]"
-                        style={{
-                          backgroundColor:
-                            currentHeroBanner.optionalButtonBgColor || "rgba(255,255,255,0.16)",
-                          color: currentHeroBanner.optionalButtonColor || "#ffffff",
-                        }}
-                      >
-                        {currentHeroBanner.optionalButtonText}
-                      </HeroActionLink>
-                    )}
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          </AnimatePresence>
 
-          {/* Sequential Carousel Controls (only shown when 2+ published banners exist) */}
-          {displayBanners.length > 1 && (
-            <>
-              {carousel.showArrows && (
-                <div className="relative z-20 mt-4 flex items-center justify-between gap-2 sm:mt-0">
-                  <button
-                    type="button"
-                    aria-label="পূর্ববর্তী ব্যানার"
-                    onClick={goToPrevSlide}
-                    className="flex h-8 w-8 items-center justify-center rounded-full border border-white/25 bg-black/25 text-white backdrop-blur-sm transition hover:bg-black/45 active:scale-95 sm:absolute sm:right-12 sm:top-4"
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="পরবর্তী ব্যানার"
-                    onClick={() => goToNextSlide(true)}
-                    className="flex h-8 w-8 items-center justify-center rounded-full border border-white/25 bg-black/25 text-white backdrop-blur-sm transition hover:bg-black/45 active:scale-95 sm:absolute sm:right-3 sm:top-4"
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </button>
-                </div>
-              )}
+                    {currentHeroBanner.showDecorativeGlow !== false && (
+                      <>
+                        <div className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-amber-300/20 blur-3xl" />
+                        <div className="pointer-events-none absolute -bottom-14 -left-10 h-44 w-44 rounded-full bg-emerald-300/20 blur-3xl" />
+                        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+                      </>
+                    )}
 
-              {carousel.showDots && (
-                <div className="relative z-20 mt-4 flex items-center justify-center gap-1.5">
-                  {displayBanners.map((bItem, i) => (
-                    <button
-                      key={bItem.id}
-                      type="button"
-                      aria-label={`ব্যানার ${i + 1}`}
-                      aria-current={i === heroSlideIdx ? "true" : undefined}
-                      onClick={() => goToSpecificSlide(i)}
-                      className={`h-2 rounded-full transition-all duration-300 ${
-                        i === heroSlideIdx ? "w-6 bg-white" : "w-2 bg-white/40 hover:bg-white/65"
+                    <div
+                      className={`relative z-10 ${
+                        currentHeroBanner.textAlign === "left"
+                          ? "text-left"
+                          : currentHeroBanner.textAlign === "right"
+                          ? "text-right"
+                          : "text-left sm:text-left"
                       }`}
-                    />
-                  ))}
+                    >
+                      {currentHeroBanner.badgeText.trim() && (
+                        <span
+                          className="inline-flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1 text-[11px] font-semibold tracking-wide backdrop-blur-sm"
+                          style={{
+                            color: currentHeroBanner.badgeColor || "#ffffff",
+                            backgroundColor:
+                              currentHeroBanner.badgeBgColor || "rgba(255,255,255,0.14)",
+                          }}
+                        >
+                          <Droplet className="h-3 w-3 text-amber-300" />{" "}
+                          {currentHeroBanner.badgeText}
+                        </span>
+                      )}
+
+                      <h1
+                        className="mt-3.5 font-bangla text-[24px] font-extrabold leading-[1.24] tracking-tight drop-shadow-xs sm:text-[32px]"
+                        style={{
+                          color:
+                            currentHeroBanner.headingColor ||
+                            currentHeroBanner.textColor ||
+                            "#ffffff",
+                        }}
+                      >
+                        {currentHeroBanner.headingLine1}
+                        {currentHeroBanner.headingLine2 && (
+                          <>
+                            <br />
+                            {currentHeroBanner.headingLine2}
+                          </>
+                        )}
+                      </h1>
+
+                      {currentHeroBanner.description.trim() && (
+                        <p
+                          className={`mt-2.5 max-w-xl text-[12.5px] leading-relaxed sm:text-sm ${
+                            currentHeroBanner.textAlign === "center" ? "mx-auto sm:mx-0" : ""
+                          }`}
+                          style={{
+                            color:
+                              currentHeroBanner.descriptionColor ||
+                              currentHeroBanner.subtextColor ||
+                              "#ecfdf5",
+                            opacity: 0.94,
+                          }}
+                        >
+                          {currentHeroBanner.description}
+                        </p>
+                      )}
+
+                      {(currentHeroBanner.primaryButtonText.trim() ||
+                        currentHeroBanner.secondaryButtonText.trim() ||
+                        currentHeroBanner.optionalButtonText?.trim()) && (
+                        <div
+                          className={`mt-5 flex flex-wrap items-center gap-2.5 ${
+                            currentHeroBanner.textAlign === "right"
+                              ? "justify-end"
+                              : "justify-start"
+                          }`}
+                        >
+                          {currentHeroBanner.primaryButtonText.trim() && (
+                            <HeroActionLink
+                              href={currentHeroBanner.primaryButtonLink || "tel:999"}
+                              className="inline-flex min-h-[40px] items-center gap-2 rounded-full px-5 py-2.5 text-xs font-extrabold shadow-md transition hover:brightness-105 active:scale-95 sm:text-[13px]"
+                              style={{
+                                backgroundColor:
+                                  currentHeroBanner.primaryButtonBgColor || "#dc2626",
+                                color: currentHeroBanner.primaryButtonColor || "#ffffff",
+                              }}
+                            >
+                              <Phone className="h-3.5 w-3.5" />{" "}
+                              {currentHeroBanner.primaryButtonText}
+                            </HeroActionLink>
+                          )}
+                          {currentHeroBanner.secondaryButtonText.trim() && (
+                            <HeroActionLink
+                              href={currentHeroBanner.secondaryButtonLink || "/submit-info"}
+                              className="inline-flex min-h-[40px] items-center gap-2 rounded-full border border-white/25 px-4.5 py-2.5 text-xs font-bold shadow-xs backdrop-blur-sm transition hover:brightness-95 active:scale-95 sm:text-[13px]"
+                              style={{
+                                backgroundColor:
+                                  currentHeroBanner.secondaryButtonBgColor || "#ffffff",
+                                color: currentHeroBanner.secondaryButtonColor || "#064e3b",
+                              }}
+                            >
+                              <Send className="h-3.5 w-3.5" />{" "}
+                              {currentHeroBanner.secondaryButtonText}
+                            </HeroActionLink>
+                          )}
+                          {currentHeroBanner.optionalButtonText?.trim() && (
+                            <HeroActionLink
+                              href={currentHeroBanner.optionalButtonLink || "/directory"}
+                              className="inline-flex min-h-[40px] items-center gap-2 rounded-full border border-white/25 px-4 py-2.5 text-xs font-bold backdrop-blur-sm transition hover:brightness-110 active:scale-95 sm:text-[13px]"
+                              style={{
+                                backgroundColor:
+                                  currentHeroBanner.optionalButtonBgColor ||
+                                  "rgba(255,255,255,0.16)",
+                                color: currentHeroBanner.optionalButtonColor || "#ffffff",
+                              }}
+                            >
+                              {currentHeroBanner.optionalButtonText}
+                            </HeroActionLink>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                </AnimatePresence>
+              </div>
+
+              {/* Sequential Carousel Controls (kept stationary outside slide transition) */}
+              {displayBanners.length > 1 && (carousel.showArrows || carousel.showDots) && (
+                <div className="pointer-events-none absolute inset-x-5 bottom-4 z-20 flex flex-col gap-3.5 sm:inset-0 sm:block">
+                  {carousel.showArrows && (
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        aria-label="পূর্ববর্তী ব্যানার"
+                        onClick={goToPrevSlide}
+                        className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-white/25 bg-black/25 text-white backdrop-blur-sm transition hover:bg-black/45 active:scale-95 sm:absolute sm:right-12 sm:top-4"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="পরবর্তী ব্যানার"
+                        onClick={() => goToNextSlide(true)}
+                        className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-white/25 bg-black/25 text-white backdrop-blur-sm transition hover:bg-black/45 active:scale-95 sm:absolute sm:right-3 sm:top-4"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                    </div>
+                  )}
+
+                  {carousel.showDots && (
+                    <div className="pointer-events-auto flex items-center justify-center gap-1.5 sm:absolute sm:inset-x-0 sm:bottom-5">
+                      {displayBanners.map((bItem, i) => (
+                        <button
+                          key={bItem.id}
+                          type="button"
+                          aria-label={`ব্যানার ${i + 1}`}
+                          aria-current={i === heroSlideIdx ? "true" : undefined}
+                          onClick={() => goToSpecificSlide(i)}
+                          className={`h-2 rounded-full transition-all duration-300 ${
+                            i === heroSlideIdx ? "w-6 bg-white" : "w-2 bg-white/40 hover:bg-white/65"
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
-            </>
-          )}
-        </section>
-      )}
+            </section>
+          )
+        ))}
 
       {/* Quick-Action Pill Buttons */}
       {homepageConfig.showQuickActions !== false && visibleQuickActions.length > 0 && (
