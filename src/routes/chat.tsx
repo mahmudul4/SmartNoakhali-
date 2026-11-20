@@ -23,6 +23,7 @@ import {
   ShieldCheck,
   Sparkles,
   Headphones,
+  Search,
 } from "lucide-react";
 import {
   ensureMyThread,
@@ -110,7 +111,7 @@ const QUICK_PROMPTS = [
 
 function ChatPage() {
   const { user, isAuthed, isStaff, isMainAdmin, roles } = useAuth();
-  const { customRoles } = useRolePermissions();
+  const { customRoles, hasPermission } = useRolePermissions();
   const { getStaffProfile } = useStaffProfiles();
   const { logo } = useLogo();
   const { meta } = useSiteMetaConfig();
@@ -131,7 +132,8 @@ function ChatPage() {
 
   // Staff specific state
   const [staffSelectedThread, setStaffSelectedThread] = useState<string | null>(null);
-  const [staffTab, setStaffTab] = useState<"inbox" | "chat">("chat");
+  const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
+  const [staffSearch, setStaffSearch] = useState("");
 
   // Guest Chat State
   const [guestName, setGuestName] = useState(() => localStorage.getItem("sn_guest_name_v1") || "");
@@ -171,11 +173,42 @@ function ChatPage() {
     });
   }, [user]);
 
-  const effectiveThreadId = isStaff && staffSelectedThread
-    ? staffSelectedThread
-    : user
-    ? user.id
-    : activeUid || getOrCreateGuestId();
+  const canViewAllChats = isMainAdmin || hasPermission("chat_view_all");
+  const canReplyChat = !isStaff || isMainAdmin || hasPermission("chat_reply");
+
+  const visibleStaffThreads = isStaff
+    ? (canViewAllChats
+        ? threadsHook.items
+        : threadsHook.items.filter(
+            (t) =>
+              Boolean(t.assigned_to_uid) &&
+              (t.assigned_to_uid === user?.id || t.assigned_to_uid === activeUid)
+          )
+      ).filter((t) => {
+        const q = staffSearch.trim().toLowerCase();
+        if (!q) return true;
+        return [t.user_name, t.user_email, t.last_message_preview, t.assigned_to_name]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
+      })
+    : [];
+
+  useEffect(() => {
+    if (isStaff && mode === "live" && !staffSelectedThread && visibleStaffThreads.length > 0) {
+      setStaffSelectedThread(visibleStaffThreads[0].id);
+    }
+  }, [isStaff, mode, staffSelectedThread, visibleStaffThreads]);
+
+  const effectiveThreadId =
+    isStaff && staffSelectedThread
+      ? staffSelectedThread
+      : isStaff && visibleStaffThreads.length > 0
+        ? visibleStaffThreads[0].id
+        : user
+          ? user.id
+          : activeUid || getOrCreateGuestId();
 
   function resetAiChat() {
     setAiMessages([
@@ -435,206 +468,199 @@ function ChatPage() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-72px)] w-full flex-col px-3.5 pb-2 pt-3 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
-      {/* Header bar */}
-      <div className="mb-2.5 flex items-center justify-between">
-        <Link to="/" className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground transition hover:text-foreground">
-          <ArrowLeft className="h-4 w-4" /> হোম পেজ
-        </Link>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setSoundEnabled(!soundEnabled)}
-            className="flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-muted-foreground transition hover:text-foreground"
-            title={soundEnabled ? "শব্দ বন্ধ করুন" : "শব্দ চালু করুন"}
-          >
-            {soundEnabled ? <Volume2 className="h-3.5 w-3.5 text-emerald-600" /> : <VolumeX className="h-3.5 w-3.5 text-muted-foreground" />}
-            <span className="hidden sm:inline">{soundEnabled ? "শব্দ চালু" : "নিঃশব্দ"}</span>
-          </button>
-          {mode === "ai" && (
-            <button
-              type="button"
-              onClick={clearAiChat}
-              className="flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-muted-foreground transition hover:text-foreground"
-              title="নতুন চ্যাট শুরু করুন"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">নতুন চ্যাট</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Main Switcher Card */}
-      <div className={`mb-3 rounded-2xl p-3 shadow-card ring-1 ring-border/50 ${
-        mode === "ai" ? "bg-gradient-to-r from-indigo-50 via-card to-teal-50/40" : "bg-gradient-card"
-      }`}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5">
-            <div className={`flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-sm ${
-              mode === "ai" ? "bg-gradient-to-br from-indigo-600 to-teal-600" : "bg-gradient-hero"
-            }`}>
-              {mode === "ai" ? <Sparkles className="h-5 w-5 text-amber-200" /> : <Headphones className="h-5 w-5" />}
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <p className="font-display font-bold text-primary-deep text-sm sm:text-base">
-                  {mode === "ai" ? aiConfig.botName || "স্মার্ট এআই সহকারী" : "সরাসরি লাইভ চ্যাট"}
+    <div className="mx-auto flex h-[calc(100dvh-64px)] min-h-[420px] w-full max-w-[1480px] flex-col px-1.5 py-1.5 sm:px-4 sm:py-3 lg:h-[85vh] lg:w-[88%] xl:w-[85%]">
+      <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-2xl border border-border/80 bg-card shadow-elevated sm:rounded-3xl">
+        {/* Compact Workspace Top Bar */}
+        <div
+          className={`shrink-0 border-b border-border/70 px-3 py-2 sm:px-4 sm:py-2.5 ${
+            mode === "ai" ? "bg-gradient-to-r from-indigo-50 via-card to-teal-50/40" : "bg-gradient-card"
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-2.5">
+              <Link
+                to="/"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground transition hover:text-foreground"
+                title="হোমে ফিরুন"
+                aria-label="হোমে ফিরুন"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </Link>
+              <div
+                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white shadow-sm ${
+                  mode === "ai" ? "bg-gradient-to-br from-indigo-600 to-teal-600" : "bg-gradient-hero"
+                }`}
+              >
+                {mode === "ai" ? <Sparkles className="h-4 w-4 text-amber-200" /> : <Headphones className="h-4 w-4" />}
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <p className="truncate font-display text-sm font-bold text-primary-deep sm:text-base">
+                    {mode === "ai" ? aiConfig.botName || "স্মার্ট এআই সহকারী" : "সরাসরি লাইভ চ্যাট"}
+                  </p>
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-700 ring-1 ring-emerald-500/30">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                    সক্রিয়
+                  </span>
+                </div>
+                <p className="hidden truncate text-[11px] text-muted-foreground sm:block">
+                  {mode === "ai"
+                    ? "তাৎক্ষণিক পাবলিক ডিরেক্টরি ও সেবা সহায়তা"
+                    : isStaff
+                      ? `${senderRoleLabel} হিসেবে সাপোর্ট ইনবক্স পরিচালিত হচ্ছে`
+                      : "দায়িত্বপ্রাপ্ত হিউম্যান অপারেটরের সাথে সরাসরি যোগাযোগ"}
                 </p>
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-700 ring-1 ring-emerald-500/30">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse" />
-                  সক্রিয়
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+              <div className="flex items-center gap-1 rounded-xl bg-muted/80 p-1">
+                <button
+                  type="button"
+                  onClick={() => setMode("ai")}
+                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold transition ${
+                    mode === "ai"
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Bot className="h-3.5 w-3.5" /> এআই
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMode("live")}
+                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold transition ${
+                    mode === "live"
+                      ? "bg-gradient-hero text-white shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <MessageCircle className="h-3.5 w-3.5" /> লাইভ চ্যাট
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSoundEnabled(!soundEnabled)}
+                className="flex h-8 items-center gap-1 rounded-xl border border-border bg-card px-2 text-[11px] font-semibold text-muted-foreground transition hover:text-foreground"
+                title={soundEnabled ? "শব্দ বন্ধ করুন" : "শব্দ চালু করুন"}
+              >
+                {soundEnabled ? <Volume2 className="h-3.5 w-3.5 text-emerald-600" /> : <VolumeX className="h-3.5 w-3.5 text-muted-foreground" />}
+              </button>
+
+              {mode === "ai" && (
+                <button
+                  type="button"
+                  onClick={clearAiChat}
+                  className="flex h-8 items-center gap-1 rounded-xl border border-border bg-card px-2.5 text-[11px] font-semibold text-muted-foreground transition hover:text-foreground"
+                  title="নতুন চ্যাট শুরু করুন"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">নতুন চ্যাট</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {mode === "live" && !isStaff && activeThreadRow && (activeThreadRow.status === "resolved" || activeThreadRow.status === "closed") && (
+            <div className="mt-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-1 text-[11px] font-semibold text-amber-900">
+              এই চ্যাটটি {activeThreadRow.status === "resolved" ? "সমাধানকৃত" : "বন্ধ"} অবস্থায় রয়েছে — নতুন মেসেজ পাঠালে স্বয়ংক্রিয়ভাবে পুনরায় চালু হবে।
+            </div>
+          )}
+
+          {mode === "live" && !isAuthed && (
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-amber-500/10 px-3 py-1 text-xs text-amber-950">
+              <div className="flex items-center gap-1.5">
+                <UserIcon className="h-3.5 w-3.5 text-amber-700" />
+                <span>
+                  অতিথি চ্যাট: <strong>{guestName || "অতিথি গ্রাহক"}</strong>
                 </span>
               </div>
-              <p className="text-[11px] text-muted-foreground">
-                {mode === "ai"
-                  ? "তাৎক্ষণিক পাবলিক ডিরেক্টরি ও সেবা সহায়তা"
-                  : "দায়িত্বপ্রাপ্ত হিউম্যান অপারেটরের সাথে সরাসরি যোগাযোগ"}
-              </p>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setShowGuestMetaEdit(!showGuestMetaEdit)}
+                  className="rounded-lg bg-card px-2 py-0.5 text-[10px] font-bold text-amber-900 shadow-sm ring-1 ring-border"
+                >
+                  {showGuestMetaEdit ? "বন্ধ করুন" : "নাম/ফোন সেট করুন"}
+                </button>
+                <Link
+                  to="/auth"
+                  className="inline-flex items-center gap-1 rounded-lg bg-primary px-2.5 py-0.5 text-[10px] font-bold text-primary-foreground shadow-sm"
+                >
+                  <LogIn className="h-3 w-3" /> লগইন করুন
+                </Link>
+              </div>
             </div>
-          </div>
+          )}
 
-          <div className="flex items-center gap-1 rounded-xl bg-muted/80 p-1">
-            <button
-              type="button"
-              onClick={() => setMode("ai")}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
-                mode === "ai"
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Bot className="h-3.5 w-3.5" /> এআই সহকারী
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("live")}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
-                mode === "live"
-                  ? "bg-gradient-hero text-white shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <MessageCircle className="h-3.5 w-3.5" /> লাইভ চ্যাট
-            </button>
-          </div>
+          {showGuestMetaEdit && mode === "live" && !isAuthed && (
+            <div className="mt-2 grid grid-cols-1 gap-2 rounded-xl bg-card p-2 sm:grid-cols-2 ring-1 ring-border">
+              <input
+                value={guestName}
+                onChange={(e) => {
+                  setGuestName(e.target.value);
+                  localStorage.setItem("sn_guest_name_v1", e.target.value);
+                }}
+                placeholder="আপনার নাম লিখুন..."
+                className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs"
+              />
+              <input
+                value={guestPhone}
+                onChange={(e) => {
+                  setGuestPhone(e.target.value);
+                  localStorage.setItem("sn_guest_phone_v1", e.target.value);
+                }}
+                placeholder="আপনার ফোন নম্বর (ঐচ্ছিক)..."
+                className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs"
+              />
+            </div>
+          )}
         </div>
 
-        {/* Operator mode banner */}
-        {mode === "live" && isStaff && (
-          <div className="mt-2.5 flex items-center justify-between gap-2 rounded-xl bg-primary/10 px-3 py-1.5 text-xs text-primary-deep">
-            <div className="flex items-center gap-1.5 font-bold">
-              <ShieldCheck className="h-4 w-4 text-primary" />
-              আপনি {senderRoleLabel} হিসেবে যুক্ত আছেন
+        {mode === "ai" ? (
+          <div className="flex flex-1 min-h-0 flex-col">
+            {/* Compact Quick Prompts Bar */}
+            <div className="shrink-0 border-b border-indigo-100/80 bg-indigo-50/30 px-3 py-2 sm:px-4">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1 text-[11px] font-bold text-indigo-900/75">
+                  <Sparkles className="h-3 w-3 text-indigo-600" /> দ্রুত সেবা প্রশ্ন
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={handoffBusy}
+                    onClick={() => void handleHandoffToLiveChat()}
+                    className="flex items-center gap-1 rounded-lg bg-emerald-600/15 px-2.5 py-1 text-[11px] font-bold text-emerald-800 hover:bg-emerald-600/25 transition"
+                  >
+                    <Headphones className="h-3 w-3" /> হিউম্যান সাপোর্ট
+                  </button>
+                  <button
+                    type="button"
+                    onClick={resetAiChat}
+                    className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-muted hover:text-primary transition"
+                    title="নতুন এআই চ্যাট শুরু করুন"
+                  >
+                    <RotateCcw className="h-3 w-3" /> নতুন চ্যাট
+                  </button>
+                </div>
+              </div>
+              <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
+                {(aiConfig.quickPrompts.length > 0 ? aiConfig.quickPrompts : QUICK_PROMPTS).map((qp) => (
+                  <button
+                    key={qp}
+                    type="button"
+                    onClick={() => void askAi(qp)}
+                    className="shrink-0 rounded-full border border-indigo-200 bg-white px-3 py-1 text-[11px] font-semibold text-indigo-900 transition hover:bg-indigo-50 active:scale-95 whitespace-nowrap"
+                  >
+                    {qp}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setStaffTab(staffTab === "inbox" ? "chat" : "inbox")}
-                className="rounded-lg bg-card px-2.5 py-1 text-[11px] font-bold text-primary shadow-sm ring-1 ring-border"
-              >
-                {staffTab === "inbox" ? "💬 চ্যাট উইন্ডো দেখুন" : "📥 ইউজার ইনবক্স খুলুন"}
-              </button>
-            </div>
-          </div>
-        )}
-        {mode === "live" && !isStaff && activeThreadRow && (activeThreadRow.status === "resolved" || activeThreadRow.status === "closed") && (
-          <div className="mt-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-1.5 text-[11px] font-semibold text-amber-900">
-            এই চ্যাটটি {activeThreadRow.status === "resolved" ? "সমাধানকৃত" : "বন্ধ"} অবস্থায় রয়েছে — নতুন মেসেজ পাঠালে স্বয়ংক্রিয়ভাবে পুনরায় চালু হবে।
-          </div>
-        )}
 
-        {mode === "live" && !isAuthed && (
-          <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-amber-500/10 px-3 py-1.5 text-xs text-amber-950">
-            <div className="flex items-center gap-1.5">
-              <UserIcon className="h-3.5 w-3.5 text-amber-700" />
-              <span>
-                অতিথি চ্যাট: <strong>{guestName || "অতিথি গ্রাহক"}</strong>
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => setShowGuestMetaEdit(!showGuestMetaEdit)}
-                className="rounded-lg bg-card px-2 py-0.5 text-[10px] font-bold text-amber-900 shadow-sm ring-1 ring-border"
-              >
-                {showGuestMetaEdit ? "বন্ধ করুন" : "নাম/ফোন সেট করুন"}
-              </button>
-              <Link
-                to="/auth"
-                className="inline-flex items-center gap-1 rounded-lg bg-primary px-2.5 py-1 text-[10px] font-bold text-primary-foreground shadow-sm"
-              >
-                <LogIn className="h-3 w-3" /> লগইন করুন
-              </Link>
-            </div>
-          </div>
-        )}
-
-        {showGuestMetaEdit && mode === "live" && !isAuthed && (
-          <div className="mt-2 grid grid-cols-1 gap-2 rounded-xl bg-card p-2.5 sm:grid-cols-2 ring-1 ring-border">
-            <input
-              value={guestName}
-              onChange={(e) => {
-                setGuestName(e.target.value);
-                localStorage.setItem("sn_guest_name_v1", e.target.value);
-              }}
-              placeholder="আপনার নাম লিখুন..."
-              className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs"
-            />
-            <input
-              value={guestPhone}
-              onChange={(e) => {
-                setGuestPhone(e.target.value);
-                localStorage.setItem("sn_guest_phone_v1", e.target.value);
-              }}
-              placeholder="আপনার ফোন নম্বর (ঐচ্ছিক)..."
-              className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs"
-            />
-          </div>
-        )}
-      </div>
-
-      {mode === "ai" ? (
-        <>
-          {/* Quick Prompts with Reset + Handoff Button */}
-          <div className="mb-1.5 flex items-center justify-between gap-2">
-            <span className="text-[11px] font-bold text-indigo-900/75 flex items-center gap-1">
-              <Sparkles className="h-3 w-3 text-indigo-600" /> দ্রুত সেবা প্রশ্ন
-            </span>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                disabled={handoffBusy}
-                onClick={() => void handleHandoffToLiveChat()}
-                className="flex items-center gap-1 rounded-lg bg-emerald-600/15 px-2.5 py-1 text-[11px] font-bold text-emerald-800 hover:bg-emerald-600/25 transition"
-              >
-                <Headphones className="h-3 w-3" /> হিউম্যান সাপোর্ট
-              </button>
-              <button
-                type="button"
-                onClick={resetAiChat}
-                className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-muted hover:text-primary transition"
-                title="নতুন এআই চ্যাট শুরু করুন"
-              >
-                <RotateCcw className="h-3 w-3" /> নতুন চ্যাট
-              </button>
-            </div>
-          </div>
-          <div className="mb-2 flex flex-wrap gap-1.5 overflow-x-auto pb-1">
-            {(aiConfig.quickPrompts.length > 0 ? aiConfig.quickPrompts : QUICK_PROMPTS).map((qp) => (
-              <button
-                key={qp}
-                type="button"
-                onClick={() => void askAi(qp)}
-                className="rounded-full border border-indigo-200 bg-white px-3 py-1 text-[11px] font-semibold text-indigo-900 transition hover:bg-indigo-50 active:scale-95 whitespace-nowrap"
-              >
-                {qp}
-              </button>
-            ))}
-          </div>
-
-          {/* AI Messages View */}
-          <div className="flex-1 space-y-3 overflow-y-auto rounded-2xl border border-indigo-100 bg-indigo-50/20 p-3.5 shadow-inner">
+            {/* AI Messages View */}
+            <div className="flex-1 min-h-0 space-y-3 overflow-y-auto bg-indigo-50/20 p-3 sm:p-5">
             {aiMessages.map((m) => {
               const isUser = m.role === "user";
               return (
@@ -768,220 +794,339 @@ function ChatPage() {
             <div ref={aiEndRef} />
           </div>
 
-          {/* AI Input Form */}
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void askAi(aiInput);
-            }}
-            className="mt-2.5 flex items-center gap-2"
-          >
-            <input
-              value={aiInput}
-              onChange={(e) => setAiInput(e.target.value)}
-              placeholder="এআইকে যেকোনো প্রশ্ন করুন (যেমন: অ্যাম্বুলেন্স, রক্তদাতা, হাসপাতাল)..."
-              className="flex-1 rounded-full border border-border bg-card px-4 py-2.5 text-xs sm:text-sm outline-none focus:border-primary shadow-sm"
-            />
-            <button
-              disabled={aiLoading}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-hero text-primary-foreground shadow-elevated active:scale-95 disabled:opacity-60"
+            {/* AI Input Form */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void askAi(aiInput);
+              }}
+              className="shrink-0 flex items-end gap-2 border-t border-border/80 bg-card px-3 py-2.5 sm:px-4"
             >
-              <Send className="h-4 w-4" />
-            </button>
-          </form>
-        </>
-      ) : isStaff && staffTab === "inbox" ? (
-        /* Staff Inbox Overview */
-        <div className="flex-1 space-y-2.5 overflow-y-auto rounded-2xl border border-border bg-card/50 p-3 shadow-inner">
-          <div className="flex items-center justify-between pb-1 border-b border-border">
-            <p className="font-bold text-xs text-primary-deep">সকল গ্রাহক চ্যাট ইনবক্স ({threadsHook.items.length})</p>
-            <span className="text-[11px] text-muted-foreground">ক্লিক করে উত্তর দিন</span>
-          </div>
-          {threadsHook.items.length === 0 && (
-            <p className="py-12 text-center text-xs text-muted-foreground">কোনো অপেক্ষমাণ চ্যাট নেই</p>
-          )}
-          {threadsHook.items.map((t) => {
-            const isSelected = staffSelectedThread === t.id;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => {
-                  setStaffSelectedThread(t.id);
-                  setStaffTab("chat");
+              <textarea
+                rows={1}
+                value={aiInput}
+                onChange={(e) => {
+                  setAiInput(e.target.value);
+                  e.target.style.height = "auto";
+                  e.target.style.height = `${Math.min(e.target.scrollHeight, 112)}px`;
                 }}
-                className={`flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left transition ${
-                  isSelected ? "border-primary bg-primary/10 shadow-sm" : "border-border bg-card hover:border-primary/50"
-                }`}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void askAi(aiInput);
+                  }
+                }}
+                onFocus={() => setTimeout(() => aiEndRef.current?.scrollIntoView({ behavior: "smooth" }), 120)}
+                placeholder="এআইকে যেকোনো প্রশ্ন করুন (অ্যাম্বুলেন্স, রক্তদাতা, হাসপাতাল)..."
+                className="min-h-[42px] max-h-28 min-w-0 flex-1 resize-none overflow-y-auto rounded-2xl border border-border bg-background px-3.5 py-2.5 text-sm leading-relaxed outline-none focus:border-primary"
+              />
+              <button
+                type="submit"
+                disabled={aiLoading}
+                className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-full bg-gradient-hero px-4 text-xs font-bold text-primary-foreground shadow-elevated active:scale-95 disabled:opacity-60 sm:h-11"
               >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="font-bold text-xs text-foreground truncate">{t.user_name || "গ্রাহক"}</p>
-                    {t.staff_unread > 0 && (
-                      <span className="rounded-full bg-rose-600 px-1.5 py-0.2 text-[9px] font-extrabold text-white">
-                        {t.staff_unread} নতুন
-                      </span>
-                    )}
+                <Send className="h-4 w-4" />
+                <span className="hidden sm:inline">পাঠান</span>
+              </button>
+            </form>
+          </div>
+        ) : (
+          /* Live Chat Split Workspace (Staff 2-pane on Desktop, List <-> Conversation on Mobile; Customer spacious single pane) */
+          <div
+            className={`flex-1 min-h-0 ${
+              isStaff
+                ? "grid grid-cols-1 lg:grid-cols-[340px_minmax(0,1fr)] xl:grid-cols-[380px_minmax(0,1fr)]"
+                : "flex flex-col"
+            }`}
+          >
+            {isStaff && (
+              <aside
+                className={`${
+                  mobileThreadOpen ? "hidden lg:flex" : "flex"
+                } min-h-0 flex-col border-border/80 bg-muted/15 lg:border-r`}
+              >
+                <div className="shrink-0 space-y-2 border-b border-border/70 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-display text-xs font-bold text-primary-deep">
+                      সকল কথোপকথন ({visibleStaffThreads.length})
+                    </p>
+                    <Link
+                      to="/mdmahmudulhashan"
+                      className="inline-flex items-center gap-1 rounded-lg bg-primary/10 px-2 py-0.5 text-[10.5px] font-bold text-primary hover:bg-primary/20"
+                    >
+                      <ShieldCheck className="h-3 w-3" /> ফুল ড্যাশবোর্ড
+                    </Link>
                   </div>
-                  <p className="truncate text-[11px] text-muted-foreground mt-0.5">
-                    {t.last_message_preview || "বার্তা..."}
-                  </p>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      value={staffSearch}
+                      onChange={(e) => setStaffSearch(e.target.value)}
+                      placeholder="গ্রাহকের নাম বা বার্তা খুঁজুন..."
+                      className="w-full rounded-xl border border-border bg-card py-1.5 pl-8 pr-3 text-xs outline-none focus:border-primary"
+                    />
+                  </div>
                 </div>
-                <div className="text-right shrink-0">
-                  <p className="text-[10px] text-muted-foreground">
-                    {new Date(t.last_message_at).toLocaleTimeString("bn-BD", { hour: "2-digit", minute: "2-digit" })}
-                  </p>
-                  <span className="mt-1 inline-flex items-center gap-0.5 text-[10px] font-semibold text-primary">
-                    চ্যাট খুলুন →
+
+                <div className="flex-1 min-h-0 space-y-1.5 overflow-y-auto p-2.5">
+                  {visibleStaffThreads.length === 0 ? (
+                    <p className="py-12 text-center text-xs text-muted-foreground">
+                      কোনো কথোপকথন পাওয়া যায়নি
+                    </p>
+                  ) : (
+                    visibleStaffThreads.map((t) => {
+                      const isSelected = threadId === t.id;
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => {
+                            setStaffSelectedThread(t.id);
+                            setMobileThreadOpen(true);
+                          }}
+                          className={`flex w-full items-start justify-between gap-2.5 rounded-2xl border p-3 text-left transition ${
+                            isSelected
+                              ? "border-primary bg-primary/10 shadow-2xs"
+                              : "border-border/70 bg-card hover:border-primary/40"
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <p className="truncate text-xs font-bold text-foreground">
+                                {t.user_name || t.user_email || `গ্রাহক #${t.id.slice(0, 6)}`}
+                              </p>
+                              {t.staff_unread > 0 && (
+                                <span className="shrink-0 rounded-full bg-rose-600 px-1.5 py-0.2 text-[9px] font-extrabold text-white">
+                                  {t.staff_unread}
+                                </span>
+                              )}
+                            </div>
+                            <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                              {t.last_message_preview || "বার্তা..."}
+                            </p>
+                            {t.assigned_to_name && (
+                              <p className="mt-0.5 truncate text-[10px] font-semibold text-primary">
+                                দায়িত্বে: {t.assigned_to_name}
+                              </p>
+                            )}
+                          </div>
+                          <span className="shrink-0 text-[10px] text-muted-foreground">
+                            {new Date(t.last_message_at).toLocaleTimeString("bn-BD", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </aside>
+            )}
+
+            <div
+              className={`${
+                isStaff && !mobileThreadOpen ? "hidden lg:flex" : "flex"
+              } min-h-0 flex-1 flex-col`}
+            >
+              {/* Compact Active Conversation Subheader for Staff */}
+              {isStaff && (
+                <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 border-b border-border/70 bg-muted/20 px-3 py-2 sm:px-4">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setMobileThreadOpen(false)}
+                      className="inline-flex items-center gap-1 rounded-xl border border-border bg-card px-2.5 py-1 text-xs font-bold text-foreground lg:hidden"
+                    >
+                      <ArrowLeft className="h-3.5 w-3.5" /> তালিকা
+                    </button>
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-bold text-primary-deep sm:text-sm">
+                        {activeThreadRow?.user_name || activeThreadRow?.user_email || "গ্রাহক কথোপকথন"}
+                      </p>
+                      <p className="truncate text-[10.5px] text-muted-foreground">
+                        {activeThreadRow?.assigned_to_name
+                          ? `দায়িত্বপ্রাপ্ত: ${activeThreadRow.assigned_to_name}`
+                          : "সরাসরি লাইভ সাপোর্ট"}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="rounded-lg bg-primary/10 px-2.5 py-1 text-[10.5px] font-bold text-primary-deep">
+                    {senderRoleLabel}
                   </span>
                 </div>
-              </button>
-            );
-          })}
-        </div>
-      ) : (
-        /* Live Chat Messages View */
-        <>
-          <div className="flex-1 space-y-2.5 overflow-y-auto rounded-2xl border border-border bg-card/50 p-3.5 shadow-inner">
-            {msgsError && (
-              <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800">
-                <span>{msgsError}</span>
-                <button
-                  type="button"
-                  onClick={() => refreshMsgs()}
-                  className="rounded-lg bg-rose-600 px-2.5 py-1 text-[11px] font-bold text-white"
-                >
-                  আবার লোড করুন
-                </button>
-              </div>
-            )}
-            {msgsLoading && items.length === 0 && (
-              <div className="py-12 text-center text-muted-foreground space-y-2">
-                <Loader2 className="mx-auto h-6 w-6 animate-spin text-primary" />
-                <p className="text-xs">কথোপকথন লোড হচ্ছে...</p>
-              </div>
-            )}
-            {!msgsLoading && items.length === 0 && (
-              <div className="py-12 text-center text-muted-foreground space-y-2">
-                <MessageCircle className="mx-auto h-8 w-8 text-primary/50" />
-                <p className="text-xs font-semibold">আপনার প্রথম বার্তা পাঠান</p>
-                <p className="text-[11px]">এডমিন, এডিটর বা মডারেটর সরাসরি আপনার বার্তার উত্তর দেবেন।</p>
-              </div>
-            )}
-            {items.map((m) => {
-              const mine = isStaff ? m.sender_role === "staff" : m.sender_role === "user";
-              const staffSender = !mine ? getStaffProfile(m.sender_id) : null;
-              const staffRole = resolveStaffMessageRole(m) || m.sender_role_label || staffSender?.role_label || "অ্যাডমিন";
-              const isSuperStaff = staffRole === "সুপার অ্যাডমিন" || m.sender_id === "super_admin_mahmudul";
-              const staffName = isSuperStaff
-                ? "সুপার অ্যাডমিন"
-                : m.sender_name || staffSender?.full_name || "অ্যাডমিন সাপোর্ট";
-              const staffPhoto = m.sender_photo || staffSender?.photo_url || logo;
+              )}
 
-              return (
-                <div
-                  key={m.id}
-                  className={`flex items-end gap-2 ${mine ? "justify-end" : "justify-start"}`}
-                >
-                  {!mine && (
-                    <img
-                      src={staffPhoto}
-                      alt={staffName}
-                      className="h-8 w-8 shrink-0 rounded-full border border-primary/30 bg-white object-cover shadow-sm"
-                    />
-                  )}
-                  <div
-                    className={`group relative max-w-[82%] rounded-2xl px-3.5 py-2 text-xs sm:text-sm shadow-sm ${
-                      mine
-                        ? "bg-gradient-hero text-primary-foreground"
-                        : "border border-border bg-card text-foreground"
-                    }`}
-                  >
-                    <div className="mb-0.5 flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-1.5">
-                        <span className={`text-[10px] font-bold ${mine ? "text-gold" : "text-primary-deep"}`}>
-                          {mine ? "আপনি" : staffName}
-                        </span>
-                        {!mine && <span className="text-[10px] text-muted-foreground">· {staffRole}</span>}
-                      </div>
-                      {m.body && (
-                        <button
-                          type="button"
-                          onClick={() => handleCopy(m.body || "", m.id)}
-                          className={`rounded p-0.5 opacity-0 transition group-hover:opacity-100 ${
-                            mine ? "hover:bg-white/15 text-white/90" : "hover:bg-muted text-muted-foreground"
-                          }`}
-                          title="কপি করুন"
-                        >
-                          {copiedId === m.id ? <Check className="h-2.5 w-2.5 text-emerald-400" /> : <Copy className="h-2.5 w-2.5" />}
-                        </button>
+              {/* Scrollable Message History */}
+              <div className="flex-1 min-h-0 space-y-3 overflow-y-auto bg-background/40 p-3 sm:p-5">
+                {msgsError && (
+                  <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800">
+                    <span>{msgsError}</span>
+                    <button
+                      type="button"
+                      onClick={() => refreshMsgs()}
+                      className="rounded-lg bg-rose-600 px-2.5 py-1 text-[11px] font-bold text-white"
+                    >
+                      আবার লোড করুন
+                    </button>
+                  </div>
+                )}
+                {msgsLoading && items.length === 0 && (
+                  <div className="py-12 text-center text-muted-foreground space-y-2">
+                    <Loader2 className="mx-auto h-6 w-6 animate-spin text-primary" />
+                    <p className="text-xs">কথোপকথন লোড হচ্ছে...</p>
+                  </div>
+                )}
+                {!msgsLoading && items.length === 0 && (
+                  <div className="py-12 text-center text-muted-foreground space-y-2">
+                    <MessageCircle className="mx-auto h-8 w-8 text-primary/50" />
+                    <p className="text-xs font-semibold">আপনার প্রথম বার্তা পাঠান</p>
+                    <p className="text-[11px]">এডমিন, এডিটর বা মডারেটর সরাসরি আপনার বার্তার উত্তর দেবেন।</p>
+                  </div>
+                )}
+                {items.map((m) => {
+                  const mine = isStaff ? m.sender_role === "staff" : m.sender_role === "user";
+                  const staffSender = !mine ? getStaffProfile(m.sender_id) : null;
+                  const staffRole =
+                    resolveStaffMessageRole(m) || m.sender_role_label || staffSender?.role_label || "অ্যাডমিন";
+                  const isSuperStaff = staffRole === "সুপার অ্যাডমিন" || m.sender_id === "super_admin_mahmudul";
+                  const staffName = isSuperStaff
+                    ? "সুপার অ্যাডমিন"
+                    : m.sender_name || staffSender?.full_name || "অ্যাডমিন সাপোর্ট";
+                  const staffPhoto = m.sender_photo || staffSender?.photo_url || logo;
+
+                  return (
+                    <div
+                      key={m.id}
+                      className={`flex items-end gap-2 ${mine ? "justify-end" : "justify-start"}`}
+                    >
+                      {!mine && (
+                        <img
+                          src={staffPhoto}
+                          alt={staffName}
+                          className="h-8 w-8 shrink-0 rounded-full border border-primary/30 bg-white object-cover shadow-sm"
+                        />
                       )}
-                    </div>
-                    {m.body && <p className="whitespace-pre-wrap break-words leading-relaxed">{m.body}</p>}
-                    {m.attachment_url && <AttachmentView url={m.attachment_url} />}
-                    <div className="mt-0.5 flex items-center justify-between gap-2 text-[9px]">
-                      <span className={mine ? "opacity-75" : "text-muted-foreground"}>
-                        {new Date(m.created_at).toLocaleTimeString("bn-BD", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                      {mine && (
-                        <span className="flex items-center gap-0.5 text-[9px]">
-                          {m.status === "sending" && (
-                            <span className="opacity-75 animate-pulse">পাঠানো হচ্ছে...</span>
-                          )}
-                          {m.status === "failed" && (
+                      <div
+                        className={`group relative max-w-[85%] sm:max-w-[76%] rounded-2xl px-3.5 py-2.5 text-[13.5px] sm:text-sm shadow-sm ${
+                          mine
+                            ? "bg-gradient-hero text-primary-foreground"
+                            : "border border-border bg-card text-foreground"
+                        }`}
+                      >
+                        <div className="mb-0.5 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-[10.5px] font-bold ${mine ? "text-gold" : "text-primary-deep"}`}>
+                              {mine ? "আপনি" : staffName}
+                            </span>
+                            {!mine && <span className="text-[10px] text-muted-foreground">· {staffRole}</span>}
+                          </div>
+                          {m.body && (
                             <button
                               type="button"
-                              onClick={() => void retrySend(m.id)}
-                              className="rounded bg-rose-600 px-1.5 py-0.5 text-[9px] font-bold text-white hover:bg-rose-700"
+                              onClick={() => handleCopy(m.body || "", m.id)}
+                              className={`rounded p-0.5 opacity-0 transition group-hover:opacity-100 ${
+                                mine ? "hover:bg-white/15 text-white/90" : "hover:bg-muted text-muted-foreground"
+                              }`}
+                              title="কপি করুন"
                             >
-                              ব্যর্থ · পুনরায় পাঠান
+                              {copiedId === m.id ? (
+                                <Check className="h-3 w-3 text-emerald-400" />
+                              ) : (
+                                <Copy className="h-3 w-3" />
+                              )}
                             </button>
                           )}
-                          {(!m.status || m.status === "sent") && (
-                            <span className="text-gold font-bold">✓</span>
+                        </div>
+                        {m.body && <p className="whitespace-pre-wrap break-words leading-relaxed">{m.body}</p>}
+                        {m.attachment_url && <AttachmentView url={m.attachment_url} />}
+                        <div className="mt-1 flex items-center justify-between gap-2 text-[10px]">
+                          <span className={mine ? "opacity-80" : "text-muted-foreground"}>
+                            {new Date(m.created_at).toLocaleTimeString("bn-BD", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </span>
+                          {mine && (
+                            <span className="flex items-center gap-0.5 text-[10px]">
+                              {m.status === "sending" && (
+                                <span className="opacity-75 animate-pulse">পাঠানো হচ্ছে...</span>
+                              )}
+                              {m.status === "failed" && (
+                                <button
+                                  type="button"
+                                  onClick={() => void retrySend(m.id)}
+                                  className="rounded bg-rose-600 px-1.5 py-0.5 text-[9.5px] font-bold text-white hover:bg-rose-700"
+                                >
+                                  ব্যর্থ · পুনরায় পাঠান
+                                </button>
+                              )}
+                              {(!m.status || m.status === "sent") && (
+                                <span className="font-bold text-gold">✓</span>
+                              )}
+                            </span>
                           )}
-                        </span>
-                      )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              );
-            })}
-            <div ref={endRef} />
-          </div>
+                  );
+                })}
+                <div ref={endRef} />
+              </div>
 
-          {/* Chat Input Bar */}
-          <form onSubmit={onSend} className="mt-2.5 flex items-center gap-2">
-            <label className="flex h-11 w-11 cursor-pointer shrink-0 items-center justify-center rounded-full bg-card text-primary shadow-card border border-border hover:bg-muted transition">
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
-              <input
-                type="file"
-                accept="image/*,application/pdf"
-                className="hidden"
-                onChange={onFile}
-              />
-            </label>
-            <VoiceRecorderButton onRecorded={onVoice} disabled={busy} />
-            <input
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="আপনার বার্তা লিখুন..."
-              maxLength={2000}
-              className="flex-1 rounded-full border border-border bg-card px-4 py-2.5 text-xs sm:text-sm outline-none focus:border-primary shadow-sm"
-            />
-            <button
-              type="submit"
-              disabled={busy || !text.trim()}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-hero text-primary-foreground shadow-elevated active:scale-95 disabled:opacity-60"
-            >
-              <Send className="h-4 w-4" />
-            </button>
-          </form>
-        </>
-      )}
+              {/* Docked Multiline Chat Composer */}
+              {canReplyChat ? (
+                <form
+                  onSubmit={onSend}
+                  className="shrink-0 flex items-end gap-1.5 sm:gap-2 border-t border-border/80 bg-card px-2.5 py-2 sm:px-4 sm:py-2.5"
+                >
+                  <label className="flex h-10 w-10 sm:h-11 sm:w-11 cursor-pointer shrink-0 items-center justify-center rounded-full border border-border bg-background text-primary shadow-2xs transition hover:bg-muted">
+                    {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      className="hidden"
+                      onChange={onFile}
+                    />
+                  </label>
+                  <VoiceRecorderButton onRecorded={onVoice} disabled={busy} />
+                  <textarea
+                    rows={1}
+                    value={text}
+                    onChange={(e) => {
+                      setText(e.target.value);
+                      e.target.style.height = "auto";
+                      e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        void onSend(e as unknown as React.FormEvent);
+                      }
+                    }}
+                    onFocus={() => setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), 120)}
+                    placeholder="আপনার বার্তা লিখুন..."
+                    maxLength={2000}
+                    className="min-h-[42px] max-h-28 min-w-0 flex-1 resize-none overflow-y-auto rounded-2xl border border-border bg-background px-3.5 py-2.5 text-sm leading-relaxed outline-none focus:border-primary"
+                  />
+                  <button
+                    type="submit"
+                    disabled={busy || !text.trim()}
+                    className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-full bg-gradient-hero px-3.5 text-xs font-bold text-primary-foreground shadow-elevated active:scale-95 disabled:opacity-60 sm:h-11 sm:px-4"
+                  >
+                    <Send className="h-4 w-4" />
+                    <span className="hidden sm:inline">পাঠান</span>
+                  </button>
+                </form>
+              ) : (
+                <div className="shrink-0 border-t border-border bg-muted/30 px-4 py-2.5 text-center text-xs font-semibold text-muted-foreground">
+                  🔒 আপনার ভূমিকায় উত্তর দেওয়ার পারমিশন (chat_reply) নেই।
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

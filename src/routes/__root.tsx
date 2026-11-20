@@ -113,7 +113,7 @@ function RootComponent() {
       <ThemeAndSeoSync />
       <div className="min-h-screen w-full max-w-[100vw] overflow-x-hidden bg-background">
         <SiteHeader />
-        <main className="w-full max-w-[100vw] overflow-x-hidden">
+        <main id="main-content" tabIndex={-1} className="w-full max-w-[100vw] overflow-x-hidden outline-none">
           <Outlet />
         </main>
         <OfflineIndicator />

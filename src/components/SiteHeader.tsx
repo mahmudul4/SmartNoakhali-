@@ -1,20 +1,14 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
-  Menu,
   Search,
-  LogIn,
-  LogOut,
   ShieldCheck,
   User as UserIcon,
   WifiOff,
-  MapPin,
-  Building2,
-  Briefcase,
-  AlertTriangle,
+  LayoutGrid,
 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { NavigationDrawer } from "@/components/NavigationDrawer";
 import { useLogo, useCategories } from "@/lib/store";
 import { useAuth } from "@/lib/auth";
 import { NotificationBell } from "@/lib/notifications";
@@ -25,6 +19,7 @@ export function SiteHeader() {
   const [open, setOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
+  const desktopMenuBtnRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
   const { logo } = useLogo();
   const { categories } = useCategories();
@@ -35,7 +30,7 @@ export function SiteHeader() {
     setAvatarError(false);
   }, [user?.photoURL]);
 
-  // Keyboard shortcut Ctrl+K / Cmd+K
+  // Keyboard shortcut Ctrl+K / Cmd+K for Smart Search
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
@@ -56,262 +51,173 @@ export function SiteHeader() {
 
   return (
     <>
-      <header className="sticky top-0 z-40 w-full max-w-[100vw] overflow-x-hidden border-t-2 border-amber-400/80 border-b border-emerald-200/15 bg-[#063924]/[0.97] text-white shadow-[0_6px_24px_-10px_rgba(4,35,22,0.5)] backdrop-blur-md">
-        <div className="flex w-full min-w-0 items-center justify-between gap-2 px-3.5 py-2 sm:gap-4 sm:px-6 sm:py-2.5 lg:gap-6 lg:px-8 xl:px-10 2xl:px-12">
-          <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3 lg:flex-none">
-            <Sheet open={open} onOpenChange={setOpen}>
-              <SheetTrigger
-                aria-label="মেনু খুলুন"
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/15 bg-white/[0.08] text-white transition-colors hover:bg-white/[0.16] active:scale-95 sm:h-10 sm:w-10"
+      <header className="sticky top-0 z-40 w-full max-w-[100vw] overflow-x-hidden border-t-[3px] border-t-[#064e3b] border-b border-emerald-950/10 bg-white/[0.97] text-[#063924] shadow-[0_4px_20px_-8px_rgba(6,57,36,0.14)] backdrop-blur-md">
+        {/* Keyboard & Screen-Reader Accessible Skip / Drawer Controls (zero visual clutter) */}
+        <div className="sr-only focus-within:not-sr-only focus-within:flex focus-within:items-center focus-within:gap-3 focus-within:bg-emerald-950/[0.04] focus-within:px-4 focus-within:py-2 focus-within:border-b focus-within:border-emerald-950/10">
+          <a
+            href="#main-content"
+            className="rounded-lg bg-[#064e3b] px-3 py-1.5 font-bangla text-xs font-semibold text-white outline-none focus-visible:ring-2 focus-visible:ring-[#064e3b]"
+          >
+            মূল কন্টেন্টে যান
+          </a>
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="rounded-lg border border-[#064e3b]/30 bg-white px-3 py-1.5 font-bangla text-xs font-semibold text-[#064e3b] outline-none focus-visible:ring-2 focus-visible:ring-[#064e3b]"
+          >
+            সম্পূর্ণ নেভিগেশন মেনু খুলুন (Alt+M)
+          </button>
+        </div>
+
+        <div className="flex w-full min-w-0 items-center justify-between gap-2.5 px-3.5 py-2 sm:gap-4 sm:px-6 sm:py-2.5 lg:gap-6 lg:px-8 xl:px-10 2xl:px-12">
+          {/* Left: Official Circular Logo + Refined English & Bangla Brand Lockup */}
+          <Link
+            to="/"
+            className="group flex min-w-0 items-center gap-2.5 sm:gap-3 focus-visible:rounded-xl"
+          >
+            <div className="relative flex h-10 w-10 shrink-0 items-center justify-center min-[360px]:h-11 min-[360px]:w-11 sm:h-12 sm:w-12 lg:h-[50px] lg:w-[50px]">
+              <img
+                src={logo}
+                alt="Smart Noakhali Logo"
+                loading="eager"
+                decoding="sync"
+                className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.03]"
+              />
+            </div>
+            <div className="flex min-w-0 flex-col justify-center text-left">
+              <div className="flex items-baseline gap-1.5 whitespace-nowrap font-brand text-[17.5px] font-bold tracking-[-0.015em] leading-[1.12] min-[360px]:text-[19px] sm:text-[21px] lg:text-[23px]">
+                <span className="text-[#064e3b]">Smart</span>
+                <span className="text-[#b91c1c]">Noakhali</span>
+              </div>
+              <span className="mt-0.5 truncate font-bangla text-[11px] font-medium leading-[1.35] text-emerald-900/80 sm:text-[11.5px]">
+                স্মার্ট নোয়াখালী
+              </span>
+            </div>
+          </Link>
+
+          {/* Right Cluster: Desktop Navigation + Action Controls */}
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2.5 lg:gap-5">
+            <nav
+              aria-label="প্রধান নেভিগেশন"
+              className="hidden lg:flex items-center gap-5 xl:gap-6 font-bangla text-[14px] font-semibold text-[#064e3b]"
+            >
+              <Link to="/" className="whitespace-nowrap py-1 underline-offset-4 transition-colors hover:text-[#b91c1c] hover:underline">
+                হোম
+              </Link>
+              <Link to="/directory" className="whitespace-nowrap py-1 underline-offset-4 transition-colors hover:text-[#b91c1c] hover:underline">
+                ডিরেক্টরি
+              </Link>
+              <Link to="/blood-donor" className="whitespace-nowrap py-1 underline-offset-4 transition-colors hover:text-[#b91c1c] hover:underline">
+                রক্তদাতা
+              </Link>
+              <Link to="/map" className="whitespace-nowrap py-1 underline-offset-4 transition-colors hover:text-[#b91c1c] hover:underline">
+                জেলা ম্যাপ
+              </Link>
+              <Link to="/chat" className="whitespace-nowrap py-1 underline-offset-4 transition-colors hover:text-[#b91c1c] hover:underline">
+                লাইভ চ্যাট
+              </Link>
+              <Link to="/submit-info" className="whitespace-nowrap py-1 underline-offset-4 transition-colors hover:text-[#b91c1c] hover:underline">
+                তথ্য দিন
+              </Link>
+              <button
+                ref={desktopMenuBtnRef}
+                type="button"
+                onClick={() => setOpen(true)}
+                aria-expanded={open}
+                aria-label="সকল সেবা ও বিভাগ ড্রয়ার খুলুন"
+                className="inline-flex items-center gap-1.5 whitespace-nowrap py-1 underline-offset-4 transition-colors hover:text-[#b91c1c] hover:underline"
               >
-                <Menu className="h-[18px] w-[18px]" />
-              </SheetTrigger>
-              <SheetContent side="left" className="w-72 max-w-[85vw] overflow-y-auto border-sidebar-border bg-sidebar text-sidebar-foreground">
-                <div className="mb-6 mt-2 flex items-center gap-3 border-b border-sidebar-border/70 pb-4">
-                  <div className="flex h-13 w-13 shrink-0 items-center justify-center p-0.5">
-                    <img
-                      src={logo}
-                      alt="Smart Noakhali Logo"
-                      className="h-full w-full object-contain"
-                    />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-brand text-[19px] font-extrabold tracking-tight text-white">
-                      Smart Noakhali
-                    </p>
-                    <p className="mt-0.5 text-xs font-semibold tracking-wide text-amber-300">
-                      স্মার্ট নোয়াখালী
-                    </p>
-                  </div>
-                </div>
+                <LayoutGrid className="h-3.5 w-3.5 shrink-0 opacity-80" />
+                <span>সকল সেবা</span>
+              </button>
+            </nav>
 
-                <nav className="flex flex-col gap-1 pb-6">
-                  <Link to="/" onClick={() => setOpen(false)} className="rounded-lg px-3 py-2 text-sm font-semibold hover:bg-sidebar-accent">
-                    হোম
-                  </Link>
-
-                  <div className="my-1 border-t border-sidebar-border/60" />
-                  <p className="px-3 py-1 text-[10.5px] font-bold uppercase tracking-wider text-amber-300/90">
-                    নাগরিক ও জেলা সেবা
-                  </p>
-                  <Link
-                    to="/map"
-                    onClick={() => setOpen(false)}
-                    className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium hover:bg-sidebar-accent"
-                  >
-                    <MapPin className="h-4 w-4 shrink-0 text-amber-300" />
-                    <span>নোয়াখালী ম্যাপ ও দূরত্ব</span>
-                  </Link>
-                  <Link
-                    to="/directory"
-                    onClick={() => setOpen(false)}
-                    className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium hover:bg-sidebar-accent"
-                  >
-                    <Building2 className="h-4 w-4 shrink-0 text-amber-300" />
-                    <span>প্রতিষ্ঠান ও ব্যবসা ডিরেক্টরি</span>
-                  </Link>
-                  <Link
-                    to="/career"
-                    onClick={() => setOpen(false)}
-                    className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium hover:bg-sidebar-accent"
-                  >
-                    <Briefcase className="h-4 w-4 shrink-0 text-amber-300" />
-                    <span>শিক্ষা ও ক্যারিয়ার হাব</span>
-                  </Link>
-                  <Link
-                    to="/complaint-tracking"
-                    onClick={() => setOpen(false)}
-                    className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium hover:bg-sidebar-accent"
-                  >
-                    <AlertTriangle className="h-4 w-4 shrink-0 text-amber-300" />
-                    <span>নাগরিক অভিযোগ ট্র্যাকিং</span>
-                  </Link>
-                  <Link
-                    to="/profile"
-                    onClick={() => setOpen(false)}
-                    className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium hover:bg-sidebar-accent"
-                  >
-                    <UserIcon className="h-4 w-4 shrink-0 text-amber-300" />
-                    <span>আমার প্রোফাইল ও বুকমার্ক</span>
-                  </Link>
-
-                  <div className="my-1 border-t border-sidebar-border/60" />
-                  <p className="px-3 py-1 text-[10.5px] font-bold uppercase tracking-wider text-amber-300/90">
-                    প্রধান ক্যাটাগরিসমূহ
-                  </p>
-                  {categories
-                    .filter((c) => c.slug !== "chat" && c.slug !== "app-download")
-                    .map((c) => {
-                      const common = "flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-sidebar-accent";
-                      if (c.customRoute) {
-                        const cleanRoute = c.customRoute.trim();
-                        if (cleanRoute.startsWith("/")) {
-                          return (
-                            <Link key={c.slug} to={cleanRoute as "/"} onClick={() => setOpen(false)} className={common}>
-                              <c.icon className="h-4 w-4 shrink-0 text-gold" />
-                              <span className="truncate">{c.bn}</span>
-                            </Link>
-                          );
-                        }
-                        if (/^https?:\/\//i.test(cleanRoute)) {
-                          return (
-                            <a key={c.slug} href={cleanRoute} target="_blank" rel="noreferrer" onClick={() => setOpen(false)} className={common}>
-                              <c.icon className="h-4 w-4 shrink-0 text-gold" />
-                              <span className="truncate">{c.bn}</span>
-                            </a>
-                          );
-                        }
-                      }
-                      if (c.slug === "submit-info")
-                        return <Link key={c.slug} to="/submit-info" onClick={() => setOpen(false)} className={common}><c.icon className="h-4 w-4 shrink-0 text-gold" /><span className="truncate">{c.bn}</span></Link>;
-                      if (c.slug === "donation")
-                        return <Link key={c.slug} to="/donation" onClick={() => setOpen(false)} className={common}><c.icon className="h-4 w-4 shrink-0 text-gold" /><span className="truncate">{c.bn}</span></Link>;
-                      if (c.slug === "about")
-                        return <Link key={c.slug} to="/about" onClick={() => setOpen(false)} className={common}><c.icon className="h-4 w-4 shrink-0 text-gold" /><span className="truncate">{c.bn}</span></Link>;
-                      if (c.slug === "board-result")
-                        return <Link key={c.slug} to="/board-result" onClick={() => setOpen(false)} className={common}><c.icon className="h-4 w-4 shrink-0 text-gold" /><span className="truncate">{c.bn}</span></Link>;
-                      if (c.slug === "blood-donor")
-                        return <Link key={c.slug} to="/blood-donor" onClick={() => setOpen(false)} className={common}><c.icon className="h-4 w-4 shrink-0 text-gold" /><span className="truncate">{c.bn}</span></Link>;
-                      if (c.slug === "emergency-request")
-                        return <Link key={c.slug} to="/emergency-request" onClick={() => setOpen(false)} className={common}><c.icon className="h-4 w-4 shrink-0 text-gold" /><span className="truncate">{c.bn}</span></Link>;
-                      return (
-                        <Link key={c.slug} to="/category/$slug" params={{ slug: c.slug }} onClick={() => setOpen(false)} className={common}>
-                          <c.icon className="h-4 w-4 shrink-0 text-gold" />
-                          <span className="truncate">{c.bn}</span>
-                        </Link>
-                      );
-                    })}
-                  <div className="my-2 h-px bg-sidebar-border" />
-                  {isAuthed && (isMainAdmin || isStaff) && (
-                    <Link
-                      to="/mdmahmudulhashan"
-                      onClick={() => setOpen(false)}
-                      className="flex items-center gap-3 rounded-lg bg-gold/15 px-3 py-2 text-sm font-semibold text-gold transition hover:bg-gold/25"
-                    >
-                      <ShieldCheck className="h-4 w-4 shrink-0 text-gold" /> ড্যাশবোর্ড / এডমিন প্যানেল
-                    </Link>
-                  )}
-                  {isAuthed ? (
-                    <>
-                      <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-muted-foreground">
-                        <UserIcon className="h-4 w-4 shrink-0 text-gold" />
-                        <span className="truncate">{user?.email || user?.displayName || "ব্যবহারকারী"}</span>
-                        {isAdmin && <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-gold" />}
-                      </div>
-                      <button onClick={() => void handleHeaderLogout()} className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-sidebar-accent">
-                        <LogOut className="h-4 w-4 shrink-0 text-gold" /> লগআউট
-                      </button>
-                    </>
-                  ) : (
-                    <Link to="/auth" onClick={() => setOpen(false)} className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-sidebar-accent">
-                      <LogIn className="h-4 w-4 shrink-0 text-gold" /> লগইন / নিবন্ধন
-                    </Link>
-                  )}
-                </nav>
-              </SheetContent>
-            </Sheet>
-
-            {/* Brand Lockup: Crisp Official Logo + Authoritative Typography */}
-            <Link to="/" className="group flex min-w-0 items-center gap-2.5 sm:gap-3">
-              <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] p-0.5 ring-1 ring-white/15 min-[360px]:h-10 min-[360px]:w-10 sm:h-11 sm:w-11">
-                <img
-                  src={logo}
-                  alt="Smart Noakhali Logo"
-                  loading="eager"
-                  decoding="sync"
-                  className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.04]"
-                />
-              </div>
-              <div className="min-w-0 text-left leading-tight">
-                <span className="block truncate font-brand text-[15px] font-extrabold tracking-tight text-white min-[360px]:text-[17px] sm:text-[20px] lg:text-[21px]">
-                  Smart Noakhali
-                </span>
-                <span className="block truncate font-bangla text-[10.5px] font-semibold tracking-wide text-amber-300/95 min-[360px]:text-[11px] sm:text-[11.5px]">
-                  স্মার্ট নোয়াখালী
-                </span>
-              </div>
-            </Link>
-          </div>
-
-          {/* Balanced Desktop Navigation */}
-          <nav aria-label="প্রধান নেভিগেশন" className="hidden lg:flex items-center gap-1 xl:gap-2 text-[13.5px] font-semibold text-emerald-50/90">
-            <Link to="/" className="whitespace-nowrap shrink-0 rounded-lg px-3 py-1.5 transition-colors hover:bg-white/10 hover:text-white">
-              হোম
-            </Link>
-            <Link to="/directory" className="whitespace-nowrap shrink-0 rounded-lg px-3 py-1.5 transition-colors hover:bg-white/10 hover:text-white">
-              ডিরেক্টরি
-            </Link>
-            <Link to="/blood-donor" className="whitespace-nowrap shrink-0 rounded-lg px-3 py-1.5 transition-colors hover:bg-white/10 hover:text-white">
-              রক্তদাতা
-            </Link>
-            <Link to="/map" className="whitespace-nowrap shrink-0 rounded-lg px-3 py-1.5 transition-colors hover:bg-white/10 hover:text-white">
-              জেলা ম্যাপ
-            </Link>
-            <Link to="/submit-info" className="whitespace-nowrap shrink-0 rounded-lg px-3 py-1.5 transition-colors hover:bg-white/10 hover:text-white">
-              তথ্য দিন
-            </Link>
-          </nav>
-
-          {/* Right Action Cluster */}
-          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             <button
               type="button"
-              onClick={() => setSearchOpen(true)}
-              aria-label="স্মার্ট সার্চ"
-              className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/15 bg-white/[0.08] text-xs font-semibold text-white transition-colors hover:bg-white/[0.16] active:scale-95 sm:w-auto sm:gap-1.5 sm:px-3"
-              title="স্মার্ট সার্চ (Ctrl+K)"
+              onClick={() => setOpen(true)}
+              aria-expanded={open}
+              aria-label="সকল সেবা ও বিভাগ ড্রয়ার খুলুন"
+              className="hidden md:inline-flex lg:hidden items-center gap-1.5 whitespace-nowrap py-1 font-bangla text-[13.5px] font-semibold text-[#064e3b] underline-offset-4 transition-colors hover:text-[#b91c1c] hover:underline"
             >
-              <Search className="h-4 w-4 text-amber-300" />
-              <span className="hidden sm:inline">সার্চ</span>
-              <kbd className="hidden xl:inline-block rounded border border-white/20 bg-white/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-emerald-100/80">
-                ⌘K
-              </kbd>
+              <LayoutGrid className="h-3.5 w-3.5 shrink-0 opacity-80" />
+              <span>সকল সেবা</span>
             </button>
 
-            {!isOnline && (
-              <span
-                className="flex h-9 items-center gap-1 rounded-xl border border-amber-300/40 bg-amber-500/20 px-2 text-[10.5px] font-bold text-amber-200 animate-pulse"
-                title="অফলাইন মোড সক্রিয়"
+            <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+              <button
+                type="button"
+                onClick={() => setSearchOpen(true)}
+                aria-label="স্মার্ট সার্চ"
+                className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-950/15 bg-emerald-950/[0.04] font-bangla text-xs font-semibold text-[#064e3b] transition-colors hover:bg-emerald-950/[0.09] active:scale-95 sm:h-9 sm:w-auto sm:gap-1.5 sm:px-3"
+                title="স্মার্ট সার্চ (Ctrl+K)"
               >
-                <WifiOff className="h-3.5 w-3.5 shrink-0" />
-                <span className="hidden sm:inline">অফলাইন</span>
-              </span>
-            )}
+                <Search className="h-4 w-4 text-[#064e3b]" />
+                <span className="hidden sm:inline">সার্চ</span>
+                <kbd className="hidden xl:inline-block rounded border border-emerald-950/15 bg-white px-1.5 py-0.5 font-mono text-[10px] font-semibold text-emerald-900/75">
+                  ⌘K
+                </kbd>
+              </button>
 
-            <NotificationBell />
-
-            {isAuthed && (isMainAdmin || isStaff) && (
-              <Link
-                to="/mdmahmudulhashan"
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-amber-300/40 bg-amber-400/15 text-xs font-bold text-amber-200 transition-colors hover:bg-amber-400/25 sm:w-auto sm:gap-1.5 sm:px-3"
-                title="সিকিউরিটি / এডমিন ড্যাশবোর্ড"
-                aria-label="সিকিউরিটি ড্যাশবোর্ড"
-              >
-                <ShieldCheck className="h-4 w-4 shrink-0 text-amber-300" />
-                <span className="hidden md:inline">ড্যাশবোর্ড</span>
-              </Link>
-            )}
-
-            <Link
-              to="/profile"
-              aria-label={isAuthed && user?.displayName ? `${user.displayName} — আমার প্রোফাইল` : "আমার প্রোফাইল"}
-              title={isAuthed && user?.displayName ? `${user.displayName} — আমার প্রোফাইল` : "আমার প্রোফাইল"}
-              className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/75 bg-white/15 text-white shadow-sm ring-1 ring-white/20 transition hover:border-amber-300 hover:ring-amber-300/50 active:scale-95 sm:h-9 sm:w-9"
-            >
-              {isAuthed && user?.photoURL && !avatarError ? (
-                <img
-                  src={user.photoURL}
-                  alt={user.displayName || "আমার প্রোফাইল"}
-                  onError={() => setAvatarError(true)}
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <UserIcon className="h-4 w-4 text-white" />
+              {!isOnline && (
+                <span
+                  className="flex h-9 items-center gap-1 rounded-xl border border-amber-500/40 bg-amber-500/15 px-2 font-bangla text-[10.5px] font-bold text-amber-900"
+                  title="অফলাইন মোড সক্রিয়"
+                >
+                  <WifiOff className="h-3.5 w-3.5 shrink-0" />
+                  <span className="hidden sm:inline">অফলাইন</span>
+                </span>
               )}
-            </Link>
+
+              <NotificationBell />
+
+              {isAuthed && (isMainAdmin || isStaff) && (
+                <Link
+                  to="/mdmahmudulhashan"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#b91c1c]/25 bg-[#b91c1c]/[0.07] font-bangla text-xs font-bold text-[#991b1b] transition-colors hover:bg-[#b91c1c]/[0.14] sm:h-9 sm:w-auto sm:gap-1.5 sm:px-3"
+                  title="সিকিউরিটি / এডমিন ড্যাশবোর্ড"
+                  aria-label="সিকিউরিটি ড্যাশবোর্ড"
+                >
+                  <ShieldCheck className="h-4 w-4 shrink-0 text-[#b91c1c]" />
+                  <span className="hidden md:inline">ড্যাশবোর্ড</span>
+                </Link>
+              )}
+
+              <Link
+                to="/profile"
+                aria-label={isAuthed && user?.displayName ? `${user.displayName} — আমার প্রোফাইল` : "আমার প্রোফাইল"}
+                title={isAuthed && user?.displayName ? `${user.displayName} — আমার প্রোফাইল` : "আমার প্রোফাইল"}
+                className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#064e3b]/30 bg-emerald-950/[0.06] text-[#064e3b] shadow-2xs transition hover:border-[#b91c1c] active:scale-95 sm:h-9 sm:w-9"
+              >
+                {isAuthed && user?.photoURL && !avatarError ? (
+                  <img
+                    src={user.photoURL}
+                    alt={user.displayName || "আমার প্রোফাইল"}
+                    onError={() => setAvatarError(true)}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <UserIcon className="h-4 w-4 text-[#064e3b]" />
+                )}
+              </Link>
+            </div>
           </div>
         </div>
       </header>
+
+      {/* Swipe-Enabled & Keyboard-Accessible Slide-In Navigation Drawer */}
+      <NavigationDrawer
+        open={open}
+        onOpenChange={setOpen}
+        logo={logo}
+        categories={categories}
+        isAuthed={isAuthed}
+        isMainAdmin={isMainAdmin}
+        isStaff={isStaff}
+        isAdmin={isAdmin}
+        user={user}
+        onLogout={handleHeaderLogout}
+        restoreFocusRef={desktopMenuBtnRef}
+      />
 
       {/* Global Smart Search Modal */}
       <SmartSearchModal

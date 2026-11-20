@@ -19,6 +19,8 @@ import {
   Headphones,
   Copy,
   Check,
+  ArrowLeft,
+  Search,
 } from "lucide-react";
 import { toast } from "sonner";
 import { auth, ensureFirebaseAuthUser } from "@/lib/firebase";
@@ -85,7 +87,7 @@ const QUICK_AI_PROMPTS = [
 
 export function FloatingLiveChat() {
   const { user, isAuthed, isStaff, isMainAdmin, roles } = useAuth();
-  const { customRoles } = useRolePermissions();
+  const { customRoles, hasPermission } = useRolePermissions();
   const { getStaffProfile } = useStaffProfiles();
   const { logo } = useLogo();
   const { meta } = useSiteMetaConfig();
@@ -99,6 +101,9 @@ export function FloatingLiveChat() {
   const [open, setOpen] = useState(false);
   const [chatMode, setChatMode] = useState<"ai" | "live">(() => (aiConfig.enabled ? "ai" : "live"));
   const [threadId, setThreadId] = useState<string | null>(null);
+  const [staffSelectedThreadId, setStaffSelectedThreadId] = useState<string | null>(null);
+  const [mobileStaffThreadOpen, setMobileStaffThreadOpen] = useState(false);
+  const [staffSearch, setStaffSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [text, setText] = useState("");
@@ -145,7 +150,40 @@ export function FloatingLiveChat() {
     });
   }, [user]);
 
-  const effectiveThreadId = user?.id || activeUid || getOrCreateGuestId();
+  const canViewAllChats = isMainAdmin || hasPermission("chat_view_all");
+  const canReplyChat = !isStaff || isMainAdmin || hasPermission("chat_reply");
+
+  const visibleStaffThreads = isStaff
+    ? (canViewAllChats
+        ? threadsHook.items
+        : threadsHook.items.filter(
+            (t) =>
+              Boolean(t.assigned_to_uid) &&
+              (t.assigned_to_uid === user?.id || t.assigned_to_uid === activeUid)
+          )
+      ).filter((t) => {
+        const q = staffSearch.trim().toLowerCase();
+        if (!q) return true;
+        return [t.user_name, t.user_email, t.last_message_preview, t.assigned_to_name]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
+      })
+    : [];
+
+  useEffect(() => {
+    if (isStaff && open && chatMode === "live" && !staffSelectedThreadId && visibleStaffThreads.length > 0) {
+      setStaffSelectedThreadId(visibleStaffThreads[0].id);
+    }
+  }, [isStaff, open, chatMode, staffSelectedThreadId, visibleStaffThreads]);
+
+  const effectiveThreadId =
+    isStaff && staffSelectedThreadId
+      ? staffSelectedThreadId
+      : isStaff && visibleStaffThreads.length > 0
+        ? visibleStaffThreads[0].id
+        : user?.id || activeUid || getOrCreateGuestId();
 
   function resetAiChat() {
     setAiMessages([
@@ -447,94 +485,107 @@ export function FloatingLiveChat() {
   }
 
   return (
-    <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end">
+    <>
       {open && (
-        <div className="mb-3 flex h-[490px] w-[calc(100vw-1.5rem)] max-w-[375px] flex-col overflow-hidden rounded-3xl border border-primary/25 bg-card shadow-elevated">
-          {/* Header (Distinct AI vs Live Chat theming) */}
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 p-1.5 backdrop-blur-[2px] sm:items-center sm:p-4"
+          onClick={() => setOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="লাইভ চ্যাট ও এআই সহকারী"
+        >
           <div
-            className={`px-4 pt-3 pb-2.5 text-white ${
-              chatMode === "ai"
-                ? "bg-gradient-to-r from-indigo-700 via-teal-700 to-emerald-700"
-                : "bg-gradient-hero"
-            }`}
+            onClick={(e) => e.stopPropagation()}
+            className="flex h-[85dvh] max-h-[calc(100dvh-0.75rem)] min-h-[380px] w-full flex-col overflow-hidden rounded-2xl border border-primary/25 bg-card shadow-2xl sm:rounded-3xl md:h-[84vh] md:max-h-[880px] md:w-[88vw] lg:w-[86vw] xl:w-[84vw] max-w-[1380px]"
           >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="relative flex h-9 w-9 items-center justify-center rounded-full bg-white/15">
-                  {chatMode === "ai" ? (
-                    <Bot className="h-5 w-5 text-gold" />
-                  ) : (
-                    <Headphones className="h-5 w-5 text-gold" />
-                  )}
-                  <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-primary-deep" />
+            {/* Compact Header (Distinct AI vs Live Chat theming) */}
+            <div
+              className={`shrink-0 px-3.5 py-2.5 text-white sm:px-5 sm:py-3 ${
+                chatMode === "ai"
+                  ? "bg-gradient-to-r from-indigo-700 via-teal-700 to-emerald-700"
+                  : "bg-gradient-hero"
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/15">
+                    {chatMode === "ai" ? (
+                      <Bot className="h-5 w-5 text-gold" />
+                    ) : (
+                      <Headphones className="h-5 w-5 text-gold" />
+                    )}
+                    <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-primary-deep" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate font-display text-sm font-bold leading-tight sm:text-base">
+                      {chatMode === "ai" ? aiConfig.botName || "Smart Noakhali AI" : "সরাসরি লাইভ সাপোর্ট"}
+                    </p>
+                    <p className="truncate text-[10.5px] opacity-85">
+                      {chatMode === "ai"
+                        ? "এআই সহকারী • তাৎক্ষণিক তথ্য সহায়তা"
+                        : isStaff
+                          ? `${senderRoleLabel} • সাপোর্ট চ্যাট ওয়ার্কস্পেস`
+                          : "হিউম্যান অপারেটর • সরাসরি বার্তা"}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="font-display text-sm font-bold leading-tight">
-                    {chatMode === "ai" ? aiConfig.botName || "Smart Noakhali AI" : "সরাসরি লাইভ সাপোর্ট"}
-                  </p>
-                  <p className="text-[10px] opacity-85">
-                    {chatMode === "ai"
-                      ? "এআই সহকারী • তাৎক্ষণিক তথ্য সহায়তা"
-                      : "হিউম্যান অপারেটর • সরাসরি বার্তা"}
-                  </p>
+
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  {/* Compact Inline Mode Switcher */}
+                  <div className="flex items-center gap-1 rounded-xl bg-black/25 p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setChatMode("ai")}
+                      className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${
+                        chatMode === "ai"
+                          ? "bg-white text-indigo-900 shadow-sm"
+                          : "text-white/85 hover:text-white"
+                      }`}
+                    >
+                      <Sparkles className="h-3 w-3" /> এআই
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setChatMode("live")}
+                      className={`relative flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${
+                        chatMode === "live"
+                          ? "bg-white text-primary-deep shadow-sm"
+                          : "text-white/85 hover:text-white"
+                      }`}
+                    >
+                      <MessageCircle className="h-3 w-3" /> লাইভ
+                      {unreadCount > 0 && (
+                        <span className="ml-0.5 rounded-full bg-rose-600 px-1.5 py-0.2 text-[9px] font-extrabold text-white">
+                          {unreadCount}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+
+                  <Link
+                    to={isStaff && chatMode === "live" ? "/mdmahmudulhashan" : "/chat"}
+                    onClick={() => setOpen(false)}
+                    title="পূর্ণ পৃষ্ঠায় খুলুন"
+                    className="rounded-full p-1.5 text-white/85 transition hover:bg-white/15 hover:text-white"
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => setOpen(false)}
+                    title="বন্ধ করুন"
+                    className="rounded-full p-1.5 text-white/85 transition hover:bg-white/15 hover:text-white"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
                 </div>
-              </div>
-              <div className="flex items-center gap-1">
-                <Link
-                  to={isStaff && chatMode === "live" ? "/mdmahmudulhashan" : "/chat"}
-                  onClick={() => setOpen(false)}
-                  title="পূর্ণ স্ক্রিনে খুলুন"
-                  className="rounded-full p-1.5 text-white/80 transition hover:bg-white/15 hover:text-white"
-                >
-                  <Maximize2 className="h-4 w-4" />
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => setOpen(false)}
-                  title="বন্ধ করুন"
-                  className="rounded-full p-1.5 text-white/80 transition hover:bg-white/15 hover:text-white"
-                >
-                  <X className="h-4 w-4" />
-                </button>
               </div>
             </div>
 
-            {/* Mode Switcher: AI Assistant vs Live Support */}
-            <div className="mt-2.5 grid grid-cols-2 gap-1 rounded-xl bg-black/25 p-1">
-              <button
-                type="button"
-                onClick={() => setChatMode("ai")}
-                className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-bold transition ${
-                  chatMode === "ai"
-                    ? "bg-white text-indigo-900 shadow-sm"
-                    : "text-white/85 hover:text-white"
-                }`}
-              >
-                <Sparkles className="h-3.5 w-3.5" /> এআই দিয়ে খুঁজুন
-              </button>
-              <button
-                type="button"
-                onClick={() => setChatMode("live")}
-                className={`relative flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-bold transition ${
-                  chatMode === "live"
-                    ? "bg-white text-primary-deep shadow-sm"
-                    : "text-white/85 hover:text-white"
-                }`}
-              >
-                <MessageCircle className="h-3.5 w-3.5" /> লাইভ সাপোর্ট
-                {unreadCount > 0 && (
-                  <span className="ml-1 rounded-full bg-rose-600 px-1.5 py-0.2 text-[9px] font-extrabold text-white">
-                    {unreadCount}
-                  </span>
-                )}
-              </button>
-            </div>
-          </div>
-
-          {/* Body: AI Mode */}
-          {chatMode === "ai" ? (
-            <>
-              <div className="flex-1 space-y-2.5 overflow-y-auto bg-indigo-50/25 p-3">
+            {/* Body: AI Mode */}
+            {chatMode === "ai" ? (
+              <div className="flex flex-1 min-h-0 flex-col">
+                <div className="flex-1 min-h-0 space-y-3 overflow-y-auto bg-indigo-50/25 p-3.5 sm:p-5">
                 {!aiConfig.enabled && (
                   <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-center text-xs text-amber-900 space-y-2">
                     <p className="font-bold">এআই চ্যাট সাময়িকভাবে বন্ধ রয়েছে</p>
@@ -739,280 +790,425 @@ export function FloatingLiveChat() {
                 <div ref={aiEndRef} />
               </div>
 
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void askAi(aiInput);
-                }}
-                className="flex items-center gap-1.5 border-t border-border bg-card p-2.5"
-              >
-                <input
-                  value={aiInput}
-                  onChange={(e) => setAiInput(e.target.value)}
-                  placeholder="যেকোনো তথ্য বা নাম্বার খুঁজুন..."
-                  className="min-w-0 flex-1 rounded-full border border-border bg-background px-3.5 py-2 text-xs outline-none focus:border-primary"
-                />
-                <button
-                  type="submit"
-                  disabled={aiLoading}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-hero text-primary-foreground shadow-card active:scale-95 disabled:opacity-60"
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void askAi(aiInput);
+                  }}
+                  className="shrink-0 flex items-end gap-2 border-t border-border bg-card px-3 py-2.5 sm:px-4"
                 >
-                  <Send className="h-3.5 w-3.5" />
-                </button>
-              </form>
-            </>
-          ) : (
-            <>
-              {/* Header notice for guest or staff */}
-              {!isAuthed && (
-                <div className="flex flex-col border-b border-border bg-amber-500/10 px-3 py-1.5 text-xs text-amber-950">
-                  <div className="flex items-center justify-between gap-1.5">
-                    <span className="truncate text-[11px]">
-                      অতিথি চ্যাট: <strong>{guestName || "গ্রাহক"}</strong>
-                    </span>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setShowGuestEdit(!showGuestEdit)}
-                        className="text-[10px] font-bold text-amber-900 underline"
-                      >
-                        {showGuestEdit ? "সম্পন্ন" : "নাম লিখুন"}
-                      </button>
-                      <a
-                        href="/auth"
-                        className="rounded bg-primary px-2 py-0.5 text-[9px] font-bold text-primary-foreground"
-                      >
-                        লগইন করুন
-                      </a>
-                    </div>
-                  </div>
-                  {showGuestEdit && (
-                    <div className="mt-1.5 flex gap-1.5">
-                      <input
-                        value={guestName}
-                        onChange={(e) => {
-                          setGuestName(e.target.value);
-                          localStorage.setItem("sn_guest_name_v1", e.target.value);
-                        }}
-                        placeholder="আপনার নাম..."
-                        className="flex-1 rounded border border-border bg-background px-2 py-0.5 text-[10px]"
-                      />
-                      <input
-                        value={guestPhone}
-                        onChange={(e) => {
-                          setGuestPhone(e.target.value);
-                          localStorage.setItem("sn_guest_phone_v1", e.target.value);
-                        }}
-                        placeholder="মোবাইল নম্বর..."
-                        className="flex-1 rounded border border-border bg-background px-2 py-0.5 text-[10px]"
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {isStaff && (
-                <div className="flex items-center justify-between bg-primary/10 px-3 py-1 text-[11px] text-primary-deep border-b border-border">
-                  <span className="font-semibold">{senderRoleLabel} হিসেবে চ্যাট করছেন</span>
-                  <Link
-                    to="/mdmahmudulhashan"
-                    onClick={() => setOpen(false)}
-                    className="text-[10px] font-bold text-primary underline"
+                  <textarea
+                    rows={1}
+                    value={aiInput}
+                    onChange={(e) => {
+                      setAiInput(e.target.value);
+                      e.target.style.height = "auto";
+                      e.target.style.height = `${Math.min(e.target.scrollHeight, 112)}px`;
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        void askAi(aiInput);
+                      }
+                    }}
+                    onFocus={() => setTimeout(() => aiEndRef.current?.scrollIntoView({ behavior: "smooth" }), 120)}
+                    placeholder="যেকোনো তথ্য বা নাম্বার খুঁজুন..."
+                    className="min-h-[40px] max-h-28 min-w-0 flex-1 resize-none overflow-y-auto rounded-2xl border border-border bg-background px-3.5 py-2 text-sm leading-relaxed outline-none focus:border-primary"
+                  />
+                  <button
+                    type="submit"
+                    disabled={aiLoading}
+                    className="flex h-10 shrink-0 items-center justify-center gap-1 rounded-full bg-gradient-hero px-3.5 text-xs font-bold text-primary-foreground shadow-card active:scale-95 disabled:opacity-60"
                   >
-                    ইনবক্স ({unreadCount}) →
-                  </Link>
-                </div>
-              )}
-              {activeThreadRow && (activeThreadRow.status === "resolved" || activeThreadRow.status === "closed") && (
-                <div className="bg-amber-500/10 border-b border-amber-500/20 px-3 py-1 text-[10px] font-semibold text-amber-900">
-                  এই কথোপকথনটি {activeThreadRow.status === "resolved" ? "সমাধানকৃত" : "বন্ধ"} হিসেবে চিহ্নিত — নতুন বার্তা পাঠালে স্বয়ংক্রিয়ভাবে পুনরায় চালু হবে।
-                </div>
-              )}
-              <div className="flex-1 space-y-2.5 overflow-y-auto bg-background/60 p-3">
-                {msgsError && (
-                  <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-800">
-                    <span>{msgsError}</span>
-                    <button
-                      type="button"
-                      onClick={() => refreshMsgs()}
-                      className="rounded-lg bg-rose-600 px-2 py-0.5 text-[10px] font-bold text-white"
-                    >
-                      পুনরায় লোড
-                    </button>
-                  </div>
-                )}
-                {msgsLoading && items.length === 0 && (
-                  <div className="py-8 text-center text-xs text-muted-foreground">
-                    <Loader2 className="mx-auto mb-1.5 h-5 w-5 animate-spin text-primary" />
-                    বার্তা লোড হচ্ছে...
-                  </div>
-                )}
-                {!msgsLoading && items.length === 0 && (
-                  <div className="rounded-2xl border border-dashed border-border bg-card/80 p-5 text-center text-xs text-muted-foreground">
-                    আপনার যেকোনো প্রশ্ন বা জরুরী তথ্যের জন্য বার্তা লিখুন — এডমিন/মডারেটর উত্তর দিলে তার নাম ও ছবি এখানে দেখতে পাবেন।
-                  </div>
-                )}
-                {items.map((m) => {
-                  const mine = m.sender_role === "user";
-                  const staffSender = !mine ? getStaffProfile(m.sender_id) : null;
-                  const staffRole = resolveStaffMessageRole(m) || m.sender_role_label || staffSender?.role_label || "অ্যাডমিন";
-                  const isSuperStaff = staffRole === "সুপার অ্যাডমিন" || m.sender_id === "super_admin_mahmudul";
-                  const staffName = isSuperStaff
-                    ? "সুপার অ্যাডমিন"
-                    : m.sender_name || staffSender?.full_name || "অ্যাডমিন সাপোর্ট";
-                  const staffPhoto = m.sender_photo || staffSender?.photo_url || logo;
-
-                  return (
-                    <div
-                      key={m.id}
-                      className={`flex items-end gap-2 ${
-                        mine ? "justify-end" : "justify-start"
-                      }`}
-                    >
-                      {!mine && (
-                        <img
-                          src={staffPhoto}
-                          alt={staffName}
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = logo;
-                          }}
-                          className="h-7 w-7 shrink-0 rounded-full border border-primary/30 bg-white object-cover shadow-sm"
+                    <Send className="h-4 w-4" />
+                    <span className="hidden sm:inline">পাঠান</span>
+                  </button>
+                </form>
+              </div>
+            ) : (
+              <div
+                className={`flex-1 min-h-0 ${
+                  isStaff
+                    ? "grid grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[360px_minmax(0,1fr)]"
+                    : "flex flex-col"
+                }`}
+              >
+                {/* Staff Left Conversation List */}
+                {isStaff && (
+                  <aside
+                    className={`${
+                      mobileStaffThreadOpen ? "hidden lg:flex" : "flex"
+                    } min-h-0 flex-col border-border/80 bg-muted/15 lg:border-r`}
+                  >
+                    <div className="shrink-0 space-y-2 border-b border-border/70 p-2.5 sm:p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-display text-xs font-bold text-primary-deep">
+                          কথোপকথন ({visibleStaffThreads.length})
+                        </p>
+                        <Link
+                          to="/mdmahmudulhashan"
+                          onClick={() => setOpen(false)}
+                          className="inline-flex items-center gap-1 rounded-lg bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary hover:bg-primary/20"
+                        >
+                          <ShieldCheck className="h-3 w-3" /> ড্যাশবোর্ড
+                        </Link>
+                      </div>
+                      <div className="relative">
+                        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                        <input
+                          value={staffSearch}
+                          onChange={(e) => setStaffSearch(e.target.value)}
+                          placeholder="নাম বা বার্তা খুঁজুন..."
+                          className="w-full rounded-xl border border-border bg-card py-1.5 pl-8 pr-2.5 text-xs outline-none focus:border-primary"
                         />
+                      </div>
+                    </div>
+
+                    <div className="flex-1 min-h-0 space-y-1.5 overflow-y-auto p-2">
+                      {visibleStaffThreads.length === 0 ? (
+                        <p className="py-10 text-center text-xs text-muted-foreground">
+                          কোনো অনুমোদিত চ্যাট নেই
+                        </p>
+                      ) : (
+                        visibleStaffThreads.map((t) => {
+                          const isSelected = threadId === t.id;
+                          return (
+                            <button
+                              key={t.id}
+                              type="button"
+                              onClick={() => {
+                                setStaffSelectedThreadId(t.id);
+                                setMobileStaffThreadOpen(true);
+                              }}
+                              className={`flex w-full items-start justify-between gap-2 rounded-xl border p-2.5 text-left transition ${
+                                isSelected
+                                  ? "border-primary bg-primary/10 shadow-2xs"
+                                  : "border-border/70 bg-card hover:border-primary/40"
+                              }`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <p className="truncate text-xs font-bold text-foreground">
+                                    {t.user_name || t.user_email || `গ্রাহক #${t.id.slice(0, 6)}`}
+                                  </p>
+                                  {t.staff_unread > 0 && (
+                                    <span className="shrink-0 rounded-full bg-rose-600 px-1.5 py-0.2 text-[9px] font-extrabold text-white">
+                                      {t.staff_unread}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                                  {t.last_message_preview || "বার্তা..."}
+                                </p>
+                              </div>
+                              <span className="shrink-0 text-[10px] text-muted-foreground">
+                                {new Date(t.last_message_at).toLocaleTimeString("bn-BD", {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+                            </button>
+                          );
+                        })
                       )}
-                      <div
-                        className={`max-w-[80%] rounded-2xl px-3 py-2 text-xs shadow-sm ${
-                          mine
-                            ? "bg-gradient-hero text-primary-foreground"
-                            : "border border-border bg-card"
-                        }`}
-                      >
-                        <div className="mb-0.5 flex items-center gap-1.5">
-                          <span
-                            className={`text-[10px] font-bold ${
-                              mine ? "text-gold" : "text-primary-deep"
-                            }`}
+                    </div>
+                  </aside>
+                )}
+
+                {/* Active Conversation View */}
+                <div
+                  className={`${
+                    isStaff && !mobileStaffThreadOpen ? "hidden lg:flex" : "flex"
+                  } min-h-0 flex-1 flex-col`}
+                >
+                  {/* Header notice for guest or staff */}
+                  {!isAuthed && (
+                    <div className="shrink-0 flex flex-col border-b border-border bg-amber-500/10 px-3 py-1.5 text-xs text-amber-950">
+                      <div className="flex items-center justify-between gap-1.5">
+                        <span className="truncate text-[11px]">
+                          অতিথি চ্যাট: <strong>{guestName || "গ্রাহক"}</strong>
+                        </span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setShowGuestEdit(!showGuestEdit)}
+                            className="text-[10px] font-bold text-amber-900 underline"
                           >
-                            {mine ? "আপনি" : staffName}
-                          </span>
-                          {!mine && (
-                            <span className="text-[9px] font-semibold text-muted-foreground">
-                              · {staffRole}
-                            </span>
-                          )}
-                        </div>
-                        {m.body && (
-                          <p className="whitespace-pre-wrap break-words">
-                            {m.body}
-                          </p>
-                        )}
-                        {m.attachment_url && (
-                          <AttachmentView url={m.attachment_url} />
-                        )}
-                        <div className="mt-0.5 flex items-center justify-between gap-2 text-[9px]">
-                          <span className={mine ? "opacity-75" : "text-muted-foreground"}>
-                            {new Date(m.created_at).toLocaleTimeString("bn-BD", {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </span>
-                          {mine && (
-                            <span className="flex items-center gap-0.5 text-[9px]">
-                              {m.status === "sending" && (
-                                <span className="opacity-75 animate-pulse">পাঠানো হচ্ছে...</span>
-                              )}
-                              {m.status === "failed" && (
-                                <button
-                                  type="button"
-                                  onClick={() => void retrySend(m.id)}
-                                  className="inline-flex items-center gap-1 rounded bg-rose-600 px-1.5 py-0.5 text-[9px] font-bold text-white hover:bg-rose-700"
-                                >
-                                  ব্যর্থ · পুনরায় পাঠান
-                                </button>
-                              )}
-                              {(!m.status || m.status === "sent") && (
-                                <span className="text-gold font-bold">✓</span>
-                              )}
-                            </span>
-                          )}
+                            {showGuestEdit ? "সম্পন্ন" : "নাম লিখুন"}
+                          </button>
+                          <a
+                            href="/auth"
+                            className="rounded bg-primary px-2 py-0.5 text-[9px] font-bold text-primary-foreground"
+                          >
+                            লগইন করুন
+                          </a>
                         </div>
                       </div>
-                      {mine && (
-                        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
-                          <UserIcon className="h-3.5 w-3.5" />
+                      {showGuestEdit && (
+                        <div className="mt-1.5 flex gap-1.5">
+                          <input
+                            value={guestName}
+                            onChange={(e) => {
+                              setGuestName(e.target.value);
+                              localStorage.setItem("sn_guest_name_v1", e.target.value);
+                            }}
+                            placeholder="আপনার নাম..."
+                            className="flex-1 rounded border border-border bg-background px-2 py-0.5 text-[10px]"
+                          />
+                          <input
+                            value={guestPhone}
+                            onChange={(e) => {
+                              setGuestPhone(e.target.value);
+                              localStorage.setItem("sn_guest_phone_v1", e.target.value);
+                            }}
+                            placeholder="মোবাইল নম্বর..."
+                            className="flex-1 rounded border border-border bg-background px-2 py-0.5 text-[10px]"
+                          />
                         </div>
                       )}
                     </div>
-                  );
-                })}
-                <div ref={endRef} />
-              </div>
-
-              <form
-                onSubmit={onSend}
-                className="flex items-center gap-1.5 border-t border-border bg-card p-2.5"
-              >
-                <label
-                  title="ছবি বা ফাইল যুক্ত করুন"
-                  className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-muted text-primary transition hover:bg-primary/10"
-                >
-                  {busy ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Paperclip className="h-4 w-4" />
                   )}
-                  <input
-                    type="file"
-                    accept="image/*,application/pdf"
-                    className="hidden"
-                    onChange={onFile}
-                  />
-                </label>
-                <VoiceRecorderButton onRecorded={onVoice} disabled={busy} />
-                <input
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  placeholder="বার্তা লিখুন..."
-                  maxLength={2000}
-                  className="min-w-0 flex-1 rounded-full border border-border bg-background px-3 py-2 text-xs outline-none focus:border-primary"
-                />
-                <button
-                  type="submit"
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-hero text-primary-foreground shadow-card active:scale-95"
-                >
-                  <Send className="h-3.5 w-3.5" />
-                </button>
-              </form>
-            </>
-          )}
+
+                  {isStaff && (
+                    <div className="shrink-0 flex items-center justify-between gap-2 bg-primary/10 px-3 py-1.5 text-[11px] text-primary-deep border-b border-border">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setMobileStaffThreadOpen(false)}
+                          className="inline-flex items-center gap-1 rounded-lg bg-card px-2 py-0.5 text-[11px] font-bold text-foreground shadow-2xs ring-1 ring-border lg:hidden"
+                        >
+                          <ArrowLeft className="h-3 w-3" /> তালিকা
+                        </button>
+                        <span className="truncate font-bold">
+                          {activeThreadRow?.user_name || activeThreadRow?.user_email || `${senderRoleLabel} হিসেবে চ্যাট করছেন`}
+                        </span>
+                      </div>
+                      <Link
+                        to="/mdmahmudulhashan"
+                        onClick={() => setOpen(false)}
+                        className="shrink-0 text-[10.5px] font-bold text-primary underline"
+                      >
+                        পূর্ণ ইনবক্স ({unreadCount}) →
+                      </Link>
+                    </div>
+                  )}
+
+                  {activeThreadRow && (activeThreadRow.status === "resolved" || activeThreadRow.status === "closed") && (
+                    <div className="shrink-0 bg-amber-500/10 border-b border-amber-500/20 px-3 py-1 text-[10.5px] font-semibold text-amber-900">
+                      এই কথোপকথনটি {activeThreadRow.status === "resolved" ? "সমাধানকৃত" : "বন্ধ"} হিসেবে চিহ্নিত — নতুন বার্তা পাঠালে স্বয়ংক্রিয়ভাবে পুনরায় চালু হবে।
+                    </div>
+                  )}
+
+                  <div className="flex-1 min-h-0 space-y-3 overflow-y-auto bg-background/60 p-3.5 sm:p-5">
+                    {msgsError && (
+                      <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-800">
+                        <span>{msgsError}</span>
+                        <button
+                          type="button"
+                          onClick={() => refreshMsgs()}
+                          className="rounded-lg bg-rose-600 px-2 py-0.5 text-[10px] font-bold text-white"
+                        >
+                          পুনরায় লোড
+                        </button>
+                      </div>
+                    )}
+                    {msgsLoading && items.length === 0 && (
+                      <div className="py-10 text-center text-xs text-muted-foreground">
+                        <Loader2 className="mx-auto mb-1.5 h-5 w-5 animate-spin text-primary" />
+                        বার্তা লোড হচ্ছে...
+                      </div>
+                    )}
+                    {!msgsLoading && items.length === 0 && (
+                      <div className="rounded-2xl border border-dashed border-border bg-card/80 p-5 text-center text-xs text-muted-foreground">
+                        আপনার যেকোনো প্রশ্ন বা জরুরী তথ্যের জন্য বার্তা লিখুন — এডমিন/মডারেটর উত্তর দিলে তার নাম ও ছবি এখানে দেখতে পাবেন।
+                      </div>
+                    )}
+                    {items.map((m) => {
+                      const mine = isStaff ? m.sender_role === "staff" : m.sender_role === "user";
+                      const staffSender = !mine ? getStaffProfile(m.sender_id) : null;
+                      const staffRole =
+                        resolveStaffMessageRole(m) || m.sender_role_label || staffSender?.role_label || "অ্যাডমিন";
+                      const isSuperStaff = staffRole === "সুপার অ্যাডমিন" || m.sender_id === "super_admin_mahmudul";
+                      const staffName = isSuperStaff
+                        ? "সুপার অ্যাডমিন"
+                        : m.sender_name || staffSender?.full_name || "অ্যাডমিন সাপোর্ট";
+                      const staffPhoto = m.sender_photo || staffSender?.photo_url || logo;
+
+                      return (
+                        <div
+                          key={m.id}
+                          className={`flex items-end gap-2 ${
+                            mine ? "justify-end" : "justify-start"
+                          }`}
+                        >
+                          {!mine && (
+                            <img
+                              src={staffPhoto}
+                              alt={staffName}
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src = logo;
+                              }}
+                              className="h-8 w-8 shrink-0 rounded-full border border-primary/30 bg-white object-cover shadow-sm"
+                            />
+                          )}
+                          <div
+                            className={`max-w-[85%] sm:max-w-[76%] rounded-2xl px-3.5 py-2.5 text-[13.5px] sm:text-sm shadow-sm ${
+                              mine
+                                ? "bg-gradient-hero text-primary-foreground"
+                                : "border border-border bg-card"
+                            }`}
+                          >
+                            <div className="mb-0.5 flex items-center gap-1.5">
+                              <span
+                                className={`text-[10.5px] font-bold ${
+                                  mine ? "text-gold" : "text-primary-deep"
+                                }`}
+                              >
+                                {mine ? "আপনি" : staffName}
+                              </span>
+                              {!mine && (
+                                <span className="text-[10px] font-semibold text-muted-foreground">
+                                  · {staffRole}
+                                </span>
+                              )}
+                            </div>
+                            {m.body && (
+                              <p className="whitespace-pre-wrap break-words leading-relaxed">
+                                {m.body}
+                              </p>
+                            )}
+                            {m.attachment_url && (
+                              <AttachmentView url={m.attachment_url} />
+                            )}
+                            <div className="mt-1 flex items-center justify-between gap-2 text-[10px]">
+                              <span className={mine ? "opacity-80" : "text-muted-foreground"}>
+                                {new Date(m.created_at).toLocaleTimeString("bn-BD", {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+                              {mine && (
+                                <span className="flex items-center gap-0.5 text-[10px]">
+                                  {m.status === "sending" && (
+                                    <span className="opacity-75 animate-pulse">পাঠানো হচ্ছে...</span>
+                                  )}
+                                  {m.status === "failed" && (
+                                    <button
+                                      type="button"
+                                      onClick={() => void retrySend(m.id)}
+                                      className="inline-flex items-center gap-1 rounded bg-rose-600 px-1.5 py-0.5 text-[9.5px] font-bold text-white hover:bg-rose-700"
+                                    >
+                                      ব্যর্থ · পুনরায় পাঠান
+                                    </button>
+                                  )}
+                                  {(!m.status || m.status === "sent") && (
+                                    <span className="font-bold text-gold">✓</span>
+                                  )}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {mine && (
+                            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+                              <UserIcon className="h-3.5 w-3.5" />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    <div ref={endRef} />
+                  </div>
+
+                  {canReplyChat ? (
+                    <form
+                      onSubmit={onSend}
+                      className="shrink-0 flex items-end gap-1.5 sm:gap-2 border-t border-border bg-card px-2.5 py-2 sm:px-4 sm:py-2.5"
+                    >
+                      <label
+                        title="ছবি বা ফাইল যুক্ত করুন"
+                        className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border bg-background text-primary transition hover:bg-muted"
+                      >
+                        {busy ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Paperclip className="h-4 w-4" />
+                        )}
+                        <input
+                          type="file"
+                          accept="image/*,application/pdf"
+                          className="hidden"
+                          onChange={onFile}
+                        />
+                      </label>
+                      <VoiceRecorderButton onRecorded={onVoice} disabled={busy} />
+                      <textarea
+                        rows={1}
+                        value={text}
+                        onChange={(e) => {
+                          setText(e.target.value);
+                          e.target.style.height = "auto";
+                          e.target.style.height = `${Math.min(e.target.scrollHeight, 112)}px`;
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            void onSend(e as unknown as React.FormEvent);
+                          }
+                        }}
+                        onFocus={() => setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), 120)}
+                        placeholder="বার্তা লিখুন..."
+                        maxLength={2000}
+                        className="min-h-[40px] max-h-28 min-w-0 flex-1 resize-none overflow-y-auto rounded-2xl border border-border bg-background px-3.5 py-2 text-sm leading-relaxed outline-none focus:border-primary"
+                      />
+                      <button
+                        type="submit"
+                        disabled={busy || !text.trim()}
+                        className="flex h-10 shrink-0 items-center justify-center gap-1 rounded-full bg-gradient-hero px-3.5 text-xs font-bold text-primary-foreground shadow-card active:scale-95 disabled:opacity-60"
+                      >
+                        <Send className="h-4 w-4" />
+                        <span className="hidden sm:inline">পাঠান</span>
+                      </button>
+                    </form>
+                  ) : (
+                    <div className="shrink-0 border-t border-border bg-muted/30 px-4 py-2 text-center text-xs font-semibold text-muted-foreground">
+                      🔒 আপনার ভূমিকায় উত্তর দেওয়ার পারমিশন (chat_reply) নেই।
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       {/* Floating Action Button (Bottom-Right) */}
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-label="লাইভ চ্যাট ও এআই"
-        className="group relative flex items-center gap-2 rounded-full bg-gradient-hero px-4 py-3 text-primary-foreground shadow-elevated ring-2 ring-gold/70 transition-all duration-200 hover:scale-105 active:scale-95"
-      >
-        <span className="relative flex h-5 w-5 items-center justify-center">
-          {open ? (
-            <X className="h-5 w-5 text-gold" />
-          ) : (
-            <>
-              <MessageCircle className="h-5 w-5 text-gold" />
-              <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-emerald-400 ring-1 ring-primary-deep" />
-            </>
-          )}
-        </span>
-        <span className="font-display text-xs font-bold tracking-wide text-white">
-          লাইভ চ্যাট ও AI
-        </span>
-        {unreadCount > 0 && !open && (
-          <span className="ml-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1.5 text-[10px] font-extrabold text-white shadow-sm">
-            {unreadCount}
+      <div className="fixed bottom-5 right-5 z-40">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-label="লাইভ চ্যাট ও এআই"
+          className="group relative flex items-center gap-2 rounded-full bg-gradient-hero px-4 py-3 text-primary-foreground shadow-elevated ring-2 ring-gold/70 transition-all duration-200 hover:scale-105 active:scale-95"
+        >
+          <span className="relative flex h-5 w-5 items-center justify-center">
+            {open ? (
+              <X className="h-5 w-5 text-gold" />
+            ) : (
+              <>
+                <MessageCircle className="h-5 w-5 text-gold" />
+                <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-emerald-400 ring-1 ring-primary-deep" />
+              </>
+            )}
           </span>
-        )}
-      </button>
-    </div>
+          <span className="font-display text-xs font-bold tracking-wide text-white">
+            লাইভ চ্যাট ও AI
+          </span>
+          {unreadCount > 0 && !open && (
+            <span className="ml-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1.5 text-[10px] font-extrabold text-white shadow-sm">
+              {unreadCount}
+            </span>
+          )}
+        </button>
+      </div>
+    </>
   );
 }

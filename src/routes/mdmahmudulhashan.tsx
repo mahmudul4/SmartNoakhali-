@@ -10245,9 +10245,9 @@ function ChatThreadsAdmin() {
             </p>
           </div>
         ) : (
-          <div className="lg:grid lg:grid-cols-[400px_minmax(0,1fr)] xl:grid-cols-[450px_minmax(0,1fr)] lg:items-start lg:gap-4">
+          <div className="lg:grid lg:h-[83vh] lg:min-h-[600px] lg:grid-cols-[340px_minmax(0,1fr)] xl:grid-cols-[390px_minmax(0,1fr)] 2xl:grid-cols-[430px_minmax(0,1fr)] lg:items-stretch lg:gap-4">
             {/* Left Thread List */}
-            <div className="space-y-3 lg:max-h-[75dvh] lg:overflow-y-auto lg:pr-1">
+            <div className="space-y-2.5 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:pr-1.5">
               {filtered.map((t) => {
                 const customerName =
                   t.profile?.full_name ||
@@ -10265,8 +10265,8 @@ function ChatThreadsAdmin() {
                 return (
                   <div
                     key={t.id}
-                    className={`rounded-3xl border p-4 shadow-card transition ${
-                      isSelectedDesktop ? "ring-2 ring-primary/60 " : ""
+                    className={`rounded-2xl border p-3 shadow-card transition ${
+                      isSelectedDesktop ? "ring-2 ring-primary/70 " : ""
                     }${
                       isUrgent
                         ? "border-amber-400 bg-gradient-to-br from-amber-50/70 to-card"
@@ -10282,16 +10282,16 @@ function ChatThreadsAdmin() {
                         onClick={() => setActive(t)}
                       >
                         <div
-                          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full font-bold ${
+                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full font-bold ${
                             isUnread
                               ? "bg-rose-600 text-white shadow-sm"
                               : "bg-emerald-500/15 text-emerald-700"
                           }`}
                         >
-                          <MessageCircle className="h-5 w-5" />
+                          <MessageCircle className="h-4 w-4" />
                         </div>
                         <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-1.5">
+                          <div className="flex flex-wrap items-center gap-1">
                             <p className="font-display text-sm font-bold text-primary-deep truncate">
                               {customerName}
                             </p>
@@ -10347,7 +10347,7 @@ function ChatThreadsAdmin() {
                           <button
                             type="button"
                             onClick={() => setConfirmDeleteThread(t)}
-                            className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2.5 py-1 text-[11px] font-bold text-destructive transition hover:bg-destructive hover:text-white"
+                            className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2 py-1 text-[11px] font-bold text-destructive transition hover:bg-destructive hover:text-white"
                             title="এই লাইভ চ্যাট ডিলিট করুন"
                           >
                             <Trash2 className="h-3 w-3" /> ডিলিট
@@ -10358,14 +10358,14 @@ function ChatThreadsAdmin() {
 
                     {/* Operator Workflow Controls */}
                     {(canAssign || canCloseReopen) && (
-                      <div className="mt-2.5 flex flex-wrap items-center gap-2 rounded-2xl bg-muted/40 p-2 text-[11px]">
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-xl bg-muted/40 p-1.5 text-[11px]">
                         {canAssign && (
-                          <label className="flex items-center gap-1.5 font-semibold text-muted-foreground">
+                          <label className="flex items-center gap-1 font-semibold text-muted-foreground">
                             <ArrowRightLeft className="h-3.5 w-3.5 text-primary" />
                             <select
                               value={t.assigned_to_uid || ""}
                               onChange={(e) => void handleAssignOperator(t, e.target.value)}
-                              className="max-w-[175px] rounded-lg border border-border bg-background px-2 py-1 text-[11px] font-semibold text-foreground outline-none focus:border-primary"
+                              className="max-w-[165px] rounded-lg border border-border bg-background px-2 py-1 text-[11px] font-semibold text-foreground outline-none focus:border-primary"
                             >
                               <option value="">আন-অ্যাসাইনড</option>
                               {operators.map((op) => (
@@ -10411,7 +10411,7 @@ function ChatThreadsAdmin() {
 
                     {/* AI Handoff Summary */}
                     {canViewHistory && t.handoff_summary && (
-                      <div className="mt-2 rounded-2xl border border-indigo-200 bg-indigo-50/70 px-3 py-2 text-[11px] text-indigo-950">
+                      <div className="mt-1.5 rounded-xl border border-indigo-200 bg-indigo-50/70 px-2.5 py-1.5 text-[11px] text-indigo-950 line-clamp-2">
                         <span className="font-bold text-indigo-700">🤖 AI সারাংশ: </span>
                         <span>{t.handoff_summary}</span>
                       </div>
@@ -10420,7 +10420,7 @@ function ChatThreadsAdmin() {
                     {/* Latest Message Preview Bubble */}
                     <div
                       onClick={() => setActive(t)}
-                      className="mt-2.5 cursor-pointer rounded-2xl border border-border/80 bg-background/90 px-3 py-2 text-xs transition hover:border-primary/40"
+                      className="mt-2 cursor-pointer rounded-xl border border-border/80 bg-background/90 px-2.5 py-1.5 text-xs transition hover:border-primary/40 line-clamp-2"
                     >
                       <span className="font-bold text-muted-foreground">সর্বশেষ বার্তা: </span>
                       <span className="font-medium text-foreground">
@@ -10431,7 +10431,7 @@ function ChatThreadsAdmin() {
                     {/* 1-Click Quick Reply Pills + Inline Reply (Mobile / Compact card action) */}
                     {canReply ? (
                       <>
-                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        <div className="mt-2 flex flex-wrap items-center gap-1">
                           <span className="text-[10px] font-bold text-muted-foreground">⚡ দ্রুত উত্তর:</span>
                           {QUICK_STAFF_REPLIES.slice(0, 2).map((qr, i) => (
                             <button
@@ -10486,7 +10486,7 @@ function ChatThreadsAdmin() {
             </div>
 
             {/* Right Pane: Desktop Live Conversation Workspace */}
-            <div className="hidden lg:block sticky top-20">
+            <div className="hidden lg:flex lg:h-full lg:min-h-0 lg:flex-col">
               {desktopPreviewThread ? (
                 <AdminChatPanel
                   thread={desktopPreviewThread}
@@ -10626,6 +10626,7 @@ function AdminChatPanel({
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
 
   const myStaff = getStaffProfile(me) || getStaffProfile(user?.email);
   const myRoleLabel = resolveUserRoleDisplay({
@@ -10650,6 +10651,13 @@ function AdminChatPanel({
   useEffect(() => {
     void markThreadRead(thread.id, "staff");
   }, [thread.id, items.length]);
+
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [text]);
 
   async function syncResponderIdentity() {
     if (!me) return;
@@ -10687,12 +10695,19 @@ function AdminChatPanel({
     if (error) toast.error(error.message);
   }
 
-  async function onSend(e: React.FormEvent) {
-    e.preventDefault();
+  async function submitTextReply() {
     const t = text.trim();
     if (!t || !me) return;
     setText("");
+    if (composerRef.current) {
+      composerRef.current.style.height = "auto";
+    }
     await sendReplyMessage(t);
+  }
+
+  async function onSend(e: React.FormEvent) {
+    e.preventDefault();
+    await submitTextReply();
   }
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -10717,17 +10732,17 @@ function AdminChatPanel({
   }
 
   return (
-    <div className="flex h-[75dvh] flex-col rounded-3xl border border-border/80 bg-card p-3 shadow-card">
-      <div className="mb-2 space-y-2 rounded-2xl bg-muted/30 p-3">
+    <div className="flex h-[82dvh] max-h-[calc(100dvh-5.5rem)] min-h-[420px] flex-col overflow-hidden rounded-2xl border border-border/80 bg-card shadow-card sm:rounded-3xl lg:h-full lg:max-h-none">
+      <div className="shrink-0 space-y-2 border-b border-border/70 bg-muted/25 px-3 py-2.5 sm:px-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             {!compactDesktopPane && (
               <button
                 type="button"
                 onClick={onBack}
-                className="rounded-full bg-card px-3 py-1.5 text-xs font-semibold shadow-sm ring-1 ring-border hover:bg-primary/10"
+                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-card px-3 py-1.5 text-xs font-semibold shadow-sm ring-1 ring-border hover:bg-primary/10"
               >
-                <ArrowLeft className="inline h-3.5 w-3.5" /> তালিকায় ফেরত
+                <ArrowLeft className="h-3.5 w-3.5" /> তালিকায় ফেরত
               </button>
             )}
             <div className="min-w-0">
@@ -10740,12 +10755,12 @@ function AdminChatPanel({
               </p>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-2 rounded-full bg-primary/10 px-2.5 py-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1">
               <img
                 src={myPhoto}
                 alt={myName}
-                className="h-6 w-6 rounded-full border border-primary/30 bg-white object-cover"
+                className="h-5 w-5 rounded-full border border-primary/30 bg-white object-cover"
               />
               <span className="text-[11px] font-bold text-primary-deep">
                 {myName} ({myRoleLabel})
@@ -10755,7 +10770,7 @@ function AdminChatPanel({
               <button
                 type="button"
                 onClick={onRequestDeleteThread}
-                className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-3 py-1.5 text-xs font-bold text-destructive transition hover:bg-destructive hover:text-white"
+                className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2.5 py-1 text-xs font-bold text-destructive transition hover:bg-destructive hover:text-white"
               >
                 <Trash2 className="h-3.5 w-3.5" /> ডিলিট
               </button>
@@ -10765,7 +10780,7 @@ function AdminChatPanel({
 
         {/* Thread Assignment, Status & AI Handoff Summary */}
         {(canAssign || canCloseReopen || (canViewHistory && thread.handoff_summary)) && (
-          <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-2 text-[11px]">
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-1.5 text-[11px]">
             {canAssign && (
               <select
                 value={thread.assigned_to_uid || ""}
@@ -10798,7 +10813,7 @@ function AdminChatPanel({
                   onClick={() =>
                     onPriorityChange(thread.priority === "urgent" ? "normal" : "urgent")
                   }
-                  className={`rounded-lg px-2.5 py-1 text-[11px] font-bold ${
+                  className={`rounded-lg px-2 py-1 text-[11px] font-bold ${
                     thread.priority === "urgent"
                       ? "bg-amber-500 text-white"
                       : "border border-border bg-background text-muted-foreground"
@@ -10809,7 +10824,7 @@ function AdminChatPanel({
               </>
             )}
             {canViewHistory && thread.handoff_summary && (
-              <span className="rounded-lg bg-indigo-50 px-2.5 py-1 text-[11px] text-indigo-900">
+              <span className="max-w-full truncate rounded-lg bg-indigo-50 px-2 py-1 text-[11px] text-indigo-900" title={thread.handoff_summary}>
                 🤖 AI সারাংশ: {thread.handoff_summary}
               </span>
             )}
@@ -10817,7 +10832,7 @@ function AdminChatPanel({
         )}
       </div>
 
-      <div className="flex-1 space-y-2.5 overflow-y-auto rounded-2xl border border-border bg-background/50 p-3">
+      <div className="flex-1 min-h-0 space-y-3 overflow-y-auto bg-background/40 p-3.5 sm:p-5">
         {msgsError && (
           <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800">
             <span>{msgsError}</span>
@@ -10950,8 +10965,8 @@ function AdminChatPanel({
       </div>
 
       {canReply && (
-        <>
-          <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1">
+        <div className="shrink-0 border-t border-border/70 bg-card px-3 py-2.5 sm:px-4">
+          <div className="mb-2 flex gap-1.5 overflow-x-auto pb-0.5">
             {QUICK_STAFF_REPLIES.map((qr, idx) => (
               <button
                 key={idx}
@@ -10964,10 +10979,10 @@ function AdminChatPanel({
             ))}
           </div>
 
-          <form onSubmit={onSend} className="mt-1.5 flex items-center gap-2">
+          <form onSubmit={onSend} className="flex items-end gap-2">
             <label
               title="ছবি বা ফাইল পাঠান"
-              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-card text-primary shadow-card ring-1 ring-border"
+              className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-full bg-background text-primary shadow-sm ring-1 ring-border transition hover:bg-primary/5"
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
               <input
@@ -10977,21 +10992,35 @@ function AdminChatPanel({
                 onChange={onFile}
               />
             </label>
-            <VoiceRecorderButton onRecorded={onVoice} disabled={busy} />
-            <input
+            <div className="shrink-0">
+              <VoiceRecorderButton onRecorded={onVoice} disabled={busy} />
+            </div>
+            <textarea
+              ref={composerRef}
+              rows={1}
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder={`${myName} হিসেবে উত্তর লিখুন...`}
-              className="min-w-0 flex-1 rounded-full border border-border bg-card px-4 py-2.5 text-sm outline-none focus:border-primary"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void submitTextReply();
+                }
+              }}
+              onFocus={() => {
+                setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }), 180);
+              }}
+              placeholder={`${myName} হিসেবে উত্তর লিখুন... (Enter পাঠান, Shift+Enter নতুন লাইন)`}
+              className="min-h-[42px] max-h-28 min-w-0 flex-1 resize-none rounded-2xl border border-border bg-background px-4 py-2.5 text-sm leading-snug outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
             />
             <button
               type="submit"
-              className="flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-full bg-gradient-hero px-4 text-xs font-bold text-primary-foreground shadow-elevated"
+              disabled={busy || !text.trim()}
+              className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-full bg-gradient-hero px-4 text-xs font-bold text-primary-foreground shadow-elevated transition active:scale-95 disabled:opacity-50"
             >
               <Send className="h-4 w-4" /> পাঠান
             </button>
           </form>
-        </>
+        </div>
       )}
     </div>
   );

@@ -307,11 +307,11 @@ export function NotificationBell() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-emerald-200/30 bg-white/10 text-white backdrop-blur-xs transition-all duration-200 hover:bg-white/20 active:scale-95 sm:h-9 sm:w-9"
+        className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-emerald-950/15 bg-emerald-950/[0.04] text-[#064e3b] transition-all duration-200 hover:bg-emerald-950/[0.09] active:scale-95"
         title="বিজ্ঞপ্তি"
         aria-label={genuineUnreadCount > 0 ? `বিজ্ঞপ্তি (${genuineUnreadCount} টি অপঠিত)` : "বিজ্ঞপ্তি"}
       >
-        <Bell className="h-4 w-4 text-white" />
+        <Bell className="h-4 w-4 text-[#064e3b]" />
         {genuineUnreadCount > 0 && (
           <>
             <span className="pointer-events-none absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-rose-500 animate-ping opacity-75" />
