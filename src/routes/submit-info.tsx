@@ -211,7 +211,7 @@ function SubmitInfo() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-3.5 pb-28 pt-4 sm:px-4">
+    <div className="mx-auto max-w-4xl px-3.5 pb-28 pt-4 sm:px-6">
       <Link
         to="/"
         className="mb-3 inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
@@ -316,11 +316,10 @@ function SubmitInfo() {
 
           <div className="pt-1">
             <UniversalImageUploader
-              category="general"
+              category="submission"
               value={imageUrl}
               onChange={(url: string | null) => {
                 setImageUrl(url || "");
-                if (url) toast.success("ছবি সফলভাবে আপলোড সম্পন্ন হয়েছে");
               }}
               label="ছবি নির্বাচন বা আপলোড করুন"
               hint="PNG, JPG, JPEG, WebP ফরম্যাট সমর্থিত (স্বয়ংক্রিয় অপ্টিমাইজড)"

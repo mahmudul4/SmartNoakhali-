@@ -14,7 +14,7 @@ const links = [
 
 function BoardResult() {
   return (
-    <div className="mx-auto max-w-3xl px-4 pb-24 pt-4">
+    <div className="mx-auto max-w-5xl px-3.5 pb-24 pt-4 sm:px-6">
       <Link to="/" className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground"><ArrowLeft className="h-4 w-4" /> হোম</Link>
       <div className="mb-4 flex items-center gap-3 rounded-2xl bg-gradient-card p-4 shadow-card">
         <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary"><FileText className="h-6 w-6" /></div>
@@ -23,7 +23,7 @@ function BoardResult() {
           <p className="text-xs text-muted-foreground">নিচের লিংক থেকে ফলাফল দেখুন</p>
         </div>
       </div>
-      <div className="grid gap-3">
+      <div className="grid gap-3 sm:grid-cols-3">
         {links.map((l) => (
           <a key={l.url} href={l.url} target="_blank" rel="noreferrer" className="flex items-center justify-between rounded-2xl bg-gradient-card p-4 shadow-card transition hover:shadow-elevated">
             <span className="font-semibold">{l.label}</span>

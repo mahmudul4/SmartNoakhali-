@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   Image as ImageIcon,
   Upload,
@@ -33,6 +33,14 @@ export function WebsiteBrandingManager() {
   const [drafts, setDrafts] = useState<SiteBranding>(branding);
   const [uploadingAsset, setUploadingAsset] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [failedPreview, setFailedPreview] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!dirty) {
+      setDrafts(branding);
+      setFailedPreview({});
+    }
+  }, [branding, dirty]);
 
   // File input refs
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -62,6 +70,7 @@ export function WebsiteBrandingManager() {
         if (assetType === "pwa512") return { ...prev, pwaIcon512: res.url };
         return prev;
       });
+      setFailedPreview((prev) => ({ ...prev, [assetType]: false }));
       setDirty(true);
       toast.success(
         `${file.name} সফলভাবে আপলোড ও প্রিভিউতে যুক্ত হয়েছে (${res.width}x${res.height}px)`
@@ -170,11 +179,16 @@ export function WebsiteBrandingManager() {
               <span className="text-[10px] font-mono opacity-70 block mb-1.5">লাইভ হেডার প্রিভিউ:</span>
               <div className="flex items-center gap-3">
                 <div className="h-11 w-11 shrink-0 rounded-xl bg-white/10 p-1 flex items-center justify-center border border-white/20">
-                  <img
-                    src={drafts.logoUrl || DEFAULT_BRANDING.logoUrl}
-                    alt="Logo Preview"
-                    className="h-full w-full object-contain"
-                  />
+                  {failedPreview.logo ? (
+                    <ImageIcon className="h-5 w-5 text-white/70" />
+                  ) : (
+                    <img
+                      src={drafts.logoUrl || DEFAULT_BRANDING.logoUrl}
+                      alt="Logo Preview"
+                      onError={() => setFailedPreview((p) => ({ ...p, logo: true }))}
+                      className="h-full w-full object-contain"
+                    />
+                  )}
                 </div>
                 <div>
                   <p className="font-brand text-sm font-black text-brand-shimmer">Smart Noakhali</p>
@@ -228,11 +242,16 @@ export function WebsiteBrandingManager() {
                 ব্রাউজার ট্যাব প্রিভিউ:
               </span>
               <div className="flex items-center gap-2 rounded-t-xl bg-card border-x border-t border-border px-3 py-1.5 w-fit shadow-xs">
-                <img
-                  src={drafts.faviconUrl || DEFAULT_BRANDING.faviconUrl}
-                  alt="Favicon Preview"
-                  className="h-4 w-4 object-contain shrink-0"
-                />
+                {failedPreview.favicon ? (
+                  <Globe className="h-4 w-4 text-primary shrink-0" />
+                ) : (
+                  <img
+                    src={drafts.faviconUrl || DEFAULT_BRANDING.faviconUrl}
+                    alt="Favicon Preview"
+                    onError={() => setFailedPreview((p) => ({ ...p, favicon: true }))}
+                    className="h-4 w-4 object-contain shrink-0"
+                  />
+                )}
                 <span className="text-xs font-semibold text-foreground truncate max-w-[140px]">
                   Smart Noakhali — স্মার্ট নোয়াখালী
                 </span>
@@ -282,11 +301,16 @@ export function WebsiteBrandingManager() {
             {/* Mobile Icon Preview Mockup */}
             <div className="mt-4 rounded-2xl border border-border bg-muted/40 p-3 flex items-center gap-3">
               <div className="h-16 w-16 shrink-0 rounded-2xl bg-card border border-border p-2 shadow-card flex items-center justify-center">
-                <img
-                  src={drafts.pwaIcon192 || DEFAULT_BRANDING.pwaIcon192}
-                  alt="PWA 192 Preview"
-                  className="h-full w-full object-contain rounded-xl"
-                />
+                {failedPreview.pwa192 ? (
+                  <Smartphone className="h-6 w-6 text-primary" />
+                ) : (
+                  <img
+                    src={drafts.pwaIcon192 || DEFAULT_BRANDING.pwaIcon192}
+                    alt="PWA 192 Preview"
+                    onError={() => setFailedPreview((p) => ({ ...p, pwa192: true }))}
+                    className="h-full w-full object-contain rounded-xl"
+                  />
+                )}
               </div>
               <div>
                 <p className="text-xs font-bold text-foreground">নোয়াখালী অ্যাপ</p>
@@ -334,11 +358,16 @@ export function WebsiteBrandingManager() {
             {/* Splash Mockup */}
             <div className="mt-4 rounded-2xl border border-border bg-muted/40 p-3 flex items-center gap-3">
               <div className="h-16 w-16 shrink-0 rounded-2xl bg-card border border-border p-2 shadow-card flex items-center justify-center">
-                <img
-                  src={drafts.pwaIcon512 || DEFAULT_BRANDING.pwaIcon512}
-                  alt="PWA 512 Preview"
-                  className="h-full w-full object-contain rounded-xl"
-                />
+                {failedPreview.pwa512 ? (
+                  <Smartphone className="h-6 w-6 text-primary" />
+                ) : (
+                  <img
+                    src={drafts.pwaIcon512 || DEFAULT_BRANDING.pwaIcon512}
+                    alt="PWA 512 Preview"
+                    onError={() => setFailedPreview((p) => ({ ...p, pwa512: true }))}
+                    className="h-full w-full object-contain rounded-xl"
+                  />
+                )}
               </div>
               <div>
                 <p className="text-xs font-bold text-foreground">অ্যাপ স্টার্ট ও স্প্ল্যাশ</p>

@@ -43,6 +43,7 @@ import {
 import { useDonationConfig, type DonationConfig, type DonationNumberItem } from "@/lib/store";
 import { useAuth } from "@/lib/auth";
 import { FinancialReports } from "@/components/FinancialReports";
+import { UniversalImageUploader } from "@/components/UniversalImageUploader";
 
 export const Route = createFileRoute("/donation")({
   head: () => ({
@@ -169,7 +170,6 @@ function DonationPage() {
     deposit_slip_url: "",
   });
 
-  const [slipFileName, setSlipFileName] = useState<string>("");
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -217,23 +217,6 @@ function DonationPage() {
 
   function copy(num: string, label: string) {
     navigator.clipboard.writeText(num).then(() => toast.success(`${label} নম্বর কপি হয়েছে`));
-  }
-
-  // Handle Bank Slip file selection (base64 data URL preview)
-  function handleSlipFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 2 * 1024 * 1024) {
-      toast.error("ফাইলের সাইজ সর্বোচ্চ ২ মেগাবাইট হতে পারবে");
-      return;
-    }
-    setSlipFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = () => {
-      setForm((prev) => ({ ...prev, deposit_slip_url: reader.result as string }));
-      toast.success("জমা স্লিপের ছবি যুক্ত হয়েছে");
-    };
-    reader.readAsDataURL(file);
   }
 
   async function handleSaveNumbers() {
@@ -304,7 +287,7 @@ function DonationPage() {
   }, [approvedDonations, donorCategoryFilter, donorSearch]);
 
   return (
-    <div className="mx-auto max-w-4xl px-4 pb-24 pt-4">
+    <div className="mx-auto max-w-6xl px-4 pb-24 pt-4 sm:px-6">
       {/* Top Breadcrumb & Admin Quick Action */}
       <div className="mb-3 flex items-center justify-between">
         <Link
@@ -897,7 +880,6 @@ function DonationPage() {
                     note: "",
                     deposit_slip_url: "",
                   });
-                  setSlipFileName("");
                 }}
                 className="inline-flex items-center gap-1.5 rounded-full bg-primary px-5 py-2 text-xs font-bold text-primary-foreground shadow-sm active:scale-95"
               >
@@ -1053,26 +1035,18 @@ function DonationPage() {
 
               {/* Bank Deposit Slip Attachment (Optional / Recommended for Bank) */}
               <div>
-                <label className="text-xs font-semibold text-muted-foreground block mb-1">
+                <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
                   ব্যাংক ডিপোজিট স্লিপ / রসিদের ছবি (ঐচ্ছিক)
                 </label>
-                <div className="flex items-center gap-2">
-                  <label className="flex items-center gap-2 rounded-xl border border-dashed border-border bg-background px-4 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted cursor-pointer transition">
-                    <UploadCloud className="h-4 w-4 text-primary" />
-                    <span>{slipFileName ? slipFileName : "ছবি নির্বাচন করুন (সর্বোচ্চ ২ MB)"}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleSlipFileChange}
-                      className="hidden"
-                    />
-                  </label>
-                  {form.deposit_slip_url && (
-                    <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
-                      <CheckCircle2 className="h-3.5 w-3.5" /> যুক্ত হয়েছে
-                    </span>
-                  )}
-                </div>
+                <UniversalImageUploader
+                  variant="inline"
+                  category="submission"
+                  entityId="donation-slip"
+                  value={form.deposit_slip_url}
+                  onChange={(url) => setForm((prev) => ({ ...prev, deposit_slip_url: url || "" }))}
+                  label="জমা স্লিপ / রসিদ আপলোড করুন"
+                  hint="স্বয়ংক্রিয়ভাবে অপ্টিমাইজ হয়ে রসিদ হিসেবে যুক্ত হবে"
+                />
               </div>
 
               {/* Note / Prayer */}

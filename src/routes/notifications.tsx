@@ -164,7 +164,7 @@ function NotificationsPage() {
   };
 
   return (
-    <div className="mx-auto max-w-3xl px-3 py-5 sm:px-4 sm:py-7 space-y-5">
+    <div className="mx-auto max-w-5xl space-y-5 px-3.5 py-5 pb-24 sm:px-6 sm:py-7">
       {/* Header Banner */}
       <div className="rounded-3xl border border-border/80 bg-gradient-card p-5 shadow-card">
         <div className="flex flex-wrap items-center justify-between gap-3">

@@ -152,6 +152,7 @@ function ProfilePage() {
   const [uname, setUname] = useState("");
   const [phone, setPhone] = useState("");
   const [photoURL, setPhotoURL] = useState("");
+  const [headerAvatarError, setHeaderAvatarError] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -164,15 +165,19 @@ function ProfilePage() {
     "overview" | "submissions" | "complaints" | "favorites" | "notifications" | "security"
   >("overview");
 
-  // Load user data into form
   useEffect(() => {
-    if (user) {
+    setHeaderAvatarError(false);
+  }, [photoURL, user?.photoURL]);
+
+  // Load user data into form without overwriting active unsaved edits
+  useEffect(() => {
+    if (user && !isEditing) {
       setDisplayName(user.displayName || "");
       setPhone(user.phone || "");
       setPhotoURL(user.photoURL || "");
       setUname(username || (user.email ? user.email.split("@")[0] : "user"));
     }
-  }, [user, username]);
+  }, [user, username, isEditing]);
 
   // Redirect if not logged in, preserving return destination
   useEffect(() => {
@@ -255,12 +260,16 @@ function ProfilePage() {
     }
     setSaving(true);
     try {
-      await updateProfileInfo({
+      const updated = await updateProfileInfo({
         displayName: displayName.trim(),
-        photoURL: photoURL.trim() || undefined,
+        photoURL: photoURL.trim(),
         phone: phone.trim() || undefined,
         username: uname.trim() || undefined,
       });
+      setDisplayName(updated.displayName || displayName.trim());
+      setPhone(updated.phone || phone.trim());
+      setPhotoURL(updated.photoURL || "");
+      setHeaderAvatarError(false);
       setIsEditing(false);
       toast.success("প্রোফাইল তথ্য সফলভাবে আপডেট হয়েছে!");
       void loadActivities();
@@ -287,7 +296,7 @@ function ProfilePage() {
   };
 
   return (
-    <div className="mx-auto max-w-4xl px-3.5 py-6 sm:px-4 sm:py-8">
+    <div className="mx-auto max-w-5xl px-3.5 py-6 sm:px-6 sm:py-8">
       {/* Top Navigation */}
       <div className="mb-5 flex items-center justify-between">
         <Link
@@ -323,12 +332,12 @@ function ProfilePage() {
           {/* Avatar with status border */}
           <div className="relative shrink-0">
             <div className="relative h-24 w-24 overflow-hidden rounded-full bg-gradient-to-tr from-amber-400 via-primary to-emerald-600 p-1 shadow-gold ring-4 ring-background sm:h-28 sm:w-28">
-              {photoURL || user.photoURL ? (
+              {(photoURL || user.photoURL) && !headerAvatarError ? (
                 <img
                   src={photoURL || user.photoURL || ""}
                   alt={displayName || "User Avatar"}
                   className="h-full w-full rounded-full object-cover bg-white"
-                  onError={() => setPhotoURL("")}
+                  onError={() => setHeaderAvatarError(true)}
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center rounded-full bg-primary/10 text-primary">

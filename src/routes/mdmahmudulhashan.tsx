@@ -53,6 +53,16 @@ import {
   ArrowRightLeft,
   Clock,
   AlertTriangle,
+  Home,
+  Megaphone,
+  Building2,
+  GraduationCap,
+  HeartPulse,
+  MessageSquare,
+  Zap,
+  Shield,
+  Wallet,
+  Layers,
 } from "lucide-react";
 import { toast } from "sonner";
 import { auth, SUPER_ADMIN_EMAIL, isSuperAdminEmail } from "@/lib/firebase";
@@ -579,6 +589,7 @@ function Dashboard({
   const [tab, setTab] = useState<Tab>("overview");
   const [totalUsersCount, setTotalUsersCount] = useState<number>(0);
   const [refreshingDashboard, setRefreshingDashboard] = useState(false);
+  const [myAvatarError, setMyAvatarError] = useState(false);
 
   const canHomepageTab =
     isMainAdmin ||
@@ -624,7 +635,10 @@ function Dashboard({
 
   const myStaffProfile =
     getStaffProfile(user?.id) || getStaffProfile(user?.email);
-  const myAvatar = myStaffProfile?.photo_url || logo;
+  const myAvatar = myStaffProfile?.photo_url || user?.photoURL || logo;
+  useEffect(() => {
+    setMyAvatarError(false);
+  }, [myAvatar]);
   const roleDisplay = resolveUserRoleDisplay({
     email: user?.email,
     roles,
@@ -661,6 +675,199 @@ function Dashboard({
     pendingDonors.length +
     pendingEvents.length +
     pendingEmerg.length;
+
+  const navGroups = useMemo(() => {
+    type NavItem = {
+      key: Tab;
+      label: string;
+      icon: typeof LayoutGrid;
+      badge?: number;
+      show: boolean;
+    };
+    const groups: Array<{ id: string; title: string; items: NavItem[] }> = [
+      {
+        id: "summary",
+        title: "সংক্ষিপ্তসার",
+        items: [
+          { key: "overview", label: "ড্যাশবোর্ড", icon: LayoutGrid, show: true },
+          { key: "profile", label: "আমার প্রোফাইল", icon: UserCircle2, show: true },
+          { key: "tasks", label: "টাস্ক ও করণীয়", icon: CheckCircle2, show: true },
+        ],
+      },
+      {
+        id: "content",
+        title: "কনটেন্ট ও ব্যানার",
+        items: [
+          { key: "homepage", label: "হোমপেজ ও হিরো ব্যানার", icon: Home, show: canHomepageTab },
+          {
+            key: "branding",
+            label: "ব্র্যান্ডিং ও মিডিয়া",
+            icon: ImageIcon,
+            show: isMainAdmin || hasPermission("upload_branding"),
+          },
+          {
+            key: "banners",
+            label: "পপ-আপ ব্যানার",
+            icon: Megaphone,
+            show: isMainAdmin || hasPermission("publish_content") || hasPermission("manage_settings"),
+          },
+          {
+            key: "categories",
+            label: "ক্যাটাগরি",
+            icon: Layers,
+            show: isMainAdmin || hasPermission("manage_categories"),
+          },
+          { key: "services", label: "আমাদের সেবা", icon: Wrench, show: isMainAdmin },
+          { key: "notifications", label: "বিজ্ঞপ্তি পরিচালনা", icon: Bell, show: canNotificationsTab },
+        ],
+      },
+      {
+        id: "civic",
+        title: "নাগরিক ও ডিরেক্টরি",
+        items: [
+          {
+            key: "info",
+            label: "তথ্য অনুমোদন",
+            icon: FileText,
+            badge: pendingSubs.length,
+            show: isMainAdmin || hasPermission("create_edit_content") || hasPermission("moderate_submissions"),
+          },
+          {
+            key: "institutions",
+            label: "প্রতিষ্ঠান ও ব্যবসা",
+            icon: Building2,
+            badge: pendingInstitutionsCount > 0 ? pendingInstitutionsCount : undefined,
+            show: isMainAdmin || hasPermission("moderate_submissions") || hasPermission("create_edit_content"),
+          },
+          {
+            key: "jobs",
+            label: "শিক্ষা ও ক্যারিয়ার",
+            icon: GraduationCap,
+            badge: pendingJobsCount > 0 ? pendingJobsCount : undefined,
+            show: isMainAdmin || hasPermission("moderate_submissions") || hasPermission("create_edit_content"),
+          },
+          {
+            key: "donors",
+            label: "রক্তদাতা",
+            icon: Droplet,
+            badge: pendingDonors.length,
+            show: isMainAdmin || hasPermission("create_edit_content") || hasPermission("publish_content"),
+          },
+          {
+            key: "events",
+            label: "রক্তদান ইভেন্ট",
+            icon: HeartPulse,
+            badge: pendingEvents.length,
+            show: isMainAdmin || hasPermission("create_edit_content") || hasPermission("publish_content"),
+          },
+          {
+            key: "emergency",
+            label: "জরুরি রিকোয়েস্ট",
+            icon: AlertTriangle,
+            badge: pendingEmerg.length,
+            show: isMainAdmin || hasPermission("moderate_submissions"),
+          },
+          {
+            key: "complaints",
+            label: "নাগরিক অভিযোগ",
+            icon: AlertCircle,
+            badge: pendingComplaintsCount > 0 ? pendingComplaintsCount : undefined,
+            show: isMainAdmin || hasPermission("moderate_submissions"),
+          },
+        ],
+      },
+      {
+        id: "finance_support",
+        title: "আর্থিক ও সাপোর্ট",
+        items: [
+          {
+            key: "donation",
+            label: "অনুদান ও ফান্ড",
+            icon: HandCoins,
+            badge: pendingDons.length,
+            show: isMainAdmin,
+          },
+          {
+            key: "expenses",
+            label: "মানবিক ব্যয়",
+            icon: Wallet,
+            badge: expensesHook.items.length,
+            show: isMainAdmin,
+          },
+          {
+            key: "chat",
+            label: "লাইভ চ্যাট",
+            icon: MessageCircle,
+            badge: unreadChatCount,
+            show: canChatTab,
+          },
+          { key: "ai_chat", label: "AI চ্যাট ও নলেজ", icon: Bot, show: canAiChatTab },
+        ],
+      },
+      {
+        id: "system",
+        title: "সিস্টেম ও নিরাপত্তা",
+        items: [
+          { key: "roles", label: "রোল ও পারমিশন", icon: Shield, show: isMainAdmin },
+          {
+            key: "users",
+            label: "ইউজার ও অ্যাকসেস",
+            icon: UsersIcon,
+            badge: totalUsersCount > 0 ? totalUsersCount : undefined,
+            show: isMainAdmin,
+          },
+          {
+            key: "access",
+            label: "অ্যাকসেস রিকোয়েস্ট",
+            icon: KeyRound,
+            badge: pendingAccessTotal,
+            show: isMainAdmin,
+          },
+          {
+            key: "activity",
+            label: "অ্যাক্টিভিটি ও ডিলিট লগ",
+            icon: Activity,
+            badge: deletedAuditCount > 0 ? deletedAuditCount : auditHook.logs.length,
+            show: isMainAdmin || hasPermission("view_reports"),
+          },
+          { key: "apps", label: "অ্যাপ আপলোড", icon: Smartphone, show: isMainAdmin },
+          {
+            key: "settings",
+            label: "সেটিংস",
+            icon: Settings,
+            show: isMainAdmin || hasPermission("manage_settings"),
+          },
+          { key: "security", label: "নিরাপত্তা", icon: Lock, show: isMainAdmin },
+        ],
+      },
+    ];
+    return groups
+      .map((g) => ({ ...g, items: g.items.filter((item) => item.show) }))
+      .filter((g) => g.items.length > 0);
+  }, [
+    canHomepageTab,
+    canNotificationsTab,
+    canAiChatTab,
+    canChatTab,
+    isMainAdmin,
+    hasPermission,
+    pendingSubs.length,
+    pendingInstitutionsCount,
+    pendingJobsCount,
+    pendingDonors.length,
+    pendingEvents.length,
+    pendingEmerg.length,
+    pendingComplaintsCount,
+    pendingDons.length,
+    expensesHook.items.length,
+    unreadChatCount,
+    totalUsersCount,
+    pendingAccessTotal,
+    deletedAuditCount,
+    auditHook.logs.length,
+  ]);
+
+  const flatNavItems = useMemo(() => navGroups.flatMap((g) => g.items), [navGroups]);
 
   // Enforce dynamic tab access based on permissions
   useEffect(() => {
@@ -746,9 +953,9 @@ function Dashboard({
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 pb-28 pt-4">
+    <div className="mx-auto w-full max-w-7xl px-3.5 pb-28 pt-4 sm:px-6">
       {/* Top Personal Profile & Control Header */}
-      <div className="mb-4 rounded-3xl bg-gradient-hero p-4 text-primary-foreground shadow-elevated">
+      <div className="mb-4 rounded-3xl bg-gradient-hero p-4 text-primary-foreground shadow-elevated sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <button
@@ -758,8 +965,9 @@ function Dashboard({
               title="প্রোফাইল ফটো পরিবর্তন করুন"
             >
               <img
-                src={myAvatar}
+                src={myAvatarError ? logo : myAvatar}
                 alt={myDisplayName}
+                onError={() => setMyAvatarError(true)}
                 className="h-full w-full rounded-full object-cover"
               />
               <span className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition group-hover:opacity-100">
@@ -802,7 +1010,7 @@ function Dashboard({
               type="button"
               onClick={() => void handleDashboardRefresh()}
               title="সকল ডাটা লাইভ সিঙ্ক করুন"
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 transition hover:bg-white/25"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-white/15 transition hover:bg-white/25"
             >
               <RefreshCcw className={`h-3.5 w-3.5 ${refreshingDashboard ? "animate-spin" : ""}`} />
             </button>
@@ -856,189 +1064,106 @@ function Dashboard({
         )}
       </div>
 
-      {/* Navigation Tabs */}
-      <div className="mt-5 flex flex-wrap gap-1.5 rounded-2xl bg-muted p-1.5">
-        <TabBtn active={tab === "overview"} onClick={() => setTab("overview")}>
-          ড্যাশবোর্ড
-        </TabBtn>
-        {canHomepageTab && (
-          <TabBtn active={tab === "homepage"} onClick={() => setTab("homepage")}>
-            🏠 হোমপেজ ও হিরো ব্যানার
-          </TabBtn>
-        )}
-        {canNotificationsTab && (
-          <TabBtn active={tab === "notifications"} onClick={() => setTab("notifications")}>
-            🔔 বিজ্ঞপ্তি পরিচালনা
-          </TabBtn>
-        )}
-        {canAiChatTab && (
-          <TabBtn active={tab === "ai_chat"} onClick={() => setTab("ai_chat")}>
-            🤖 AI চ্যাট ও নলেজ
-          </TabBtn>
-        )}
-        <TabBtn active={tab === "tasks"} onClick={() => setTab("tasks")}>
-          📋 টাস্ক ও করণীয়
-        </TabBtn>
-        {isMainAdmin && (
-          <TabBtn active={tab === "roles"} onClick={() => setTab("roles")}>
-            🛡️ রোল ও পারমিশন
-          </TabBtn>
-        )}
-        {(isMainAdmin || hasPermission("upload_branding")) && (
-          <TabBtn active={tab === "branding"} onClick={() => setTab("branding")}>
-            🎨 ব্র্যান্ডিং ও মিডিয়া লাইব্রেরি
-          </TabBtn>
-        )}
-        {(isMainAdmin || hasPermission("view_reports")) && (
-          <TabBtn
-            active={tab === "activity"}
-            onClick={() => setTab("activity")}
-            badge={deletedAuditCount > 0 ? deletedAuditCount : auditHook.logs.length}
-          >
-            🕵️ অ্যাক্টিভিটি ও ডিলিট লগ
-          </TabBtn>
-        )}
-        <TabBtn active={tab === "profile"} onClick={() => setTab("profile")}>
-          আমার প্রোফাইল
-        </TabBtn>
-        {(isMainAdmin || hasPermission("manage_categories")) && (
-          <TabBtn active={tab === "categories"} onClick={() => setTab("categories")}>
-            ক্যাটাগরি
-          </TabBtn>
-        )}
-        {isMainAdmin && (
-          <TabBtn active={tab === "services"} onClick={() => setTab("services")}>
-            🛠️ আমাদের সেবা পরিচালনা
-          </TabBtn>
-        )}
-        {(isMainAdmin || hasPermission("create_edit_content") || hasPermission("moderate_submissions")) && (
-          <TabBtn active={tab === "info"} onClick={() => setTab("info")} badge={pendingSubs.length}>
-            তথ্য
-          </TabBtn>
-        )}
-        {isMainAdmin && (
-          <TabBtn
-            active={tab === "donation"}
-            onClick={() => setTab("donation")}
-            badge={pendingDons.length}
-          >
-            💰 অনুদান ও ফান্ড ড্যাশবোর্ড
-          </TabBtn>
-        )}
-        {isMainAdmin && (
-          <TabBtn
-            active={tab === "expenses"}
-            onClick={() => setTab("expenses")}
-            badge={expensesHook.items.length}
-          >
-            🤝 মানবিক ব্যয় পরিচালনা
-          </TabBtn>
-        )}
-        {(isMainAdmin || hasPermission("create_edit_content") || hasPermission("publish_content")) && (
-          <TabBtn
-            active={tab === "donors"}
-            onClick={() => setTab("donors")}
-            badge={pendingDonors.length}
-          >
-            দাতা
-          </TabBtn>
-        )}
-        {(isMainAdmin || hasPermission("create_edit_content") || hasPermission("publish_content")) && (
-          <TabBtn
-            active={tab === "events"}
-            onClick={() => setTab("events")}
-            badge={pendingEvents.length}
-          >
-            রক্তদান
-          </TabBtn>
-        )}
-        {(isMainAdmin || hasPermission("moderate_submissions")) && (
-          <TabBtn
-            active={tab === "emergency"}
-            onClick={() => setTab("emergency")}
-            badge={pendingEmerg.length}
-          >
-            জরুরী
-          </TabBtn>
-        )}
-        {(isMainAdmin || hasPermission("publish_content") || hasPermission("manage_settings")) && (
-          <TabBtn active={tab === "banners"} onClick={() => setTab("banners")}>
-            ব্যানার
-          </TabBtn>
-        )}
-        {canChatTab && (
-          <TabBtn
-            active={tab === "chat"}
-            onClick={() => setTab("chat")}
-            badge={unreadChatCount}
-          >
-            লাইভ চ্যাট
-          </TabBtn>
-        )}
-        {isMainAdmin && (
-          <TabBtn active={tab === "apps"} onClick={() => setTab("apps")}>
-            অ্যাপ আপলোড
-          </TabBtn>
-        )}
-        {isMainAdmin && (
-          <TabBtn
-            active={tab === "users"}
-            onClick={() => setTab("users")}
-            badge={totalUsersCount > 0 ? totalUsersCount : undefined}
-          >
-            ইউজার ও অ্যাকসেস
-          </TabBtn>
-        )}
-        {isMainAdmin && (
-          <TabBtn
-            active={tab === "access"}
-            onClick={() => setTab("access")}
-            badge={pendingAccessTotal}
-          >
-            অ্যাকসেস ও রিকোয়েস্ট
-          </TabBtn>
-        )}
-        {(isMainAdmin || hasPermission("moderate_submissions") || hasPermission("create_edit_content")) && (
-          <TabBtn
-            active={tab === "institutions"}
-            onClick={() => setTab("institutions")}
-            badge={pendingInstitutionsCount > 0 ? pendingInstitutionsCount : undefined}
-          >
-            🏢 প্রতিষ্ঠান ও ব্যবসা
-          </TabBtn>
-        )}
-        {(isMainAdmin || hasPermission("moderate_submissions") || hasPermission("create_edit_content")) && (
-          <TabBtn
-            active={tab === "jobs"}
-            onClick={() => setTab("jobs")}
-            badge={pendingJobsCount > 0 ? pendingJobsCount : undefined}
-          >
-            🎓 শিক্ষা ও ক্যারিয়ার
-          </TabBtn>
-        )}
-        {(isMainAdmin || hasPermission("moderate_submissions")) && (
-          <TabBtn
-            active={tab === "complaints"}
-            onClick={() => setTab("complaints")}
-            badge={pendingComplaintsCount > 0 ? pendingComplaintsCount : undefined}
-          >
-            📢 নাগরিক অভিযোগ
-          </TabBtn>
-        )}
-        {(isMainAdmin || hasPermission("manage_settings")) && (
-          <TabBtn active={tab === "settings"} onClick={() => setTab("settings")}>
-            সেটিংস
-          </TabBtn>
-        )}
-        {isMainAdmin && (
-          <TabBtn active={tab === "security"} onClick={() => setTab("security")}>
-            নিরাপত্তা
-          </TabBtn>
-        )}
+      {/* Mobile Compact Horizontal Navigation Strip (< lg) */}
+      <div className="mt-4 lg:hidden">
+        <div
+          role="tablist"
+          aria-label="অ্যাডমিন নেভিগেশন"
+          className="flex flex-nowrap items-center gap-1.5 overflow-x-auto scrollbar-none rounded-2xl border border-border/70 bg-card/95 p-1.5 shadow-card"
+        >
+          {flatNavItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = tab === item.key;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => setTab(item.key)}
+                className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-semibold transition ${
+                  isActive
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-foreground/75 hover:bg-muted hover:text-primary-deep"
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0" />
+                <span>{item.label}</span>
+                {item.badge !== undefined && item.badge > 0 && (
+                  <span
+                    className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold tabular-nums leading-none ${
+                      isActive
+                        ? "bg-white/25 text-white"
+                        : "bg-rose-600 text-white"
+                    }`}
+                  >
+                    {item.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Active Tab Content */}
-      <div className="mt-4">
+      {/* Desktop Two-Column Institutional Workspace */}
+      <div className="mt-4 lg:mt-6 lg:grid lg:grid-cols-[260px_minmax(0,1fr)] lg:items-start lg:gap-6">
+        {/* Desktop Grouped Sidebar */}
+        <aside
+          aria-label="অ্যাডমিন সাইডবার"
+          className="hidden lg:block lg:sticky lg:top-20 max-h-[calc(100vh-6rem)] overflow-y-auto rounded-3xl border border-border/80 bg-card p-3 shadow-card"
+        >
+          <div className="space-y-3">
+            {navGroups.map((group) => (
+              <div key={group.id}>
+                <p className="px-2.5 pb-1 text-[10.5px] font-bold tracking-wide text-muted-foreground">
+                  {group.title}
+                </p>
+                <div className="space-y-0.5">
+                  {group.items.map((item) => {
+                    const Icon = item.icon;
+                    const isActive = tab === item.key;
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => setTab(item.key)}
+                        className={`flex w-full items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-semibold transition ${
+                          isActive
+                            ? "bg-primary text-primary-foreground shadow-sm"
+                            : "text-foreground/80 hover:bg-muted hover:text-primary-deep"
+                        }`}
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <Icon
+                            className={`h-4 w-4 shrink-0 ${
+                              isActive ? "text-primary-foreground" : "text-primary/80"
+                            }`}
+                          />
+                          <span className="truncate">{item.label}</span>
+                        </span>
+                        {item.badge !== undefined && item.badge > 0 && (
+                          <span
+                            className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold tabular-nums leading-none ${
+                              isActive
+                                ? "bg-white/25 text-white"
+                                : "bg-rose-500/15 text-rose-700"
+                            }`}
+                          >
+                            {item.badge}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </aside>
+
+        {/* Active Tab Content */}
+        <main className="min-w-0">
         {tab === "overview" && (
           <OverviewPanel
             onJump={setTab}
@@ -1144,6 +1269,7 @@ function Dashboard({
         {tab === "settings" && (isMainAdmin || hasPermission("manage_settings")) && <SettingsAdminPanel />}
 
         {tab === "security" && isMainAdmin && <SecurityPanel />}
+        </main>
       </div>
     </div>
   );
@@ -1155,11 +1281,10 @@ function Dashboard({
 // Super Admin sees their own profile PLUS all staff profiles!
 // ============================================================================
 function MyStaffProfilePanel({ isMainAdmin }: { isMainAdmin: boolean }) {
-  const { user, username: authUsername, roles, customRoleId, customRoleName } = useAuth();
+  const { user, username: authUsername, roles, customRoleId, customRoleName, updateProfileInfo } = useAuth();
   const { customRoles } = useRolePermissions();
   const { profiles: staffMap, getStaffProfile, upsertStaffProfile } = useStaffProfiles();
   const { logo } = useLogo();
-  const photoInputRef = useRef<HTMLInputElement>(null);
 
   const existing = getStaffProfile(user?.id) || getStaffProfile(user?.email);
   const roleLabel = resolveUserRoleDisplay({
@@ -1180,9 +1305,8 @@ function MyStaffProfilePanel({ isMainAdmin }: { isMainAdmin: boolean }) {
   const [designation, setDesignation] = useState(
     existing?.designation || (isMainAdmin ? "প্রধান প্রশাসক (Super Admin)" : roleLabel)
   );
-  const [photoUrl, setPhotoUrl] = useState(existing?.photo_url || "");
+  const [photoUrl, setPhotoUrl] = useState(existing?.photo_url || user?.photoURL || "");
   const [saving, setSaving] = useState(false);
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   // Super Admin editing another staff member's photo/profile
   const staffTargetInputRef = useRef<HTMLInputElement>(null);
@@ -1197,24 +1321,16 @@ function MyStaffProfilePanel({ isMainAdmin }: { isMainAdmin: boolean }) {
     }
   }, [existing?.full_name, existing?.phone, existing?.designation, existing?.photo_url]);
 
-  async function onUploadMyPhoto(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file || !user) return;
-    if (!file.type.startsWith("image/")) return toast.error("শুধু ছবি ফাইল নির্বাচন করুন");
-
-    setUploadingPhoto(true);
+  async function persistMyAvatar(nextUrl: string) {
+    if (!user) return;
+    setPhotoUrl(nextUrl);
     try {
-      const compressed = await uploadPublicImage(file, `staff_avatars/${user.id}`);
-      if (!compressed) throw new Error("ছবি প্রসেস করা যায়নি");
-      setPhotoUrl(compressed);
-
       await upsertStaffProfile({
         uid: user.id,
         email: user.email || "",
         full_name: fullName.trim() || user.email?.split("@")[0] || roleLabel,
         role_label: roleLabel,
-        photo_url: compressed,
+        photo_url: nextUrl,
         phone: phone.trim(),
         designation: designation.trim(),
       });
@@ -1225,16 +1341,14 @@ function MyStaffProfilePanel({ isMainAdmin }: { isMainAdmin: boolean }) {
           full_name: fullName.trim() || undefined,
           username: username.trim() || undefined,
           phone: phone.trim() || undefined,
-          photo_url: compressed,
+          photo_url: nextUrl,
           designation: designation.trim() || undefined,
         },
       });
+      await updateProfileInfo({ photoURL: nextUrl });
       await logEvent("profile_photo_updated", user.email || user.id);
-      toast.success("প্রোফাইল ফটো সফলভাবে আপডেট হয়েছে!");
     } catch (err: any) {
-      toast.error(err?.message || "ফটো আপলোড ব্যর্থ");
-    } finally {
-      setUploadingPhoto(false);
+      toast.error(err?.message || "ফটো সংরক্ষণ ব্যর্থ");
     }
   }
 
@@ -1260,9 +1374,14 @@ function MyStaffProfilePanel({ isMainAdmin }: { isMainAdmin: boolean }) {
           full_name: fullName.trim(),
           username: username.trim() || undefined,
           phone: phone.trim() || undefined,
-          photo_url: photoUrl || undefined,
+          photo_url: photoUrl,
           designation: designation.trim() || undefined,
         },
+      });
+      await updateProfileInfo({
+        displayName: fullName.trim(),
+        phone: phone.trim(),
+        photoURL: photoUrl,
       });
       toast.success("আপনার প্রোফাইল সংরক্ষিত হয়েছে!");
     } catch (err: any) {
@@ -1326,39 +1445,18 @@ function MyStaffProfilePanel({ isMainAdmin }: { isMainAdmin: boolean }) {
           </span>
         </div>
 
-        <div className="mt-5 grid gap-6 md:grid-cols-[200px_1fr]">
+        <div className="mt-5 grid gap-6 md:grid-cols-[220px_1fr]">
           {/* Avatar Upload Column */}
           <div className="flex flex-col items-center text-center">
-            <div className="relative h-28 w-28 overflow-hidden rounded-full border-4 border-primary/20 bg-muted shadow-elevated">
-              <img
-                src={photoUrl || logo}
-                alt={fullName}
-                className="h-full w-full object-cover"
-              />
-              {uploadingPhoto && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-                  <Loader2 className="h-6 w-6 animate-spin text-white" />
-                </div>
-              )}
-            </div>
-            <input
-              ref={photoInputRef}
-              type="file"
-              accept="image/*"
-              onChange={onUploadMyPhoto}
-              className="hidden"
+            <UniversalImageUploader
+              category="staff_avatar"
+              entityId={user?.id}
+              value={photoUrl}
+              variant="avatar"
+              aspectRatioClass="h-28 w-28"
+              hint="JPG, PNG বা WebP (স্বয়ংক্রিয়ভাবে অপ্টিমাইজ হয়)"
+              onChange={(url) => void persistMyAvatar(url || "")}
             />
-            <button
-              type="button"
-              disabled={uploadingPhoto}
-              onClick={() => photoInputRef.current?.click()}
-              className="mt-3 flex items-center gap-1.5 rounded-full bg-gradient-hero px-4 py-2 text-xs font-bold text-primary-foreground shadow-card"
-            >
-              <Camera className="h-3.5 w-3.5" /> প্রোফাইল ফটো আপলোড
-            </button>
-            <p className="mt-1.5 text-[10px] text-muted-foreground">
-              JPG, PNG বা WebP (সর্বোচ্চ ৫MB)
-            </p>
           </div>
 
           {/* Profile Form Column */}
@@ -1408,13 +1506,16 @@ function MyStaffProfilePanel({ isMainAdmin }: { isMainAdmin: boolean }) {
 
             {/* Live Chat Responder Preview */}
             <div className="rounded-2xl border border-primary/20 bg-primary/5 p-3">
-              <p className="mb-2 text-[11px] font-bold text-primary-deep">
-                💬 লাইভ চ্যাটে গ্রাহকের কাছে আপনার উত্তর যেভাবে দেখাবে (প্রিভিউ):
+              <p className="mb-2 flex items-center gap-1.5 text-[11px] font-bold text-primary-deep">
+                <MessageSquare className="h-3.5 w-3.5 text-primary" /> লাইভ চ্যাটে গ্রাহকের কাছে আপনার উত্তর যেভাবে দেখাবে (প্রিভিউ):
               </p>
               <div className="flex items-start gap-2.5">
                 <img
                   src={photoUrl || logo}
                   alt={fullName}
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = logo;
+                  }}
                   className="h-9 w-9 shrink-0 rounded-full border border-primary/30 bg-white object-cover"
                 />
                 <div className="rounded-2xl rounded-tl-sm border border-border bg-card px-3.5 py-2 text-xs shadow-sm">
@@ -1433,9 +1534,9 @@ function MyStaffProfilePanel({ isMainAdmin }: { isMainAdmin: boolean }) {
               </div>
             </div>
 
-            <div className="flex items-center justify-between pt-1">
-              <p className="text-[11px] text-muted-foreground">
-                🔒 আপনার প্রোফাইল সম্পূর্ণ ব্যক্তিগত — অন্য কোনো এডমিন, এডিটর বা মোডারেটর এটি দেখতে পাবে না।
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+              <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                <Lock className="h-3.5 w-3.5 shrink-0 text-primary" /> আপনার প্রোফাইল সম্পূর্ণ ব্যক্তিগত — অন্য কোনো এডমিন, এডিটর বা মোডারেটর এটি দেখতে পাবে না।
               </p>
               <button
                 type="submit"
@@ -3805,7 +3906,6 @@ function SubmissionsAdminPanel({ subs }: { subs: ReturnType<typeof useCloudSubmi
   const [showAdd, setShowAdd] = useState(false);
   const [busy, setBusy] = useState(false);
   const [approvingAll, setApprovingAll] = useState(false);
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [editingItem, setEditingItem] = useState<SubmissionRow | null>(null);
   const [form, setForm] = useState({
     category_slug: "janapratinidhi",
@@ -3856,34 +3956,6 @@ function SubmissionsAdminPanel({ subs }: { subs: ReturnType<typeof useCloudSubmi
       toast.error((e as Error).message || "ত্রুটি");
     } finally {
       setApprovingAll(false);
-    }
-  }
-
-  async function handlePhotoUpload(
-    e: React.ChangeEvent<HTMLInputElement>,
-    mode: "add" | "edit"
-  ) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      toast.error("শুধু ছবি ফাইল নির্বাচন করুন");
-      return;
-    }
-    setUploadingPhoto(true);
-    try {
-      const url = await uploadPublicImage(file, "submissions");
-      if (!url) throw new Error("ছবি প্রসেস করা যায়নি");
-      if (mode === "add") {
-        setForm((prev) => ({ ...prev, image_url: url }));
-      } else if (editingItem) {
-        setEditingItem({ ...editingItem, image_url: url });
-      }
-      toast.success("ছবি যুক্ত হয়েছে");
-    } catch (err: any) {
-      toast.error(err?.message || "আপলোড ব্যর্থ");
-    } finally {
-      setUploadingPhoto(false);
     }
   }
 
@@ -4025,28 +4097,14 @@ function SubmissionsAdminPanel({ subs }: { subs: ReturnType<typeof useCloudSubmi
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-card px-3 py-1.5 text-xs font-semibold text-primary-deep shadow-2xs ring-1 ring-border">
-                  {uploadingPhoto ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Camera className="h-3.5 w-3.5 text-primary" />
-                  )}
-                  ছবি যুক্ত করুন (ঐচ্ছিক)
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => void handlePhotoUpload(e, "add")}
-                    className="hidden"
-                  />
-                </label>
-                {form.image_url && (
-                  <img
-                    src={form.image_url}
-                    alt="preview"
-                    className="h-9 w-9 rounded-lg border object-cover"
-                  />
-                )}
+              <div className="flex-1 min-w-[200px]">
+                <UniversalImageUploader
+                  category="submission"
+                  variant="inline"
+                  label="ছবি যুক্ত করুন (ঐচ্ছিক)"
+                  value={form.image_url}
+                  onChange={(url) => setForm((prev) => ({ ...prev, image_url: url || "" }))}
+                />
               </div>
 
               <div className="flex gap-2">
@@ -4212,24 +4270,18 @@ function SubmissionsAdminPanel({ subs }: { subs: ReturnType<typeof useCloudSubmi
               rows={3}
               className="w-full rounded-xl border border-border bg-background p-3 text-sm"
             />
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <label className="inline-flex cursor-pointer items-center gap-1 rounded-full bg-muted px-3 py-1.5 text-xs font-semibold text-primary-deep">
-                  <Camera className="h-3.5 w-3.5" /> ছবি পরিবর্তন
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => void handlePhotoUpload(e, "edit")}
-                    className="hidden"
-                  />
-                </label>
-                {editingItem.image_url && (
-                  <img
-                    src={editingItem.image_url}
-                    alt="preview"
-                    className="h-9 w-9 rounded-lg border object-cover"
-                  />
-                )}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex-1 min-w-[180px]">
+                <UniversalImageUploader
+                  category="submission"
+                  entityId={editingItem.id}
+                  variant="inline"
+                  label="ছবি পরিবর্তন"
+                  value={editingItem.image_url || ""}
+                  onChange={(url) =>
+                    setEditingItem((prev) => (prev ? { ...prev, image_url: url || "" } : null))
+                  }
+                />
               </div>
               <div className="flex gap-2">
                 <button
@@ -5481,7 +5533,6 @@ function DonorsAdminPanel({
   const [editing, setEditing] = useState<DonorRow | null>(null);
   const [busy, setBusy] = useState(false);
   const [approvingAll, setApprovingAll] = useState(false);
-  const [uploadingDonorPhoto, setUploadingDonorPhoto] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
   const [bloodFilter, setBloodFilter] = useState("all");
@@ -5512,26 +5563,6 @@ function DonorsAdminPanel({
       toast.error((e as Error).message || "ত্রুটি");
     } finally {
       setApprovingAll(false);
-    }
-  }
-
-  async function handleDonorPhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file || !editing) return;
-    if (!file.type.startsWith("image/")) {
-      toast.error("অনুগ্রহ করে একটি ছবি ফাইল নির্বাচন করুন");
-      return;
-    }
-    setUploadingDonorPhoto(true);
-    try {
-      const url = await uploadPublicImage(file, "donors");
-      if (!url) throw new Error("ছবি প্রসেস করা যায়নি");
-      setEditing({ ...editing, photo_url: url });
-      toast.success("রক্তদাতার ছবি সফলভাবে লোড হয়েছে");
-    } catch (err: any) {
-      toast.error(err?.message || "ছবি আপলোড ব্যর্থ");
-    } finally {
-      setUploadingDonorPhoto(false);
     }
   }
 
@@ -5692,49 +5723,17 @@ function DonorsAdminPanel({
             <p className="font-display text-sm font-bold text-primary-deep">রক্তদাতা সম্পাদনা</p>
 
             {/* Donor Photo Section */}
-            <div className="flex items-center gap-3 rounded-xl border border-border/70 bg-muted/30 p-2.5">
-              <div className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full border border-rose-500/30 bg-rose-500/10 text-rose-600 shadow-sm">
-                {editing.photo_url ? (
-                  <img
-                    src={editing.photo_url}
-                    alt="Donor"
-                    className="h-full w-full object-cover"
-                    onError={(e) => {
-                      (e.currentTarget as HTMLElement).style.display = "none";
-                      const fb = e.currentTarget.parentElement?.querySelector(".edit-donor-fb") as HTMLElement;
-                      if (fb) fb.classList.remove("hidden");
-                    }}
-                  />
-                ) : null}
-                <div className={`edit-donor-fb flex h-full w-full items-center justify-center ${editing.photo_url ? "hidden" : ""}`}>
-                  <Droplet className="h-7 w-7 text-rose-600" />
-                </div>
-              </div>
-              <div className="flex-1">
-                <p className="text-xs font-semibold text-foreground">রক্তদাতার ছবি</p>
-                <div className="mt-1 flex flex-wrap items-center gap-2">
-                  <label className="inline-flex cursor-pointer items-center gap-1 rounded-full bg-primary/10 px-3 py-1 text-[11px] font-bold text-primary-deep transition hover:bg-primary/20">
-                    <Camera className="h-3 w-3" />
-                    {uploadingDonorPhoto ? "আপলোড হচ্ছে..." : editing.photo_url ? "ছবি পরিবর্তন" : "ছবি যোগ করুন"}
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      disabled={uploadingDonorPhoto}
-                      onChange={handleDonorPhotoUpload}
-                    />
-                  </label>
-                  {editing.photo_url && (
-                    <button
-                      type="button"
-                      onClick={() => setEditing({ ...editing, photo_url: "" })}
-                      className="text-[11px] font-semibold text-destructive hover:underline"
-                    >
-                      ছবি মুছুন
-                    </button>
-                  )}
-                </div>
-              </div>
+            <div className="rounded-xl border border-border/70 bg-muted/25 p-2.5">
+              <UniversalImageUploader
+                category="donor"
+                entityId={editing.id}
+                label="রক্তদাতার ছবি"
+                variant="inline"
+                value={editing.photo_url || ""}
+                onChange={(url) =>
+                  setEditing((prev) => (prev ? { ...prev, photo_url: url || "" } : null))
+                }
+              />
             </div>
 
             <input
@@ -9071,8 +9070,8 @@ function OverviewPanel({
     <div className="space-y-3">
       {/* Quick Actions */}
       <div className="rounded-2xl bg-card p-4 shadow-card">
-        <p className="mb-3 font-display text-sm font-bold text-primary-deep">
-          ⚡ দ্রুত অ্যাকশন ও শর্টকাট
+        <p className="mb-3 flex items-center gap-1.5 font-display text-sm font-bold text-primary-deep">
+          <Zap className="h-4 w-4 text-amber-500" /> দ্রুত অ্যাকশন ও শর্টকাট
         </p>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <QuickAction
@@ -9165,7 +9164,7 @@ function OverviewPanel({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <p className="flex items-center gap-1.5 font-display text-sm font-bold text-primary-deep">
-                <Activity className="h-4 w-4 text-primary" /> 🕵️ এডমিন, এডিটর ও মডারেটর অ্যাক্টিভিটি ও ডিলিট মনিটর
+                <Activity className="h-4 w-4 text-primary" /> এডমিন, এডিটর ও মডারেটর অ্যাক্টিভিটি ও ডিলিট মনিটর
               </p>
               <p className="text-xs text-muted-foreground">
                 কে কখন কোন তথ্য অনুমোদন, এডিট বা ডিলিট করেছে তার লাইভ তালিকা (শুধু সুপার এডমিন দেখতে পান)
@@ -9192,8 +9191,9 @@ function OverviewPanel({
                     className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white/90 px-3 py-2 text-xs shadow-sm"
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-bold text-rose-800">
-                        🗑️ {dl.target_title}{" "}
+                      <p className="flex items-center gap-1 truncate font-bold text-rose-800">
+                        <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">{dl.target_title}</span>{" "}
                         <span className="font-normal text-muted-foreground">
                           ({dl.module_label})
                         </span>

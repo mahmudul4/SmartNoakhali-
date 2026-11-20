@@ -18,7 +18,7 @@ export const Route = createFileRoute("/map")({
 
 function MapPage() {
   return (
-    <div className="mx-auto w-full max-w-4xl overflow-x-hidden px-3.5 pb-24 pt-4 sm:px-4">
+    <div className="mx-auto w-full max-w-6xl overflow-x-hidden px-3.5 pb-24 pt-4 sm:px-6">
       {/* Interactive Map Component */}
       <InteractiveNoakhaliMap />
 

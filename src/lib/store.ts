@@ -32,6 +32,22 @@ import {
 import defaultLogoUrl from "@/assets/logo.png";
 import { clearBinaryFromIdb, saveBinaryToIdb, sanitizeAppFileName } from "@/lib/pwa";
 import { compressDataUrlToWebP } from "@/lib/imageProcessor";
+import {
+  normalizeResponsiveLayouts,
+  type HeroDeviceBreakpoint,
+  type HeroEditableElementId,
+  type HeroElementPosition,
+  type HeroBreakpointLayout,
+  type HeroResponsiveLayouts,
+} from "@/lib/heroPositioning";
+
+export type {
+  HeroDeviceBreakpoint,
+  HeroEditableElementId,
+  HeroElementPosition,
+  HeroBreakpointLayout,
+  HeroResponsiveLayouts,
+};
 
 export const defaultLogo: string = defaultLogoUrl;
 
@@ -3141,6 +3157,10 @@ export type HeroImageFocalPosition =
   | "left center"
   | "right center";
 
+export type HeroLayoutMode = "centered" | "full_width" | "split_left" | "split_right";
+export type HeroImageFit = "cover" | "contain";
+export type HeroTransitionStyle = "slide" | "fade" | "none";
+
 export interface HeroBannerConfig {
   id?: string;
   name?: string;
@@ -3149,6 +3169,11 @@ export interface HeroBannerConfig {
   startDate?: string;
   endDate?: string;
   textAlign?: "left" | "center" | "right";
+  layoutMode?: HeroLayoutMode;
+  imageFit?: HeroImageFit;
+  desktopHeightPx?: number;
+  tabletHeightPx?: number;
+  mobileHeightPx?: number;
   visible: boolean;
   badgeText: string;
   headingLine1: string;
@@ -3160,6 +3185,9 @@ export interface HeroBannerConfig {
   secondaryButtonLink: string;
   optionalButtonText?: string;
   optionalButtonLink?: string;
+  optionalText?: string;
+  optionalTextColor?: string;
+  responsiveLayouts?: HeroResponsiveLayouts;
   backgroundMode: "gradient" | "solid" | "image";
   desktopImageUrl: string;
   mobileImageUrl: string;
@@ -3196,6 +3224,11 @@ export interface HeroBannerItem extends HeroBannerConfig {
   startDate: string;
   endDate: string;
   textAlign: "left" | "center" | "right";
+  layoutMode: HeroLayoutMode;
+  imageFit: HeroImageFit;
+  desktopHeightPx: number;
+  tabletHeightPx: number;
+  mobileHeightPx: number;
   badgeColor: string;
   badgeBgColor: string;
   headingColor: string;
@@ -3208,6 +3241,8 @@ export interface HeroBannerItem extends HeroBannerConfig {
   optionalButtonLink: string;
   optionalButtonColor: string;
   optionalButtonBgColor: string;
+  optionalText: string;
+  optionalTextColor: string;
 }
 
 export interface HeroCarouselSettings {
@@ -3216,6 +3251,7 @@ export interface HeroCarouselSettings {
   showArrows: boolean;
   showDots: boolean;
   pauseOnHover: boolean;
+  transitionStyle: HeroTransitionStyle;
 }
 
 export interface HeroBannersStorePayload {
@@ -3230,6 +3266,7 @@ export const DEFAULT_HERO_CAROUSEL_SETTINGS: HeroCarouselSettings = {
   showArrows: true,
   showDots: true,
   pauseOnHover: true,
+  transitionStyle: "slide",
 };
 
 export const DEFAULT_HERO_BANNER_ITEM: HeroBannerItem = {
@@ -3239,7 +3276,12 @@ export const DEFAULT_HERO_BANNER_ITEM: HeroBannerItem = {
   order: 0,
   startDate: "",
   endDate: "",
-  textAlign: "center",
+  textAlign: "left",
+  layoutMode: "centered",
+  imageFit: "cover",
+  desktopHeightPx: 336,
+  tabletHeightPx: 324,
+  mobileHeightPx: 308,
   visible: true,
   badgeText: "নোয়াখালীর ডিজিটাল সিটিজেন প্ল্যাটফর্ম",
   headingLine1: "এক ক্লিকে নোয়াখালীর",
@@ -3252,6 +3294,8 @@ export const DEFAULT_HERO_BANNER_ITEM: HeroBannerItem = {
   secondaryButtonLink: "/submit-info",
   optionalButtonText: "",
   optionalButtonLink: "",
+  optionalText: "",
+  optionalTextColor: "#fde68a",
   backgroundMode: "gradient",
   desktopImageUrl: "",
   mobileImageUrl: "",
@@ -3285,6 +3329,30 @@ function normalizeHeroBannerItem(
   rawItem: Partial<HeroBannerItem>,
   idx: number
 ): HeroBannerItem {
+  const layoutMode: HeroLayoutMode =
+    rawItem.layoutMode === "full_width" ||
+    rawItem.layoutMode === "split_left" ||
+    rawItem.layoutMode === "split_right"
+      ? rawItem.layoutMode
+      : "centered";
+  const imageFit: HeroImageFit = rawItem.imageFit === "contain" ? "contain" : "cover";
+  const desktopHeightPx =
+    typeof rawItem.desktopHeightPx === "number" && !Number.isNaN(rawItem.desktopHeightPx)
+      ? Math.min(560, Math.max(240, Math.round(rawItem.desktopHeightPx)))
+      : DEFAULT_HERO_BANNER_ITEM.desktopHeightPx;
+  const tabletHeightPx =
+    typeof rawItem.tabletHeightPx === "number" && !Number.isNaN(rawItem.tabletHeightPx)
+      ? Math.min(520, Math.max(240, Math.round(rawItem.tabletHeightPx)))
+      : DEFAULT_HERO_BANNER_ITEM.tabletHeightPx;
+  const mobileHeightPx =
+    typeof rawItem.mobileHeightPx === "number" && !Number.isNaN(rawItem.mobileHeightPx)
+      ? Math.min(480, Math.max(240, Math.round(rawItem.mobileHeightPx)))
+      : DEFAULT_HERO_BANNER_ITEM.mobileHeightPx;
+  const resolvedTextAlign: "left" | "center" | "right" =
+    rawItem.textAlign === "left" || rawItem.textAlign === "center" || rawItem.textAlign === "right"
+      ? rawItem.textAlign
+      : DEFAULT_HERO_BANNER_ITEM.textAlign;
+
   const merged: HeroBannerItem = {
     ...DEFAULT_HERO_BANNER_ITEM,
     ...rawItem,
@@ -3294,10 +3362,12 @@ function normalizeHeroBannerItem(
     order: typeof rawItem.order === "number" ? rawItem.order : idx,
     startDate: String(rawItem.startDate || ""),
     endDate: String(rawItem.endDate || ""),
-    textAlign:
-      rawItem.textAlign === "left" || rawItem.textAlign === "right"
-        ? rawItem.textAlign
-        : "center",
+    textAlign: resolvedTextAlign,
+    layoutMode,
+    imageFit,
+    desktopHeightPx,
+    tabletHeightPx,
+    mobileHeightPx,
     visible: rawItem.visible !== false,
     showDecorativeGlow: rawItem.showDecorativeGlow !== false,
     overlayOpacity:
@@ -3322,6 +3392,10 @@ function normalizeHeroBannerItem(
       rawItem.optionalButtonColor || DEFAULT_HERO_BANNER_ITEM.optionalButtonColor,
     optionalButtonBgColor:
       rawItem.optionalButtonBgColor || DEFAULT_HERO_BANNER_ITEM.optionalButtonBgColor,
+    optionalText: rawItem.optionalText || "",
+    optionalTextColor:
+      rawItem.optionalTextColor || DEFAULT_HERO_BANNER_ITEM.optionalTextColor,
+    responsiveLayouts: normalizeResponsiveLayouts(rawItem.responsiveLayouts, resolvedTextAlign),
   };
   return merged;
 }
@@ -3336,11 +3410,15 @@ function parseHeroBannersPayload(raw: string | null | undefined): HeroBannersSto
           .filter((x: unknown) => Boolean(x && typeof x === "object"))
           .map((item: Partial<HeroBannerItem>, idx: number) => normalizeHeroBannerItem(item, idx))
           .sort((a: HeroBannerItem, b: HeroBannerItem) => a.order - b.order);
+        const rawStyle = parsed?.carousel?.transitionStyle;
+        const transitionStyle: HeroTransitionStyle =
+          rawStyle === "fade" || rawStyle === "none" ? rawStyle : "slide";
         return {
           banners: list.length > 0 ? list : [DEFAULT_HERO_BANNER_ITEM],
           carousel: {
             ...DEFAULT_HERO_CAROUSEL_SETTINGS,
             ...(parsed.carousel && typeof parsed.carousel === "object" ? parsed.carousel : {}),
+            transitionStyle,
             intervalSeconds: Math.min(
               20,
               Math.max(2, Number(parsed?.carousel?.intervalSeconds ?? 5))

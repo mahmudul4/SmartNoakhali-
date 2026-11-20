@@ -1,8 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { ArrowLeft, Upload, Droplet, Phone, Send, HeartPulse, CheckCircle2, XCircle, Search, X, MapPin, Edit3, Trash2, Save } from "lucide-react";
+import { ArrowLeft, Droplet, Phone, Send, HeartPulse, CheckCircle2, XCircle, Search, X, MapPin, Edit3, Trash2, Save } from "lucide-react";
 import { toast } from "sonner";
-import { useCloudDonors, useCloudDonorEvents, uploadPublicImage, type DonorRow } from "@/lib/cloud";
+import { useCloudDonors, useCloudDonorEvents, type DonorRow } from "@/lib/cloud";
 import { useAuth } from "@/lib/auth";
 import { UniversalImageUploader } from "@/components/UniversalImageUploader";
 
@@ -40,6 +40,7 @@ function BloodPage() {
       address: editingDonor.address,
       total_donations: Number(editingDonor.total_donations) || 0,
       last_donation_date: editingDonor.last_donation_date,
+      photo_url: editingDonor.photo_url ?? null,
     });
     setSavingEdit(false);
     if (error) return toast.error(error.message);
@@ -55,7 +56,7 @@ function BloodPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl overflow-x-hidden px-3.5 pb-24 pt-4 sm:px-4">
+    <div className="mx-auto w-full max-w-6xl overflow-x-hidden px-3.5 pb-24 pt-4 sm:px-6">
       <Link to="/" className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="h-4 w-4 shrink-0" /> হোম
       </Link>
@@ -103,9 +104,9 @@ function BloodPage() {
         </select>
       </div>
 
-      <div className="grid w-full min-w-0 grid-cols-1 gap-3">
+      <div className="grid w-full min-w-0 grid-cols-1 gap-3 md:grid-cols-2 lg:gap-4">
         {filtered.length === 0 && (
-          <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground md:col-span-2">
             কোনো রক্তদাতা নেই।
           </div>
         )}
@@ -174,6 +175,17 @@ function BloodPage() {
               placeholder="মোট রক্তদান সংখ্যা"
               className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
             />
+            <div>
+              <span className="mb-1 block text-xs font-semibold text-primary-deep">রক্তদাতার ছবি (ঐচ্ছিক)</span>
+              <UniversalImageUploader
+                variant="inline"
+                category="donor"
+                entityId={editingDonor.id}
+                value={editingDonor.photo_url || ""}
+                onChange={(url) => setEditingDonor({ ...editingDonor, photo_url: url || null })}
+                label="ছবি নির্বাচন করুন"
+              />
+            </div>
             <div className="flex gap-2">
               <button
                 type="button"
@@ -227,18 +239,7 @@ function DonorForm({ onDone, addDonor }: { onDone: () => void; addDonor: ReturnT
     total_donations: "",
   });
   const [photo_url, setPhoto] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-
-  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setUploading(true);
-    const url = await uploadPublicImage(f, "donors");
-    setUploading(false);
-    if (!url) return toast.error("আপলোড ব্যর্থ");
-    setPhoto(url);
-  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -497,20 +498,7 @@ function DonatedModal({
   const [note, setNote] = useState("");
   const [formImage, setFormImage] = useState<string | null>(null);
   const [photo, setPhoto] = useState<string | null>(null);
-  const [uploading, setUploading] = useState<null | "form" | "photo">(null);
   const [busy, setBusy] = useState(false);
-
-  async function pick(kind: "form" | "photo", e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    e.target.value = "";
-    if (!f) return;
-    setUploading(kind);
-    const url = await uploadPublicImage(f, `donor-events/${donor.id}`);
-    setUploading(null);
-    if (!url) return toast.error("আপলোড ব্যর্থ");
-    if (kind === "form") setFormImage(url);
-    else setPhoto(url);
-  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();

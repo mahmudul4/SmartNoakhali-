@@ -6,7 +6,12 @@ import {
   type UploadMetadata,
 } from "firebase/storage";
 import { storage, auth, ensureFirebaseAuthUser } from "@/lib/firebase";
-import { processAndCompressImage, type CompressionOptions, type ProcessedImageResult } from "./imageProcessor";
+import {
+  processAndCompressImage,
+  getFileSignature,
+  type CompressionOptions,
+  type ProcessedImageResult,
+} from "./imageProcessor";
 
 export type ImageUploadCategory =
   | "profile"
@@ -40,6 +45,7 @@ export interface ImageUploadResult {
 
 let cachedBucketStatus: "unknown" | "available" | "unavailable" = "unknown";
 let bucketProbeInFlight: Promise<boolean> | null = null;
+const inFlightFileUploads = new Map<string, Promise<ImageUploadResult>>();
 
 /**
  * Probes once per session whether the configured Firebase Storage bucket actually exists.
@@ -143,11 +149,80 @@ function mapUploadErrorMessage(err: any): string {
   return err?.message || "ছবি আপলোড ব্যর্থ হয়েছে। পুনরায় চেষ্টা করুন।";
 }
 
+async function encodeCompactFallbackDataUrl(
+  processed: ProcessedImageResult,
+  category: ImageUploadCategory
+): Promise<string> {
+  const maxFallbackBytes =
+    category === "profile" || category === "staff_avatar"
+      ? 60 * 1024
+      : category === "logo"
+      ? 140 * 1024
+      : 165 * 1024;
+
+  if (processed.blob.size <= maxFallbackBytes) {
+    return blobToDataUrl(processed.blob);
+  }
+
+  const maxDim =
+    category === "profile" || category === "staff_avatar"
+      ? 384
+      : category === "logo"
+      ? 512
+      : 1200;
+
+  const tempFile = new File([processed.blob], processed.file.name || "fallback.webp", {
+    type: processed.blob.type || "image/webp",
+    lastModified: Date.now(),
+  });
+  const compacted = await processAndCompressImage(tempFile, {
+    preset: "custom",
+    maxWidth: maxDim,
+    maxHeight: maxDim,
+    targetMaxSizeBytes: maxFallbackBytes,
+    initialQuality: 0.78,
+    minQuality: 0.45,
+    preserveTransparency: category === "logo",
+    squareCrop: category === "profile" || category === "staff_avatar",
+  });
+  try {
+    URL.revokeObjectURL(compacted.previewUrl);
+  } catch {
+    // ignore
+  }
+  return blobToDataUrl(compacted.blob);
+}
+
 /**
  * Compress an image and upload directly to Firebase Storage with live resumable progress,
  * or fast firestore_asset encoding if the project's Storage bucket is not yet provisioned.
  */
 export async function uploadImageToFirebaseStorage(
+  file: File,
+  options: ImageUploadOptions
+): Promise<ImageUploadResult> {
+  if (options.abortSignal?.aborted) {
+    throw new Error("আপলোড বাতিল করা হয়েছে।");
+  }
+
+  const dedupKey = `${options.category}::${options.entityId || "default"}::${getFileSignature(file)}`;
+  const existingTask = inFlightFileUploads.get(dedupKey);
+  if (existingTask && !options.abortSignal) {
+    return existingTask;
+  }
+
+  const taskPromise = runImageUploadInternal(file, options).finally(() => {
+    if (inFlightFileUploads.get(dedupKey) === taskPromise) {
+      inFlightFileUploads.delete(dedupKey);
+    }
+  });
+  if (!options.abortSignal) {
+    inFlightFileUploads.set(dedupKey, taskPromise);
+  }
+  return taskPromise;
+}
+
+async function runImageUploadInternal(
   file: File,
   options: ImageUploadOptions
 ): Promise<ImageUploadResult> {
@@ -199,7 +274,7 @@ export async function uploadImageToFirebaseStorage(
   if (!bucketAvailable) {
     options.onStageChange?.("saving");
     options.onProgress?.(85);
-    const dataUrl = await blobToDataUrl(processed.blob);
+    const dataUrl = await encodeCompactFallbackDataUrl(processed, options.category);
     options.onProgress?.(100);
     return {
       downloadUrl: dataUrl,
@@ -321,7 +396,7 @@ export async function uploadImageToFirebaseStorage(
       cachedBucketStatus = "unavailable";
       options.onStageChange?.("saving");
       options.onProgress?.(95);
-      const dataUrl = await blobToDataUrl(processed.blob);
+      const dataUrl = await encodeCompactFallbackDataUrl(processed, options.category);
       options.onProgress?.(100);
       return {
         downloadUrl: dataUrl,
@@ -337,7 +412,7 @@ export async function uploadImageToFirebaseStorage(
     console.warn("[Firebase Storage notice: falling back to client-optimized format]", err);
     options.onStageChange?.("saving");
     options.onProgress?.(100);
-    const dataUrl = await blobToDataUrl(processed.blob);
+    const dataUrl = await encodeCompactFallbackDataUrl(processed, options.category);
     return {
       downloadUrl: dataUrl,
       storagePath: "client_fallback",

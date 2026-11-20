@@ -449,23 +449,34 @@ export async function processAndCompressImage(
 }
 
 /**
+ * Computes a stable signature for deduplicating identical concurrent file uploads
+ */
+export function getFileSignature(file: File): string {
+  return `${file.name}::${file.size}::${file.lastModified}::${file.type}`;
+}
+
+/**
  * Re-compresses an oversized legacy data: URL cleanly into a WebP data: URL under targetMaxBytes.
  */
 export async function compressDataUrlToWebP(
   dataUrl: string,
-  targetMaxBytes = 165 * 1024
+  targetMaxBytes = 165 * 1024,
+  maxDimension = 1440
 ): Promise<string> {
   if (!dataUrl || !dataUrl.startsWith("data:")) return dataUrl;
   const response = await fetch(dataUrl);
   const blob = await response.blob();
   const ext = blob.type.includes("png") ? "png" : blob.type.includes("webp") ? "webp" : "jpg";
-  const tempFile = new File([blob], `banner_asset.${ext}`, {
+  const tempFile = new File([blob], `asset.${ext}`, {
     type: blob.type || "image/jpeg",
     lastModified: Date.now(),
   });
   const processed = await processAndCompressImage(tempFile, {
-    preset: "banner",
+    preset: "custom",
+    maxWidth: maxDimension,
+    maxHeight: maxDimension,
     targetMaxSizeBytes: targetMaxBytes,
+    initialQuality: 0.82,
     minQuality: 0.45,
   });
   try {

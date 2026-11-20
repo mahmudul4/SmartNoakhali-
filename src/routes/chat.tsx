@@ -393,33 +393,42 @@ function ChatPage() {
     const f = e.target.files?.[0];
     e.target.value = "";
     if (!f || !threadId) return;
+    if (f.size > 25 * 1024 * 1024) {
+      return toast.error("ফাইলটি ২৫ মেগাবাইটের বেশি হওয়া যাবে না");
+    }
     setBusy(true);
-    const url = await uploadPublicImage(f, `chat/${threadId}`);
-    setBusy(false);
-    if (!url) return toast.error("আপলোড ব্যর্থ");
-    const role = isStaff ? "staff" : "user";
-    const senderId = user?.id || threadId;
-    if (soundEnabled) playChatChime("send");
-    const { error } = await send(senderId, role, "", url, userMeta);
-    if (error) toast.error(error.message);
+    try {
+      const url = await uploadPublicImage(f, `chat/${threadId}`);
+      if (!url) return toast.error("ছবি বা ফাইল আপলোড করা যায়নি, পুনরায় চেষ্টা করুন");
+      const role = isStaff ? "staff" : "user";
+      const senderId = user?.id || threadId;
+      if (soundEnabled) playChatChime("send");
+      const { error } = await send(senderId, role, "", url, userMeta);
+      if (error) toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function onVoice(blob: Blob) {
     if (!threadId) return;
     setBusy(true);
-    const file = new File([blob], `voice-${Date.now()}.webm`, { type: "audio/webm" });
-    const url = await uploadPublicImage(file, `chat/${threadId}`);
-    setBusy(false);
-    if (!url) return toast.error("আপলোড ব্যর্থ");
-    const role = isStaff ? "staff" : "user";
-    const senderId = user?.id || threadId;
-    if (soundEnabled) playChatChime("send");
-    const { error } = await send(senderId, role, "", url, userMeta);
-    if (error) toast.error(error.message);
+    try {
+      const file = new File([blob], `voice-${Date.now()}.webm`, { type: "audio/webm" });
+      const url = await uploadPublicImage(file, `chat/${threadId}`);
+      if (!url) return toast.error("ভয়েস মেসেজ আপলোড করা যায়নি");
+      const role = isStaff ? "staff" : "user";
+      const senderId = user?.id || threadId;
+      if (soundEnabled) playChatChime("send");
+      const { error } = await send(senderId, role, "", url, userMeta);
+      if (error) toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100dvh-72px)] max-w-3xl flex-col px-3 pb-2 pt-3 sm:px-4">
+    <div className="mx-auto flex h-[calc(100dvh-72px)] max-w-5xl flex-col px-3 pb-2 pt-3 sm:px-6">
       {/* Header bar */}
       <div className="mb-2.5 flex items-center justify-between">
         <Link to="/" className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground transition hover:text-foreground">
@@ -947,13 +956,19 @@ function ChatPage() {
 }
 
 export function AttachmentView({ url }: { url: string }) {
-  const isImg = /\.(png|jpe?g|gif|webp)$/i.test(url) || url.startsWith("data:image");
+  const [imgBroken, setImgBroken] = useState(false);
+  const isImg = /\.(png|jpe?g|gif|webp|avif)$/i.test(url) || url.startsWith("data:image");
   const isAudio = /\.(webm|mp3|ogg|wav|m4a)$/i.test(url) || url.startsWith("data:audio");
   if (isAudio) return <audio controls src={url} className="mt-1 h-9 w-full max-w-[240px]" />;
-  if (isImg)
+  if (isImg && !imgBroken)
     return (
       <a href={url} target="_blank" rel="noreferrer" className="mt-1.5 block">
-        <img src={url} alt="" className="max-h-48 rounded-lg object-cover ring-1 ring-border shadow-sm" />
+        <img
+          src={url}
+          alt="সংযুক্ত ছবি"
+          onError={() => setImgBroken(true)}
+          className="max-h-48 rounded-lg object-cover ring-1 ring-border shadow-sm"
+        />
       </a>
     );
   return (
@@ -963,7 +978,7 @@ export function AttachmentView({ url }: { url: string }) {
       rel="noreferrer"
       className="mt-1 inline-flex items-center gap-1.5 rounded-lg bg-black/10 px-2.5 py-1 text-xs font-semibold"
     >
-      <ImageIcon className="h-3.5 w-3.5" /> ফাইল দেখুন
+      <ImageIcon className="h-3.5 w-3.5" /> {isImg ? "ছবি দেখুন" : "ফাইল দেখুন"}
     </a>
   );
 }

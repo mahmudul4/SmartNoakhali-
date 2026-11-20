@@ -19,6 +19,7 @@ import {
 } from "@/lib/imageUpload";
 import {
   formatFileSizeBn,
+  getFileSignature,
   type ProcessedImageResult,
   type CompressionOptions,
 } from "@/lib/imageProcessor";
@@ -91,10 +92,18 @@ export function UniversalImageUploader({
 
   const [instantPreview, setInstantPreview] = useState<string | null>(null);
   const [lifecycle, setLifecycle] = useState<UploadLifecycle>("idle");
+  const lifecycleRef = useRef<UploadLifecycle>("idle");
   const [progress, setProgress] = useState<number>(0);
   const [stats, setStats] = useState<ProcessedImageResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [lastSelectedFile, setLastSelectedFile] = useState<File | null>(null);
+  const [imgLoadFailed, setImgLoadFailed] = useState<boolean>(false);
+  const uploadingFileSigRef = useRef<string | null>(null);
+
+  const updateLifecycle = (next: UploadLifecycle) => {
+    lifecycleRef.current = next;
+    setLifecycle(next);
+  };
 
   const isProcessing =
     lifecycle === "validating" ||
@@ -105,7 +114,11 @@ export function UniversalImageUploader({
   const instantPreviewRef = useRef<string | null>(null);
 
   // Effective displayed image: instant local blob preview while processing, or saved remote value
-  const displayImage = instantPreview || value;
+  const displayImage = instantPreview || (value && value.trim() ? value : null);
+
+  useEffect(() => {
+    setImgLoadFailed(false);
+  }, [displayImage]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -138,7 +151,8 @@ export function UniversalImageUploader({
     }
     setInstantPreview(null);
     if (isMountedRef.current) {
-      setLifecycle("idle");
+      updateLifecycle("idle");
+      uploadingFileSigRef.current = null;
       setProgress(0);
       toast.info("ছবি আপলোড বাতিল করা হয়েছে।");
     }
@@ -149,6 +163,11 @@ export function UniversalImageUploader({
     e.target.value = ""; // reset input so same file can be re-selected
     if (!file) return;
 
+    const sig = getFileSignature(file);
+    if (isProcessing && uploadingFileSigRef.current === sig) {
+      return;
+    }
+
     // Fast Instant Preview
     if (instantPreviewRef.current) {
       URL.revokeObjectURL(instantPreviewRef.current);
@@ -157,12 +176,16 @@ export function UniversalImageUploader({
     const localUrl = URL.createObjectURL(file);
     instantPreviewRef.current = localUrl;
     setInstantPreview(localUrl);
+    setImgLoadFailed(false);
 
     setLastSelectedFile(file);
     await startUploadProcess(file);
   };
 
   const startUploadProcess = async (file: File) => {
+    const sig = getFileSignature(file);
+    uploadingFileSigRef.current = sig;
+
     if (abortControllerRef.current) {
       try {
         abortControllerRef.current.abort();
@@ -172,7 +195,8 @@ export function UniversalImageUploader({
     abortControllerRef.current = controller;
 
     setErrorMsg(null);
-    setLifecycle("validating");
+    setImgLoadFailed(false);
+    updateLifecycle("validating");
     setProgress(5);
 
     try {
@@ -185,7 +209,7 @@ export function UniversalImageUploader({
         timeoutMs: 45000,
         onStageChange: (stage) => {
           if (isMountedRef.current) {
-            setLifecycle(stage);
+            updateLifecycle(stage);
           }
         },
         onProgress: (pct) => {
@@ -198,7 +222,7 @@ export function UniversalImageUploader({
       if (!isMountedRef.current) return;
 
       setStats(result.processed);
-      setLifecycle("success");
+      updateLifecycle("success");
       onChange(result.downloadUrl);
       toast.success("ছবি সফলভাবে আপলোড ও অপ্টিমাইজ হয়েছে!");
 
@@ -216,16 +240,17 @@ export function UniversalImageUploader({
       if (!isMountedRef.current) return;
       console.error("[UniversalImageUploader Error]", err);
       const msg = err?.message || "ছবি আপলোড ব্যর্থ হয়েছে। পুনরায় চেষ্টা করুন।";
-      setLifecycle("error");
+      updateLifecycle("error");
       setErrorMsg(msg);
       toast.error(msg);
     } finally {
       if (isMountedRef.current) {
         abortControllerRef.current = null;
-        if (lifecycle !== "error") {
+        uploadingFileSigRef.current = null;
+        if (lifecycleRef.current !== "error") {
           setTimeout(() => {
-            if (isMountedRef.current) {
-              setLifecycle("idle");
+            if (isMountedRef.current && lifecycleRef.current !== "error") {
+              updateLifecycle("idle");
               setProgress(0);
             }
           }, 600);
@@ -244,11 +269,12 @@ export function UniversalImageUploader({
       instantPreviewRef.current = null;
     }
     setInstantPreview(null);
+    setImgLoadFailed(false);
     onChange(null);
     setStats(null);
     setErrorMsg(null);
     setLastSelectedFile(null);
-    setLifecycle("idle");
+    updateLifecycle("idle");
 
     if (autoDeleteOld && oldUrl) {
       void deleteStorageImageByUrl(oldUrl);
@@ -293,15 +319,19 @@ export function UniversalImageUploader({
             onClick={() => !disabled && !isProcessing && fileInputRef.current?.click()}
             title="গ্যালারি বা ক্যামেরা থেকে ছবি পরিবর্তন করুন"
           >
-            {displayImage ? (
+            {displayImage && !imgLoadFailed ? (
               <img
                 src={displayImage}
                 alt={label || "Avatar"}
                 className="h-full w-full object-cover bg-white"
-                onError={(e) => {
-                  (e.target as HTMLElement).style.display = "none";
-                }}
+                onLoad={() => setImgLoadFailed(false)}
+                onError={() => setImgLoadFailed(true)}
               />
+            ) : imgLoadFailed ? (
+              <div className="flex flex-col items-center justify-center p-2 text-center text-muted-foreground">
+                <AlertCircle className="h-6 w-6 text-amber-600" />
+                <span className="mt-1 text-[9px] font-bold">পুনরায় আপলোড</span>
+              </div>
             ) : (
               placeholderIcon || <Camera className="h-8 w-8 text-muted-foreground/80" />
             )}
@@ -392,8 +422,16 @@ export function UniversalImageUploader({
           }`}
           title="ছবি নির্বাচন করুন"
         >
-          {displayImage ? (
-            <img src={displayImage} alt="Preview" className="h-full w-full object-cover" />
+          {displayImage && !imgLoadFailed ? (
+            <img
+              src={displayImage}
+              alt="Preview"
+              className="h-full w-full object-cover"
+              onLoad={() => setImgLoadFailed(false)}
+              onError={() => setImgLoadFailed(true)}
+            />
+          ) : imgLoadFailed ? (
+            <AlertCircle className="h-5 w-5 text-amber-600" />
           ) : (
             <FileImage className="h-5 w-5 text-muted-foreground" />
           )}
@@ -490,15 +528,14 @@ export function UniversalImageUploader({
             : "border-border bg-muted/20 hover:border-primary/60 hover:bg-muted/40"
         } ${disabled ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
       >
-        {displayImage ? (
+        {displayImage && !imgLoadFailed ? (
           <>
             <img
               src={displayImage}
               alt={label || "Uploaded Image"}
               className="h-full w-full object-contain p-2"
-              onError={(e) => {
-                (e.target as HTMLElement).style.display = "none";
-              }}
+              onLoad={() => setImgLoadFailed(false)}
+              onError={() => setImgLoadFailed(true)}
             />
             {/* Hover Actions Bar */}
             {!isProcessing && !disabled && (
@@ -523,6 +560,18 @@ export function UniversalImageUploader({
               </div>
             )}
           </>
+        ) : imgLoadFailed ? (
+          <div className="flex flex-col items-center justify-center p-5 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-700">
+              <AlertCircle className="h-6 w-6" />
+            </div>
+            <p className="mt-2.5 text-xs font-bold text-foreground">
+              ছবিটি লোড করা যায়নি — নতুন ছবি আপলোড করুন
+            </p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              ক্লিক করে পুনরায় বৈধ JPG, PNG বা WebP ছবি নির্বাচন করুন
+            </p>
+          </div>
         ) : (
           <div className="flex flex-col items-center justify-center p-5 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary transition group-hover:scale-105">

@@ -454,12 +454,25 @@ export async function recordUserCredential(entry: {
     // Non-fatal
   }
 
-  // Also sync user_registry_mirror to /api/content/sync so all devices and sessions see updated user info
-  const regPayload = sanitizeString(
-    JSON.stringify({ users: vault, deletedIds: readLocalDeletedUsers() }),
-    295000,
-    "{}"
-  );
+  // Also sync user_registry_mirror to /api/content/sync safely without ever corrupting valid JSON
+  const deletedIds = readLocalDeletedUsers();
+  let regPayload = JSON.stringify({ users: vault, deletedIds });
+  if (regPayload.length > 280000) {
+    const compactVault: Record<string, VaultUserMeta> = {};
+    for (const [vk, vv] of Object.entries(vault)) {
+      if (!vv) continue;
+      const keepPhoto =
+        vv.photo_url && (!vv.photo_url.startsWith("data:") || vv.photo_url.length <= 8000)
+          ? vv.photo_url
+          : undefined;
+      compactVault[vk] = { ...vv, photo_url: keepPhoto };
+    }
+    regPayload = sanitizeString(
+      JSON.stringify({ users: compactVault, deletedIds }),
+      295000,
+      "{}"
+    );
+  }
   try {
     await fetch("/api/content/sync", {
       method: "POST",
@@ -1588,12 +1601,19 @@ export async function updateUserProfile(opts?: {
     const path = `users/${d.user_id}`;
     const snap = await getDoc(doc(db, "users", d.user_id)).catch(() => null);
     if (snap && snap.exists()) {
-      await updateDoc(doc(db, "users", d.user_id), {
+      const patchData: Record<string, unknown> = {
         full_name: sanitizeString(d.full_name ?? snap.data().full_name ?? "User", 120, "User"),
         username: sanitizeString(d.username ?? snap.data().username ?? "user", 60, "user"),
         phone: sanitizeString(d.phone ?? snap.data().phone ?? "", 30, ""),
         updatedAt: serverTimestamp(),
-      }).catch((e) => handleFirestoreError(e, OperationType.UPDATE, path));
+      };
+      if (d.photo_url !== undefined) {
+        const cleanPhoto = String(d.photo_url || "").trim();
+        patchData.photo_url = cleanPhoto.length <= 250000 ? cleanPhoto : "";
+      }
+      await updateDoc(doc(db, "users", d.user_id), patchData).catch((e) =>
+        handleFirestoreError(e, OperationType.UPDATE, path)
+      );
     }
   }
 

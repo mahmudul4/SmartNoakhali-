@@ -162,7 +162,7 @@ function DirectoryPage() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-4xl overflow-x-hidden px-3.5 pb-24 pt-4 sm:px-4">
+    <div className="mx-auto w-full max-w-7xl overflow-x-hidden px-3.5 pb-24 pt-4 sm:px-6">
       {/* Header Banner */}
       <section className="relative overflow-hidden rounded-3xl bg-gradient-hero p-5 text-primary-foreground shadow-elevated">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

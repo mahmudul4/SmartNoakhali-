@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   Phone,
   Droplet,
@@ -39,6 +39,12 @@ import type { Category, Division } from "@/data/categories";
 import { BannerPopup } from "@/components/BannerPopup";
 import { EmergencyBanner } from "@/components/EmergencyBanner";
 import { ServiceCategoryCard } from "@/components/ServiceCategoryCard";
+import {
+  getElementCanvasStyle,
+  resolveBreakpointLayout,
+  useHeroBreakpoint,
+  type HeroDeviceBreakpoint,
+} from "@/lib/heroPositioning";
 
 const HOMEPAGE_ICONS: Record<string, LucideIcon> = {
   ShieldAlert,
@@ -107,9 +113,6 @@ function HeroActionLink({
   );
 }
 
-const HERO_STAGE_HEIGHT_CLASS =
-  "h-[316px] min-[380px]:h-[304px] sm:h-[296px] md:h-[308px]";
-
 const HERO_SLIDE_VARIANTS = {
   enter: (dir: number) => ({
     x: dir >= 0 ? "100%" : "-100%",
@@ -122,19 +125,35 @@ const HERO_SLIDE_VARIANTS = {
     zIndex: 2,
   },
   exit: (dir: number) => ({
-    x: dir >= 0 ? "-28%" : "28%",
+    x: dir >= 0 ? "-25%" : "25%",
     opacity: 1,
     zIndex: 1,
   }),
 };
 
+const HERO_FADE_VARIANTS = {
+  enter: () => ({ opacity: 0, zIndex: 2 }),
+  center: { opacity: 1, zIndex: 2 },
+  exit: () => ({ opacity: 0, zIndex: 1 }),
+};
+
+const HERO_NONE_VARIANTS = {
+  enter: () => ({ opacity: 1, x: "0%", zIndex: 2 }),
+  center: { opacity: 1, x: "0%", zIndex: 2 },
+  exit: () => ({ opacity: 0, zIndex: 1 }),
+};
+
 function HeroBannerSlide({
   banner,
+  breakpoint,
   slideDirection,
+  transitionStyle,
   hasControls,
 }: {
   banner: HeroBannerItem;
+  breakpoint: HeroDeviceBreakpoint;
   slideDirection: 1 | -1;
+  transitionStyle: "slide" | "fade" | "none";
   hasControls: boolean;
 }) {
   const desktopImg = banner.desktopImageUrl || banner.mobileImageUrl;
@@ -142,33 +161,75 @@ function HeroBannerSlide({
   const hasImage = Boolean(
     banner.backgroundMode === "image" && (desktopImg || mobileImg)
   );
+  const activeBreakpointLayout = resolveBreakpointLayout(
+    banner.responsiveLayouts,
+    breakpoint,
+    banner.textAlign
+  );
+  const isCustomPositioned = activeBreakpointLayout.mode === "custom";
+  const isSplitDesktop =
+    !isCustomPositioned &&
+    hasImage &&
+    (banner.layoutMode === "split_left" || banner.layoutMode === "split_right");
+  const isFullWidth = banner.layoutMode === "full_width";
+  const imgFitClass = banner.imageFit === "contain" ? "object-contain" : "object-cover";
+
+  const alignTextClass =
+    banner.textAlign === "left"
+      ? "text-left"
+      : banner.textAlign === "right"
+        ? "text-right"
+        : "text-center";
+  const alignButtonsClass =
+    banner.textAlign === "left"
+      ? "justify-start"
+      : banner.textAlign === "right"
+        ? "justify-end"
+        : "justify-center";
+  const alignDescMarginClass =
+    banner.textAlign === "center"
+      ? "mx-auto"
+      : banner.textAlign === "right"
+        ? "ml-auto"
+        : "";
+
+  const variants =
+    transitionStyle === "none"
+      ? HERO_NONE_VARIANTS
+      : transitionStyle === "fade"
+        ? HERO_FADE_VARIANTS
+        : HERO_SLIDE_VARIANTS;
+
+  const transition =
+    transitionStyle === "none"
+      ? { duration: 0.01 }
+      : transitionStyle === "fade"
+        ? { opacity: { duration: 0.42, ease: [0.22, 1, 0.36, 1] as const } }
+        : { x: { duration: 0.44, ease: [0.22, 1, 0.36, 1] as const } };
 
   return (
     <motion.div
       custom={slideDirection}
-      variants={HERO_SLIDE_VARIANTS}
+      variants={variants}
       initial="enter"
       animate="center"
       exit="exit"
-      transition={{
-        x: { duration: 0.44, ease: [0.22, 1, 0.36, 1] },
-      }}
-      className={`absolute inset-0 flex h-full w-full flex-col justify-center overflow-hidden p-5 sm:p-7 ${
-        hasControls ? "pb-14 sm:pb-12" : ""
-      }`}
+      transition={transition}
+      className={`absolute inset-0 flex h-full w-full flex-col justify-center overflow-hidden p-5 sm:p-8 ${
+        isFullWidth ? "lg:px-14" : "lg:px-10"
+      } ${hasControls ? "pb-14 sm:pb-12" : ""}`}
       style={{
-        willChange: "transform",
+        willChange: transitionStyle === "slide" ? "transform" : "opacity",
         backfaceVisibility: "hidden",
         WebkitBackfaceVisibility: "hidden",
         background:
-          banner.backgroundMode === "image"
-            ? "#0b2e1f"
-            : banner.backgroundMode === "solid"
+          banner.backgroundMode === "solid"
             ? banner.solidColor
             : `linear-gradient(135deg, ${banner.gradientFrom} 0%, ${banner.gradientVia} 50%, ${banner.gradientTo} 100%)`,
         color: banner.headingColor || banner.textColor || "#ffffff",
       }}
     >
+      {/* Background image (always on mobile; on desktop only when NOT split layout) */}
       {hasImage && (
         <>
           {mobileImg && (
@@ -178,20 +239,20 @@ function HeroBannerSlide({
               loading="eager"
               decoding="sync"
               draggable={false}
-              className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover md:hidden"
+              className={`pointer-events-none absolute inset-0 h-full w-full select-none ${imgFitClass} md:hidden`}
               style={{
                 objectPosition: banner.imagePositionMobile || "center center",
               }}
             />
           )}
-          {desktopImg && (
+          {desktopImg && !isSplitDesktop && (
             <img
               src={desktopImg}
               alt={banner.headingLine1 || "Smart Noakhali"}
               loading="eager"
               decoding="sync"
               draggable={false}
-              className="pointer-events-none absolute inset-0 hidden h-full w-full select-none object-cover md:block"
+              className={`pointer-events-none absolute inset-0 hidden h-full w-full select-none ${imgFitClass} md:block`}
               style={{
                 objectPosition: banner.imagePositionDesktop || "center center",
               }}
@@ -199,7 +260,7 @@ function HeroBannerSlide({
           )}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0"
+            className={`pointer-events-none absolute inset-0 ${isSplitDesktop ? "md:hidden" : ""}`}
             style={{
               backgroundColor: banner.overlayColor || "#042316",
               opacity: Math.min(90, Math.max(0, banner.overlayOpacity ?? 55)) / 100,
@@ -210,115 +271,322 @@ function HeroBannerSlide({
 
       {banner.showDecorativeGlow !== false && (
         <>
-          <div className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-amber-300/20 blur-3xl" />
-          <div className="pointer-events-none absolute -bottom-14 -left-10 h-44 w-44 rounded-full bg-emerald-300/20 blur-3xl" />
+          <div className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-amber-300/15 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-14 -left-10 h-44 w-44 rounded-full bg-emerald-300/15 blur-3xl" />
           <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
         </>
       )}
 
-      <div
-        className={`relative z-10 ${
-          banner.textAlign === "left"
-            ? "text-left"
-            : banner.textAlign === "right"
-            ? "text-right"
-            : "text-left sm:text-left"
-        }`}
-      >
-        {banner.badgeText.trim() && (
-          <span
-            className="inline-flex max-w-full items-center gap-1.5 truncate rounded-full border border-white/15 px-3 py-1 text-[11px] font-semibold tracking-wide backdrop-blur-sm"
-            style={{
-              color: banner.badgeColor || "#ffffff",
-              backgroundColor: banner.badgeBgColor || "rgba(255,255,255,0.14)",
-            }}
-          >
-            <Droplet className="h-3 w-3 shrink-0 text-amber-300" />{" "}
-            <span className="truncate">{banner.badgeText}</span>
-          </span>
-        )}
+      {isCustomPositioned ? (
+        <div className="relative z-10 h-full w-full">
+          {banner.badgeText.trim() && (() => {
+            const pos = activeBreakpointLayout.elements.badge;
+            return (
+              <div style={getElementCanvasStyle(pos, 22)}>
+                <span
+                  className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-white/15 px-3 py-1 font-semibold tracking-wide backdrop-blur-sm"
+                  style={{
+                    color: banner.badgeColor || "#ffffff",
+                    backgroundColor: banner.badgeBgColor || "rgba(255,255,255,0.14)",
+                    fontSize: `${Math.round(11 * pos.fontScale * 10) / 10}px`,
+                  }}
+                >
+                  <Droplet className="h-3 w-3 shrink-0 text-amber-300" />
+                  <span className="truncate">{banner.badgeText}</span>
+                </span>
+              </div>
+            );
+          })()}
 
-        <h1
-          className="mt-2.5 font-bangla text-[23px] min-[380px]:text-[24px] font-extrabold leading-[1.22] tracking-tight drop-shadow-xs sm:mt-3 sm:text-[31px]"
-          style={{
-            color: banner.headingColor || banner.textColor || "#ffffff",
-          }}
+          {(banner.headingLine1.trim() || banner.headingLine2.trim()) && (() => {
+            const pos = activeBreakpointLayout.elements.heading;
+            const baseHeadingPx =
+              breakpoint === "mobile" ? 23 : breakpoint === "tablet" ? 31 : 36;
+            return (
+              <div style={getElementCanvasStyle(pos, 23)}>
+                <h1
+                  className="font-bangla font-extrabold leading-[1.2] tracking-tight [text-wrap:balance] drop-shadow-xs"
+                  style={{
+                    color: banner.headingColor || banner.textColor || "#ffffff",
+                    fontSize: `${Math.round(baseHeadingPx * pos.fontScale)}px`,
+                    marginBottom: `${Math.round(activeBreakpointLayout.elementSpacingPx * 0.25)}px`,
+                  }}
+                >
+                  {banner.headingLine1}
+                  {banner.headingLine2 && (
+                    <>
+                      <br />
+                      {banner.headingLine2}
+                    </>
+                  )}
+                </h1>
+              </div>
+            );
+          })()}
+
+          {banner.description.trim() && (() => {
+            const pos = activeBreakpointLayout.elements.description;
+            const baseDescPx = breakpoint === "mobile" ? 12.5 : 14.5;
+            return (
+              <div style={getElementCanvasStyle(pos, 22)}>
+                <p
+                  className="leading-relaxed"
+                  style={{
+                    color: banner.descriptionColor || banner.subtextColor || "#ecfdf5",
+                    opacity: 0.94,
+                    fontSize: `${Math.round(baseDescPx * pos.fontScale * 10) / 10}px`,
+                  }}
+                >
+                  {banner.description}
+                </p>
+              </div>
+            );
+          })()}
+
+          {banner.primaryButtonText.trim() && (() => {
+            const pos = activeBreakpointLayout.elements.primaryButton;
+            const alignFlex =
+              pos.textAlign === "center"
+                ? "justify-center"
+                : pos.textAlign === "right"
+                  ? "justify-end"
+                  : "justify-start";
+            return (
+              <div style={getElementCanvasStyle(pos, 24)} className={`flex ${alignFlex}`}>
+                <HeroActionLink
+                  href={banner.primaryButtonLink || "tel:999"}
+                  className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full px-4 py-2 font-extrabold shadow-md transition hover:brightness-105 active:scale-95 sm:min-h-[42px] sm:gap-2 sm:px-5"
+                  style={{
+                    backgroundColor: banner.primaryButtonBgColor || "#dc2626",
+                    color: banner.primaryButtonColor || "#ffffff",
+                    fontSize: `${Math.round((breakpoint === "mobile" ? 12 : 13) * pos.fontScale * 10) / 10}px`,
+                  }}
+                >
+                  <Phone className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{banner.primaryButtonText}</span>
+                </HeroActionLink>
+              </div>
+            );
+          })()}
+
+          {banner.secondaryButtonText.trim() && (() => {
+            const pos = activeBreakpointLayout.elements.secondaryButton;
+            const alignFlex =
+              pos.textAlign === "center"
+                ? "justify-center"
+                : pos.textAlign === "right"
+                  ? "justify-end"
+                  : "justify-start";
+            return (
+              <div style={getElementCanvasStyle(pos, 24)} className={`flex ${alignFlex}`}>
+                <HeroActionLink
+                  href={banner.secondaryButtonLink || "/submit-info"}
+                  className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-white/25 px-4 py-2 font-bold shadow-xs backdrop-blur-sm transition hover:brightness-95 active:scale-95 sm:min-h-[42px] sm:gap-2 sm:px-4.5"
+                  style={{
+                    backgroundColor: banner.secondaryButtonBgColor || "#ffffff",
+                    color: banner.secondaryButtonColor || "#064e3b",
+                    fontSize: `${Math.round((breakpoint === "mobile" ? 12 : 13) * pos.fontScale * 10) / 10}px`,
+                  }}
+                >
+                  <Send className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{banner.secondaryButtonText}</span>
+                </HeroActionLink>
+              </div>
+            );
+          })()}
+
+          {banner.optionalButtonText?.trim() && (() => {
+            const pos = activeBreakpointLayout.elements.optionalButton;
+            const alignFlex =
+              pos.textAlign === "center"
+                ? "justify-center"
+                : pos.textAlign === "right"
+                  ? "justify-end"
+                  : "justify-start";
+            return (
+              <div style={getElementCanvasStyle(pos, 24)} className={`flex ${alignFlex}`}>
+                <HeroActionLink
+                  href={banner.optionalButtonLink || "/directory"}
+                  className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-white/25 px-3.5 py-2 font-bold backdrop-blur-sm transition hover:brightness-110 active:scale-95 sm:min-h-[42px] sm:gap-2 sm:px-4"
+                  style={{
+                    backgroundColor: banner.optionalButtonBgColor || "rgba(255,255,255,0.16)",
+                    color: banner.optionalButtonColor || "#ffffff",
+                    fontSize: `${Math.round((breakpoint === "mobile" ? 12 : 13) * pos.fontScale * 10) / 10}px`,
+                  }}
+                >
+                  <span className="truncate">{banner.optionalButtonText}</span>
+                </HeroActionLink>
+              </div>
+            );
+          })()}
+
+          {banner.optionalText?.trim() && (() => {
+            const pos = activeBreakpointLayout.elements.optionalText;
+            return (
+              <div style={getElementCanvasStyle(pos, 21)}>
+                <p
+                  className="font-semibold tracking-wide"
+                  style={{
+                    color: banner.optionalTextColor || "#fde68a",
+                    fontSize: `${Math.round((breakpoint === "mobile" ? 11.5 : 13) * pos.fontScale * 10) / 10}px`,
+                  }}
+                >
+                  {banner.optionalText}
+                </p>
+              </div>
+            );
+          })()}
+        </div>
+      ) : (
+        <div
+          className={`relative z-10 w-full ${
+            isSplitDesktop
+              ? "md:grid md:grid-cols-12 md:items-center md:gap-8"
+              : banner.textAlign === "center" && !isFullWidth
+                ? "mx-auto max-w-3xl"
+                : ""
+          } ${alignTextClass}`}
         >
-          {banner.headingLine1}
-          {banner.headingLine2 && (
-            <>
-              <br />
-              {banner.headingLine2}
-            </>
+          {isSplitDesktop && banner.layoutMode === "split_right" && desktopImg && (
+            <div className="hidden md:block md:col-span-5">
+              <div className="h-[220px] lg:h-[256px] w-full overflow-hidden rounded-2xl border border-white/15 bg-black/15 shadow-lg">
+                <img
+                  src={desktopImg}
+                  alt={banner.headingLine1 || "Smart Noakhali"}
+                  loading="eager"
+                  decoding="sync"
+                  draggable={false}
+                  className={`h-full w-full ${imgFitClass}`}
+                  style={{
+                    objectPosition: banner.imagePositionDesktop || "center center",
+                  }}
+                />
+              </div>
+            </div>
           )}
-        </h1>
 
-        {banner.description.trim() && (
-          <p
-            className={`mt-2 max-w-xl text-[12.5px] leading-relaxed line-clamp-3 sm:line-clamp-2 sm:text-sm ${
-              banner.textAlign === "center" ? "mx-auto sm:mx-0" : ""
-            }`}
-            style={{
-              color: banner.descriptionColor || banner.subtextColor || "#ecfdf5",
-              opacity: 0.94,
-            }}
-          >
-            {banner.description}
-          </p>
-        )}
+          <div className={isSplitDesktop ? "md:col-span-7" : ""}>
+            {banner.badgeText.trim() && (
+              <span
+                className="inline-flex max-w-full items-center gap-1.5 truncate rounded-full border border-white/15 px-3 py-1 text-[11px] font-semibold tracking-wide backdrop-blur-sm"
+                style={{
+                  color: banner.badgeColor || "#ffffff",
+                  backgroundColor: banner.badgeBgColor || "rgba(255,255,255,0.14)",
+                }}
+              >
+                <Droplet className="h-3 w-3 shrink-0 text-amber-300" />{" "}
+                <span className="truncate">{banner.badgeText}</span>
+              </span>
+            )}
 
-        {(banner.primaryButtonText.trim() ||
-          banner.secondaryButtonText.trim() ||
-          banner.optionalButtonText?.trim()) && (
-          <div
-            className={`mt-3.5 flex flex-wrap items-center gap-2 sm:mt-4 sm:gap-2.5 ${
-              banner.textAlign === "right" ? "justify-end" : "justify-start"
-            }`}
-          >
-            {banner.primaryButtonText.trim() && (
-              <HeroActionLink
-                href={banner.primaryButtonLink || "tel:999"}
-                className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full px-4.5 py-2 text-xs font-extrabold shadow-md transition hover:brightness-105 active:scale-95 sm:min-h-[40px] sm:gap-2 sm:px-5 sm:py-2.5 sm:text-[13px]"
+            <h1
+              className="mt-2.5 font-bangla text-[23px] min-[380px]:text-[24px] font-extrabold leading-[1.2] tracking-tight [text-wrap:balance] drop-shadow-xs sm:mt-3 sm:text-[31px] md:text-[34px] lg:text-[38px]"
+              style={{
+                color: banner.headingColor || banner.textColor || "#ffffff",
+              }}
+            >
+              {banner.headingLine1}
+              {banner.headingLine2 && (
+                <>
+                  <br />
+                  {banner.headingLine2}
+                </>
+              )}
+            </h1>
+
+            {banner.description.trim() && (
+              <p
+                className={`mt-2 max-w-2xl text-[12.5px] leading-relaxed line-clamp-3 sm:line-clamp-2 sm:text-sm md:text-[15px] ${alignDescMarginClass}`}
                 style={{
-                  backgroundColor: banner.primaryButtonBgColor || "#dc2626",
-                  color: banner.primaryButtonColor || "#ffffff",
+                  color: banner.descriptionColor || banner.subtextColor || "#ecfdf5",
+                  opacity: 0.94,
                 }}
               >
-                <Phone className="h-3.5 w-3.5 shrink-0" /> {banner.primaryButtonText}
-              </HeroActionLink>
+                {banner.description}
+              </p>
             )}
-            {banner.secondaryButtonText.trim() && (
-              <HeroActionLink
-                href={banner.secondaryButtonLink || "/submit-info"}
-                className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-white/25 px-4 py-2 text-xs font-bold shadow-xs backdrop-blur-sm transition hover:brightness-95 active:scale-95 sm:min-h-[40px] sm:gap-2 sm:px-4.5 sm:py-2.5 sm:text-[13px]"
-                style={{
-                  backgroundColor: banner.secondaryButtonBgColor || "#ffffff",
-                  color: banner.secondaryButtonColor || "#064e3b",
-                }}
+
+            {(banner.primaryButtonText.trim() ||
+              banner.secondaryButtonText.trim() ||
+              banner.optionalButtonText?.trim()) && (
+              <div
+                className={`mt-3.5 flex flex-wrap items-center gap-2 sm:mt-4 sm:gap-2.5 ${alignButtonsClass}`}
               >
-                <Send className="h-3.5 w-3.5 shrink-0" /> {banner.secondaryButtonText}
-              </HeroActionLink>
+                {banner.primaryButtonText.trim() && (
+                  <HeroActionLink
+                    href={banner.primaryButtonLink || "tel:999"}
+                    className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full px-4.5 py-2 text-xs font-extrabold shadow-md transition hover:brightness-105 active:scale-95 sm:min-h-[42px] sm:gap-2 sm:px-5 sm:py-2.5 sm:text-[13px]"
+                    style={{
+                      backgroundColor: banner.primaryButtonBgColor || "#dc2626",
+                      color: banner.primaryButtonColor || "#ffffff",
+                    }}
+                  >
+                    <Phone className="h-3.5 w-3.5 shrink-0" /> {banner.primaryButtonText}
+                  </HeroActionLink>
+                )}
+                {banner.secondaryButtonText.trim() && (
+                  <HeroActionLink
+                    href={banner.secondaryButtonLink || "/submit-info"}
+                    className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-white/25 px-4 py-2 text-xs font-bold shadow-xs backdrop-blur-sm transition hover:brightness-95 active:scale-95 sm:min-h-[42px] sm:gap-2 sm:px-4.5 sm:py-2.5 sm:text-[13px]"
+                    style={{
+                      backgroundColor: banner.secondaryButtonBgColor || "#ffffff",
+                      color: banner.secondaryButtonColor || "#064e3b",
+                    }}
+                  >
+                    <Send className="h-3.5 w-3.5 shrink-0" /> {banner.secondaryButtonText}
+                  </HeroActionLink>
+                )}
+                {banner.optionalButtonText?.trim() && (
+                  <HeroActionLink
+                    href={banner.optionalButtonLink || "/directory"}
+                    className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-white/25 px-3.5 py-2 text-xs font-bold backdrop-blur-sm transition hover:brightness-110 active:scale-95 sm:min-h-[42px] sm:gap-2 sm:px-4 sm:py-2.5 sm:text-[13px]"
+                    style={{
+                      backgroundColor: banner.optionalButtonBgColor || "rgba(255,255,255,0.16)",
+                      color: banner.optionalButtonColor || "#ffffff",
+                    }}
+                  >
+                    {banner.optionalButtonText}
+                  </HeroActionLink>
+                )}
+              </div>
             )}
-            {banner.optionalButtonText?.trim() && (
-              <HeroActionLink
-                href={banner.optionalButtonLink || "/directory"}
-                className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-white/25 px-3.5 py-2 text-xs font-bold backdrop-blur-sm transition hover:brightness-110 active:scale-95 sm:min-h-[40px] sm:gap-2 sm:px-4 sm:py-2.5 sm:text-[13px]"
-                style={{
-                  backgroundColor: banner.optionalButtonBgColor || "rgba(255,255,255,0.16)",
-                  color: banner.optionalButtonColor || "#ffffff",
-                }}
+
+            {banner.optionalText?.trim() && (
+              <p
+                className="mt-2 text-xs font-semibold tracking-wide"
+                style={{ color: banner.optionalTextColor || "#fde68a" }}
               >
-                {banner.optionalButtonText}
-              </HeroActionLink>
+                {banner.optionalText}
+              </p>
             )}
           </div>
-        )}
-      </div>
+
+          {isSplitDesktop && banner.layoutMode === "split_left" && desktopImg && (
+            <div className="hidden md:block md:col-span-5">
+              <div className="h-[220px] lg:h-[256px] w-full overflow-hidden rounded-2xl border border-white/15 bg-black/15 shadow-lg">
+                <img
+                  src={desktopImg}
+                  alt={banner.headingLine1 || "Smart Noakhali"}
+                  loading="eager"
+                  decoding="sync"
+                  draggable={false}
+                  className={`h-full w-full ${imgFitClass}`}
+                  style={{
+                    objectPosition: banner.imagePositionDesktop || "center center",
+                  }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </motion.div>
   );
 }
 
 function Index() {
+  const prefersReducedMotion = useReducedMotion();
+  const heroBreakpoint = useHeroBreakpoint();
   const { categories } = useCategories();
   const { divisions } = useDivisions();
   const { activeBanners, carousel, loading: heroLoading } = useHeroBannerConfig();
@@ -506,8 +774,18 @@ function Index() {
     rose: "bg-rose-500/10 text-rose-600",
   };
 
+  const effectiveTransitionStyle: "slide" | "fade" | "none" = prefersReducedMotion
+    ? "none"
+    : carousel.transitionStyle || "slide";
+
+  const heroStageStyle = {
+    "--hero-h-mobile": `${currentHeroBanner?.mobileHeightPx || 308}px`,
+    "--hero-h-tablet": `${currentHeroBanner?.tabletHeightPx || 324}px`,
+    "--hero-h-desktop": `${currentHeroBanner?.desktopHeightPx || 336}px`,
+  } as React.CSSProperties;
+
   return (
-    <div className="mx-auto w-full max-w-3xl overflow-x-hidden px-3.5 pb-28 pt-3 sm:px-4 sm:pt-4">
+    <div className="mx-auto w-full max-w-7xl overflow-x-hidden px-3.5 pb-28 pt-3 sm:px-6 sm:pt-5">
       {/* Optional Top Super Admin Announcement Strip */}
       {homepageConfig.announcement?.visible && homepageConfig.announcement.text.trim() && (
         <HeroActionLink
@@ -531,7 +809,7 @@ function Index() {
         (heroLoading ? (
           <div
             aria-label="হিরো ব্যানার লোড হচ্ছে"
-            className={`${HERO_STAGE_HEIGHT_CLASS} w-full animate-pulse rounded-[26px] border border-border/60 bg-muted/40 shadow-[0_18px_40px_-14px_rgba(7,54,34,0.18)]`}
+            className="hero-stage-dynamic w-full animate-pulse rounded-[26px] border border-border/60 bg-muted/40 shadow-[0_18px_40px_-14px_rgba(7,54,34,0.18)]"
           />
         ) : (
           currentHeroBanner && (
@@ -563,16 +841,27 @@ function Index() {
                   else goToPrevSlide();
                 }
               }}
-              className={`relative overflow-hidden border border-emerald-300/20 bg-[#073622] shadow-[0_18px_40px_-14px_rgba(7,54,34,0.45)] ${
+              className={`relative overflow-hidden border border-emerald-300/20 shadow-[0_18px_40px_-14px_rgba(7,54,34,0.35)] ${
                 currentHeroBanner.borderRadius || "rounded-[26px]"
               }`}
+              style={{
+                background:
+                  currentHeroBanner.backgroundMode === "solid"
+                    ? currentHeroBanner.solidColor
+                    : `linear-gradient(135deg, ${currentHeroBanner.gradientFrom} 0%, ${currentHeroBanner.gradientVia} 50%, ${currentHeroBanner.gradientTo} 100%)`,
+              }}
             >
-              <div className={`relative w-full overflow-hidden ${HERO_STAGE_HEIGHT_CLASS}`}>
+              <div
+                style={heroStageStyle}
+                className="hero-stage-dynamic relative w-full overflow-hidden"
+              >
                 <AnimatePresence initial={false} custom={slideDirection}>
                   <HeroBannerSlide
                     key={`${currentHeroBanner.id}_${heroSlideIdx}`}
                     banner={currentHeroBanner}
+                    breakpoint={heroBreakpoint}
                     slideDirection={slideDirection}
+                    transitionStyle={effectiveTransitionStyle}
                     hasControls={hasHeroControls}
                   />
                 </AnimatePresence>
@@ -625,9 +914,9 @@ function Index() {
           )
         ))}
 
-      {/* Quick-Action Pill Buttons */}
+      {/* Quick-Action Buttons */}
       {homepageConfig.showQuickActions !== false && visibleQuickActions.length > 0 && (
-        <div className="mt-4 grid grid-cols-3 gap-2">
+        <div className="mt-4 grid grid-cols-3 gap-2 sm:gap-2.5 md:grid-flow-col md:auto-cols-fr">
           {visibleQuickActions.map((qa) => {
             const IconComp = HOMEPAGE_ICONS[qa.iconName] || Sparkles;
             return (
@@ -645,7 +934,7 @@ function Index() {
 
       {/* Featured District Service Shortcuts */}
       {homepageConfig.showFeaturedShortcuts !== false && visibleFeaturedShortcuts.length > 0 && (
-        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:gap-3">
           {visibleFeaturedShortcuts.map((fs) => {
             const IconComp = HOMEPAGE_ICONS[fs.iconName] || MapPin;
             const toneClass = shortcutToneMap[fs.tone || "primary"] || shortcutToneMap.primary;
@@ -821,8 +1110,8 @@ function DivisionHorizontalSection({
           </div>
         </div>
 
-        {/* Desktop Left/Right Scroll Helpers */}
-        <div className="hidden shrink-0 items-center gap-1 sm:flex">
+        {/* Tablet/Desktop Horizontal Scroll Helpers (hidden on lg+ where grid expands) */}
+        <div className="hidden shrink-0 items-center gap-1 sm:flex lg:hidden">
           <button
             type="button"
             onClick={() => scrollByAmount("left")}
@@ -842,12 +1131,12 @@ function DivisionHorizontalSection({
         </div>
       </div>
 
-      {/* 2-Row Horizontally Scrollable Category Container */}
+      {/* 2-Row Horizontally Scrollable Category Container on Mobile/Tablet; Full Responsive Grid on Desktop */}
       <div
         ref={scrollRef}
         className={`grid grid-flow-col ${
           items.length === 1 ? "grid-rows-1" : "grid-rows-2"
-        } auto-cols-[80px] min-[360px]:auto-cols-[86px] sm:auto-cols-[106px] md:auto-cols-[114px] gap-2 sm:gap-2.5 overflow-x-auto overscroll-x-contain touch-pan-x touch-pan-y scroll-smooth pb-1 scrollbar-none`}
+        } auto-cols-[80px] min-[360px]:auto-cols-[86px] sm:auto-cols-[106px] md:auto-cols-[114px] gap-2 sm:gap-2.5 lg:grid-flow-row lg:grid-rows-none lg:grid-cols-6 xl:grid-cols-7 lg:auto-cols-auto lg:gap-3.5 overflow-x-auto lg:overflow-visible overscroll-x-contain touch-pan-x touch-pan-y scroll-smooth pb-1 scrollbar-none`}
       >
         {items.map((cat) => (
           <ServiceCategoryCard key={cat.slug} category={cat} />

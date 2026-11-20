@@ -396,31 +396,40 @@ export function FloatingLiveChat() {
     const f = e.target.files?.[0];
     e.target.value = "";
     if (!f || !threadId) return;
+    if (f.size > 25 * 1024 * 1024) {
+      return toast.error("ফাইলটি ২৫ মেগাবাইটের বেশি হওয়া যাবে না");
+    }
     setBusy(true);
-    const url = await uploadPublicImage(f, `chat/${threadId}`);
-    setBusy(false);
-    if (!url) return toast.error("আপলোড ব্যর্থ");
-    const role = isStaff ? "staff" : "user";
-    const senderId = user?.id || threadId;
-    playChatChime("send");
-    const { error } = await send(senderId, role, "", url, userMeta);
-    if (error) toast.error(error.message);
+    try {
+      const url = await uploadPublicImage(f, `chat/${threadId}`);
+      if (!url) return toast.error("ছবি বা ফাইল আপলোড করা যায়নি, পুনরায় চেষ্টা করুন");
+      const role = isStaff ? "staff" : "user";
+      const senderId = user?.id || threadId;
+      playChatChime("send");
+      const { error } = await send(senderId, role, "", url, userMeta);
+      if (error) toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function onVoice(blob: Blob) {
     if (!threadId) return;
     setBusy(true);
-    const file = new File([blob], `voice-${Date.now()}.webm`, {
-      type: "audio/webm",
-    });
-    const url = await uploadPublicImage(file, `chat/${threadId}`);
-    setBusy(false);
-    if (!url) return toast.error("আপলোড ব্যর্থ");
-    const role = isStaff ? "staff" : "user";
-    const senderId = user?.id || threadId;
-    playChatChime("send");
-    const { error } = await send(senderId, role, "", url, userMeta);
-    if (error) toast.error(error.message);
+    try {
+      const file = new File([blob], `voice-${Date.now()}.webm`, {
+        type: "audio/webm",
+      });
+      const url = await uploadPublicImage(file, `chat/${threadId}`);
+      if (!url) return toast.error("ভয়েস মেসেজ আপলোড করা যায়নি");
+      const role = isStaff ? "staff" : "user";
+      const senderId = user?.id || threadId;
+      playChatChime("send");
+      const { error } = await send(senderId, role, "", url, userMeta);
+      if (error) toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (

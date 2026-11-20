@@ -1169,10 +1169,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       params.displayName !== undefined
         ? sanitizeString(params.displayName, 120, "")
         : (user?.displayName || "");
-    const cleanPhotoUrl =
+    const rawPhotoInput =
       params.photoURL !== undefined
-        ? sanitizeString(params.photoURL, 500, "")
+        ? String(params.photoURL || "").trim()
         : (user?.photoURL || "");
+    const cleanPhotoUrl =
+      rawPhotoInput.length > 0 &&
+      rawPhotoInput.length <= 250000 &&
+      /^(https?:\/\/|\/|data:image\/)/i.test(rawPhotoInput)
+        ? rawPhotoInput
+        : "";
     const cleanPhone =
       params.phone !== undefined
         ? sanitizeString(params.phone, 30, "")
@@ -1183,10 +1189,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         : (username || "");
 
     if (current) {
-      await updateProfile(current, {
+      const authProfilePatch: { displayName?: string; photoURL?: string | null } = {
         displayName: cleanDisplayName || undefined,
-        photoURL: cleanPhotoUrl || undefined,
-      }).catch(() => {});
+      };
+      // Firebase Auth updateProfile only supports short HTTP(S) URLs; avoid silent failure on base64 data: URLs
+      if (/^https?:\/\//i.test(cleanPhotoUrl) && cleanPhotoUrl.length <= 1800) {
+        authProfilePatch.photoURL = cleanPhotoUrl;
+      } else if (!cleanPhotoUrl) {
+        authProfilePatch.photoURL = "";
+      }
+      await updateProfile(current, authProfilePatch).catch(() => {});
     }
 
     if (current?.uid) {

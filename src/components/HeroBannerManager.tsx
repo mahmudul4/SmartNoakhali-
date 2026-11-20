@@ -32,6 +32,13 @@ import {
   AlignCenter,
   AlignRight,
   RefreshCw,
+  LayoutTemplate,
+  Maximize2,
+  Tablet,
+  Move,
+  Crosshair,
+  Magnet,
+  GripVertical,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
@@ -46,7 +53,24 @@ import {
   type HeroBannerItem,
   type HeroCarouselSettings,
   type HeroImageFocalPosition,
+  type HeroLayoutMode,
+  type HeroImageFit,
+  type HeroTransitionStyle,
 } from "@/lib/store";
+import {
+  HERO_ELEMENT_IDS,
+  HERO_ELEMENT_LABELS_BN,
+  clampElementPosition,
+  clampNumber,
+  createDefaultBreakpointLayout,
+  getElementCanvasStyle,
+  resolveBreakpointLayout,
+  roundStep,
+  type HeroBreakpointLayout,
+  type HeroDeviceBreakpoint,
+  type HeroEditableElementId,
+  type HeroElementPosition,
+} from "@/lib/heroPositioning";
 import { useRolePermissions } from "@/lib/permissions";
 import {
   uploadImageToFirebaseStorage,
@@ -278,7 +302,16 @@ export function HeroBannerManager() {
 
   const [draft, setDraft] = useState<HeroBannerItem>(selectedSaved);
   const [carouselDraft, setCarouselDraft] = useState<HeroCarouselSettings>(carousel);
-  const [previewDevice, setPreviewDevice] = useState<"mobile" | "desktop">("mobile");
+  const [previewDevice, setPreviewDevice] = useState<HeroDeviceBreakpoint>("desktop");
+  const [selectedElement, setSelectedElement] = useState<HeroEditableElementId>("heading");
+  const [showGuides, setShowGuides] = useState(true);
+  const [snapToCenter, setSnapToCenter] = useState(true);
+  const [previewOnly, setPreviewOnly] = useState(false);
+  const [snapGuideState, setSnapGuideState] = useState<{ xCenter: boolean; yCenter: boolean }>({
+    xCenter: false,
+    yCenter: false,
+  });
+  const [draggingElement, setDraggingElement] = useState<HeroEditableElementId | null>(null);
   const [saving, setSaving] = useState(false);
   const [savingTarget, setSavingTarget] = useState<"draft" | "published" | null>(null);
   const [savingCarousel, setSavingCarousel] = useState(false);
@@ -302,6 +335,16 @@ export function HeroBannerManager() {
 
   const desktopInputRef = useRef<HTMLInputElement | null>(null);
   const mobileInputRef = useRef<HTMLInputElement | null>(null);
+  const previewCanvasRef = useRef<HTMLDivElement | null>(null);
+  const dragSessionRef = useRef<{
+    elementId: HeroEditableElementId;
+    startClientX: number;
+    startClientY: number;
+    origX: number;
+    origY: number;
+    origWidth: number;
+    mode: "move" | "resize";
+  } | null>(null);
 
   useEffect(() => {
     setDraft(selectedSaved);
@@ -666,6 +709,147 @@ export function HeroBannerManager() {
 
   const livePublishedCount = sortedBanners.filter((b) => isBannerWithinSchedule(b)).length;
 
+  const activeDeviceLayout = resolveBreakpointLayout(
+    draft.responsiveLayouts,
+    previewDevice,
+    draft.textAlign
+  );
+  const selectedElPos = activeDeviceLayout.elements[selectedElement];
+  const isCustomPositionMode = activeDeviceLayout.mode === "custom";
+
+  function updateDeviceLayout(
+    device: HeroDeviceBreakpoint,
+    updater: (current: HeroBreakpointLayout) => HeroBreakpointLayout
+  ) {
+    setDraft((prev) => {
+      const current = resolveBreakpointLayout(prev.responsiveLayouts, device, prev.textAlign);
+      const updated = updater(current);
+      return {
+        ...prev,
+        responsiveLayouts: {
+          ...(prev.responsiveLayouts || {}),
+          [device]: updated,
+        },
+      };
+    });
+  }
+
+  function updateElementPosition(
+    elementId: HeroEditableElementId,
+    patch: Partial<HeroElementPosition>,
+    autoEnableCustom = true
+  ) {
+    updateDeviceLayout(previewDevice, (current) => {
+      const prevEl = current.elements[elementId];
+      const nextEl = clampElementPosition({ ...prevEl, ...patch }, prevEl);
+      return {
+        ...current,
+        mode: autoEnableCustom ? "custom" : current.mode,
+        elements: {
+          ...current.elements,
+          [elementId]: nextEl,
+        },
+      };
+    });
+  }
+
+  function handleResetDevicePosition(scope: "current" | "all") {
+    if (scope === "all") {
+      setDraft((prev) => ({
+        ...prev,
+        responsiveLayouts: {
+          desktop: createDefaultBreakpointLayout("desktop", prev.textAlign),
+          tablet: createDefaultBreakpointLayout("tablet", prev.textAlign),
+          mobile: createDefaultBreakpointLayout("mobile", prev.textAlign),
+        },
+      }));
+      toast.info("সকল ডিভাইসের (Desktop, Tablet, Mobile) অবস্থান রিসেট করা হয়েছে।");
+    } else {
+      updateDeviceLayout(previewDevice, () =>
+        createDefaultBreakpointLayout(previewDevice, draft.textAlign)
+      );
+      toast.info(`${previewDevice.toUpperCase()} ডিভাইসের অবস্থান ডিফল্টে রিসেট হয়েছে।`);
+    }
+  }
+
+  function startElementDrag(
+    e: React.PointerEvent<HTMLElement>,
+    elementId: HeroEditableElementId,
+    mode: "move" | "resize" = "move"
+  ) {
+    if (previewOnly) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedElement(elementId);
+    setDraggingElement(elementId);
+    const pos = activeDeviceLayout.elements[elementId];
+    dragSessionRef.current = {
+      elementId,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      origX: pos.xPercent,
+      origY: pos.yPercent,
+      origWidth: pos.widthPercent,
+      mode,
+    };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // ignore if unsupported
+    }
+  }
+
+  function handleElementPointerMove(e: React.PointerEvent<HTMLElement>) {
+    const session = dragSessionRef.current;
+    const canvas = previewCanvasRef.current;
+    if (!session || !canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    const dxPct = ((e.clientX - session.startClientX) / rect.width) * 100;
+    const dyPct = ((e.clientY - session.startClientY) / rect.height) * 100;
+
+    if (session.mode === "resize") {
+      const nextW = roundStep(clampNumber(session.origWidth + dxPct, 16, 96), 1);
+      updateElementPosition(session.elementId, { widthPercent: nextW }, true);
+      return;
+    }
+
+    let nextX = roundStep(session.origX + dxPct, 1);
+    let nextY = roundStep(session.origY + dyPct, 1);
+    const boxCenterX = nextX + session.origWidth / 2;
+
+    let snappedXCenter = false;
+    let snappedYCenter = false;
+    if (snapToCenter) {
+      if (Math.abs(boxCenterX - 50) <= 2.2) {
+        nextX = roundStep(50 - session.origWidth / 2, 1);
+        snappedXCenter = true;
+      }
+      if (Math.abs(nextY - 50) <= 2.2) {
+        nextY = 50;
+        snappedYCenter = true;
+      }
+    }
+    setSnapGuideState({ xCenter: snappedXCenter, yCenter: snappedYCenter });
+    updateElementPosition(session.elementId, { xPercent: nextX, yPercent: nextY }, true);
+  }
+
+  function endElementDrag(e: React.PointerEvent<HTMLElement>) {
+    if (!dragSessionRef.current) return;
+    dragSessionRef.current = null;
+    setDraggingElement(null);
+    setSnapGuideState({ xCenter: false, yCenter: false });
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   return (
     <div className="space-y-5">
       {/* Header & Multi-Banner Overview */}
@@ -783,6 +967,23 @@ export function HeroBannerManager() {
                 className="accent-emerald-700"
               />
               হোভারে থামবে
+            </label>
+            <label className="inline-flex items-center gap-1.5 font-semibold">
+              ট্রানজিশন:
+              <select
+                value={carouselDraft.transitionStyle || "slide"}
+                onChange={(e) =>
+                  setCarouselDraft({
+                    ...carouselDraft,
+                    transitionStyle: e.target.value as HeroTransitionStyle,
+                  })
+                }
+                className="rounded-lg border border-border bg-background px-2 py-0.5 text-xs font-semibold"
+              >
+                <option value="slide">স্লাইড (Slide)</option>
+                <option value="fade">ফেড (Crossfade)</option>
+                <option value="none">তাৎক্ষণিক (Instant)</option>
+              </select>
             </label>
           </div>
         </div>
@@ -989,76 +1190,301 @@ export function HeroBannerManager() {
             })}
           </div>
         </div>
+
+        {/* Layout Mode, Image Fit & Height Controls */}
+        <div className="grid grid-cols-1 gap-3 border-t border-border/60 pt-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div>
+            <label className="flex items-center gap-1 text-[11px] font-semibold text-muted-foreground">
+              <LayoutTemplate className="h-3.5 w-3.5 text-primary" /> লেআউট মোড (Layout)
+            </label>
+            <select
+              value={draft.layoutMode || "centered"}
+              onChange={(e) =>
+                setDraft({ ...draft, layoutMode: e.target.value as HeroLayoutMode })
+              }
+              className="mt-1 w-full rounded-xl border border-border bg-background px-2.5 py-1.5 text-xs font-semibold"
+            >
+              <option value="centered">ক্লাসিক সেন্টার্ড / ব্যাকগ্রাউন্ড</option>
+              <option value="full_width">ফুল-উইডথ ব্যানার</option>
+              <option value="split_left">স্প্লিট: বামে লেখা + ডানে ছবি</option>
+              <option value="split_right">স্প্লিট: বামে ছবি + ডানে লেখা</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="flex items-center gap-1 text-[11px] font-semibold text-muted-foreground">
+              <Maximize2 className="h-3.5 w-3.5 text-primary" /> ছবির ফিট (Object Fit)
+            </label>
+            <select
+              value={draft.imageFit || "cover"}
+              onChange={(e) =>
+                setDraft({ ...draft, imageFit: e.target.value as HeroImageFit })
+              }
+              className="mt-1 w-full rounded-xl border border-border bg-background px-2.5 py-1.5 text-xs font-semibold"
+            >
+              <option value="cover">কভার (ফ্রেম জুড়ে পূর্ণ)</option>
+              <option value="contain">কনটেইন (সম্পূর্ণ ছবি প্রদর্শন)</option>
+            </select>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between text-[11px] font-semibold text-muted-foreground">
+              <span>ডেস্কটপ উচ্চতা</span>
+              <span className="font-mono font-bold text-primary tabular-nums">
+                {draft.desktopHeightPx ?? 336}px
+              </span>
+            </div>
+            <input
+              type="range"
+              min={240}
+              max={540}
+              step={8}
+              value={draft.desktopHeightPx ?? 336}
+              onChange={(e) =>
+                setDraft({ ...draft, desktopHeightPx: Number(e.target.value) })
+              }
+              className="mt-2.5 w-full accent-emerald-700"
+            />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between text-[11px] font-semibold text-muted-foreground">
+              <span>ট্যাবলেট উচ্চতা</span>
+              <span className="font-mono font-bold text-primary tabular-nums">
+                {draft.tabletHeightPx ?? 324}px
+              </span>
+            </div>
+            <input
+              type="range"
+              min={240}
+              max={500}
+              step={8}
+              value={draft.tabletHeightPx ?? 324}
+              onChange={(e) =>
+                setDraft({ ...draft, tabletHeightPx: Number(e.target.value) })
+              }
+              className="mt-2.5 w-full accent-emerald-700"
+            />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between text-[11px] font-semibold text-muted-foreground">
+              <span>মোবাইল উচ্চতা</span>
+              <span className="font-mono font-bold text-primary tabular-nums">
+                {draft.mobileHeightPx ?? 308}px
+              </span>
+            </div>
+            <input
+              type="range"
+              min={240}
+              max={460}
+              step={8}
+              value={draft.mobileHeightPx ?? 308}
+              onChange={(e) =>
+                setDraft({ ...draft, mobileHeightPx: Number(e.target.value) })
+              }
+              className="mt-2.5 w-full accent-emerald-700"
+            />
+          </div>
+        </div>
       </div>
 
-      {/* 1. Live Preview Card */}
-      <div className="rounded-3xl border border-border/80 bg-card p-4 sm:p-5 shadow-card space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+      {/* 1. Interactive Visual Hero Position Editor & Live Preview */}
+      <div className="rounded-3xl border border-border/80 bg-card p-4 sm:p-5 shadow-card space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
           <div className="flex items-center gap-2">
-            <Eye className="h-4 w-4 text-primary" />
-            <h3 className="font-display text-sm font-bold text-foreground">
-              লাইভ রেসপনসিভ প্রিভিউ (Live Preview)
-            </h3>
+            <Move className="h-4 w-4 text-primary" />
+            <div>
+              <h3 className="font-display text-sm font-bold text-foreground">
+                ভিজ্যুয়াল হিরো পজিশন এডিটর ও লাইভ প্রিভিউ
+              </h3>
+              <p className="text-[11px] text-muted-foreground">
+                যেকোনো লেখা বা বাটন সরাসরি টেনে (Drag &amp; Drop) অথবা নিচের সংখ্যাসূচক প্যানেল থেকে পজিশন ঠিক করুন।
+              </p>
+            </div>
           </div>
-          <div className="inline-flex rounded-full border border-border bg-muted/60 p-0.5">
+
+          {/* Breakpoint Switcher: Desktop / Tablet / Mobile */}
+          <div className="inline-flex rounded-xl border border-border bg-muted/60 p-0.5">
+            {(
+              [
+                { id: "desktop", label: "ডেস্কটপ", icon: Monitor },
+                { id: "tablet", label: "ট্যাবলেট", icon: Tablet },
+                { id: "mobile", label: "মোবাইল", icon: Smartphone },
+              ] as const
+            ).map((dev) => {
+              const Icon = dev.icon;
+              const devMode = resolveBreakpointLayout(
+                draft.responsiveLayouts,
+                dev.id,
+                draft.textAlign
+              ).mode;
+              return (
+                <button
+                  key={dev.id}
+                  type="button"
+                  onClick={() => setPreviewDevice(dev.id)}
+                  className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${
+                    previewDevice === dev.id
+                      ? "bg-primary text-primary-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Icon className="h-3 w-3" />
+                  <span>{dev.label}</span>
+                  {devMode === "custom" && (
+                    <span className="ml-0.5 h-1.5 w-1.5 rounded-full bg-amber-300" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Editor Toolbar: Custom Layout Mode, Guides, Snap, Preview Before Publish, Reset Position */}
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border/70 bg-muted/35 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <button
               type="button"
-              onClick={() => setPreviewDevice("mobile")}
-              className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-bold transition ${
-                previewDevice === "mobile"
-                  ? "bg-primary text-primary-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
+              onClick={() =>
+                updateDeviceLayout(previewDevice, (cur) => ({
+                  ...cur,
+                  mode: cur.mode === "custom" ? "flow" : "custom",
+                }))
+              }
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-bold transition ${
+                isCustomPositionMode
+                  ? "border-emerald-600 bg-emerald-700 text-white shadow-xs"
+                  : "border-border bg-background text-foreground hover:border-primary/50"
               }`}
             >
-              <Smartphone className="h-3 w-3" /> মোবাইল
+              <Move className="h-3 w-3" />
+              <span>
+                {isCustomPositionMode
+                  ? `${previewDevice === "desktop" ? "ডেস্কটপ" : previewDevice === "tablet" ? "ট্যাবলেট" : "মোবাইল"}: কাস্টম পজিশন চালু`
+                  : "ফ্রি-ড্র্যাগ পজিশন চালু করুন"}
+              </span>
             </button>
+
             <button
               type="button"
-              onClick={() => setPreviewDevice("desktop")}
-              className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-bold transition ${
-                previewDevice === "desktop"
-                  ? "bg-primary text-primary-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
+              onClick={() => setShowGuides((v) => !v)}
+              disabled={previewOnly}
+              className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition disabled:opacity-40 ${
+                showGuides && !previewOnly
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-border bg-background text-muted-foreground"
               }`}
             >
-              <Monitor className="h-3 w-3" /> ডেস্কটপ
+              <Crosshair className="h-3 w-3" /> গাইড লাইন
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSnapToCenter((v) => !v)}
+              disabled={previewOnly}
+              className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition disabled:opacity-40 ${
+                snapToCenter && !previewOnly
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-border bg-background text-muted-foreground"
+              }`}
+            >
+              <Magnet className="h-3 w-3" /> সেন্টার স্ন্যাপ
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setPreviewOnly((v) => !v)}
+              className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-bold transition ${
+                previewOnly
+                  ? "border-amber-500 bg-amber-500 text-white shadow-xs"
+                  : "border-border bg-background text-foreground hover:bg-muted"
+              }`}
+            >
+              {previewOnly ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+              <span>{previewOnly ? "এডিটরে ফিরুন" : "চূড়ান্ত প্রিভিউ (গাইড লুকান)"}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleResetDevicePosition("current")}
+              className="inline-flex items-center gap-1 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-500/15"
+              title="শুধু এই ডিভাইসের অবস্থান রিসেট করুন"
+            >
+              <RotateCcw className="h-3 w-3" /> অবস্থান রিসেট
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleResetDevicePosition("all")}
+              className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1 text-[10.5px] font-semibold text-muted-foreground hover:text-foreground"
+              title="সব ডিভাইসের (Desktop/Tablet/Mobile) অবস্থান ডিফল্টে নিন"
+            >
+              সব ডিভাইস রিসেট
             </button>
           </div>
         </div>
 
-        <div className="flex justify-center rounded-2xl bg-muted/40 p-3 sm:p-4">
-          {!draft.visible || draft.status === "draft" ? (
-            <div className="w-full rounded-2xl border border-dashed border-border py-10 text-center text-xs text-muted-foreground">
-              এই ব্যানারটি বর্তমানে {draft.status === "draft" ? "ড্রাফট" : "লুকানো"} অবস্থায় আছে — লাইভ করতে স্ট্যাটাস “Published” ও “দৃশ্যমান” চালু করুন।
-            </div>
-          ) : (
-            <div
-              className={`w-full transition-all duration-300 ${
-                previewDevice === "mobile" ? "max-w-[380px]" : "max-w-full"
+        {(!draft.visible || draft.status === "draft") && (
+          <div className="flex items-center justify-between gap-2 rounded-2xl border border-amber-500/35 bg-amber-50/90 px-3.5 py-2 text-[11.5px] text-amber-900">
+            <span>
+              এই ব্যানারটি বর্তমানে <strong>{draft.status === "draft" ? "ড্রাফট" : "লুকানো"}</strong> অবস্থায় আছে — নিচে লাইভ প্রিভিউ দেখা যাচ্ছে, প্রকাশ করতে “সেভ ও প্রকাশ করুন” চাপুন।
+            </span>
+          </div>
+        )}
+
+        {/* Interactive Stage Canvas */}
+        <div className="flex justify-center overflow-x-auto rounded-2xl bg-muted/45 p-3 sm:p-4">
+          <div
+            className={`w-full transition-all duration-300 ${
+              previewDevice === "mobile"
+                ? "max-w-[380px]"
+                : previewDevice === "tablet"
+                  ? "max-w-[768px]"
+                  : "max-w-full"
+            }`}
+          >
+            <section
+              ref={previewCanvasRef}
+              className={`relative flex flex-col justify-center overflow-hidden border border-emerald-300/20 shadow-[0_18px_40px_-14px_rgba(7,54,34,0.45)] ${
+                isCustomPositionMode ? "p-0" : "p-5 sm:p-7"
+              } ${draft.borderRadius} ${
+                draft.textAlign === "left"
+                  ? "text-left"
+                  : draft.textAlign === "right"
+                    ? "text-right"
+                    : "text-center"
               }`}
+              style={{
+                height: `${
+                  previewDevice === "mobile"
+                    ? draft.mobileHeightPx ?? 308
+                    : previewDevice === "tablet"
+                      ? draft.tabletHeightPx ?? 324
+                      : draft.desktopHeightPx ?? 336
+                }px`,
+                background:
+                  draft.backgroundMode === "solid"
+                    ? draft.solidColor
+                    : `linear-gradient(135deg, ${draft.gradientFrom} 0%, ${draft.gradientVia} 50%, ${draft.gradientTo} 100%)`,
+                color: draft.headingColor,
+              }}
             >
-              <section
-                className={`relative overflow-hidden border border-emerald-300/20 p-5 shadow-[0_18px_40px_-14px_rgba(7,54,34,0.45)] sm:p-7 ${draft.borderRadius} ${
-                  draft.textAlign === "left"
-                    ? "text-left"
-                    : draft.textAlign === "right"
-                      ? "text-right"
-                      : "text-center"
-                }`}
-                style={{
-                  background:
-                    draft.backgroundMode === "solid"
-                      ? draft.solidColor
-                      : `linear-gradient(135deg, ${draft.gradientFrom} 0%, ${draft.gradientVia} 50%, ${draft.gradientTo} 100%)`,
-                  color: draft.headingColor,
-                }}
-              >
-                {hasPreviewImage && (
+              {hasPreviewImage &&
+                !(
+                  !isCustomPositionMode &&
+                  previewDevice !== "mobile" &&
+                  (draft.layoutMode === "split_left" || draft.layoutMode === "split_right")
+                ) && (
                   <>
                     <img
                       src={activePreviewImg}
                       alt="Hero Banner Preview"
-                      className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+                      className={`pointer-events-none absolute inset-0 h-full w-full ${
+                        draft.imageFit === "contain" ? "object-contain" : "object-cover"
+                      }`}
                       style={{ objectPosition: activeFocal }}
                     />
                     <div
@@ -1071,106 +1497,555 @@ export function HeroBannerManager() {
                   </>
                 )}
 
-                {draft.showDecorativeGlow && (
-                  <>
-                    <div className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-amber-300/20 blur-3xl" />
-                    <div className="pointer-events-none absolute -bottom-14 -left-10 h-44 w-44 rounded-full bg-emerald-300/20 blur-3xl" />
-                    <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-                  </>
-                )}
+              {draft.showDecorativeGlow && (
+                <>
+                  <div className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-amber-300/20 blur-3xl" />
+                  <div className="pointer-events-none absolute -bottom-14 -left-10 h-44 w-44 rounded-full bg-emerald-300/20 blur-3xl" />
+                  <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+                </>
+              )}
 
-                <div className="relative">
-                  {draft.badgeText.trim() && (
-                    <span
-                      className="inline-flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1 text-[11px] font-semibold tracking-wide backdrop-blur-sm"
-                      style={{
-                        color: draft.badgeColor,
-                        backgroundColor: draft.badgeBgColor,
-                      }}
-                    >
-                      <Droplet className="h-3 w-3" /> {draft.badgeText}
-                    </span>
-                  )}
-
-                  <h1
-                    className={`mt-3.5 font-bangla font-extrabold leading-[1.24] tracking-tight drop-shadow-xs ${
-                      previewDevice === "mobile"
-                        ? "text-[22px]"
-                        : "text-[28px] sm:text-[32px]"
+              {/* Editor-only visual guides (NEVER rendered in previewOnly or public site) */}
+              {!previewOnly && showGuides && (
+                <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-15">
+                  {/* Safe content area inset (4%) */}
+                  <div className="absolute inset-[4%] rounded-xl border border-dashed border-white/25" />
+                  {/* Vertical & horizontal center lines */}
+                  <div
+                    className={`absolute inset-y-0 left-1/2 -translate-x-1/2 border-l border-dashed transition-colors ${
+                      snapGuideState.xCenter ? "border-amber-300 shadow-[0_0_8px_rgba(252,211,77,0.9)]" : "border-cyan-200/35"
                     }`}
-                    style={{ color: draft.headingColor }}
-                  >
-                    {draft.headingLine1}
-                    {draft.headingLine2 && (
-                      <>
-                        <br />
-                        {draft.headingLine2}
-                      </>
-                    )}
-                  </h1>
+                  />
+                  <div
+                    className={`absolute inset-x-0 top-1/2 -translate-y-1/2 border-t border-dashed transition-colors ${
+                      snapGuideState.yCenter ? "border-amber-300 shadow-[0_0_8px_rgba(252,211,77,0.9)]" : "border-cyan-200/35"
+                    }`}
+                  />
+                  {/* Subtle rule-of-thirds guides */}
+                  <div className="absolute inset-y-0 left-[25%] border-l border-dotted border-white/15" />
+                  <div className="absolute inset-y-0 left-[75%] border-l border-dotted border-white/15" />
+                </div>
+              )}
 
-                  {draft.description.trim() && (
-                    <p
-                      className={`mt-2.5 max-w-xl text-[12.5px] leading-relaxed sm:text-sm ${
-                        draft.textAlign === "center"
-                          ? "mx-auto"
-                          : draft.textAlign === "right"
-                            ? "ml-auto"
-                            : ""
-                      }`}
-                      style={{ color: draft.descriptionColor, opacity: 0.94 }}
-                    >
-                      {draft.description}
-                    </p>
-                  )}
+              {/* Elements Render Layer */}
+              {isCustomPositionMode ? (
+                <div className="relative z-20 h-full w-full select-none">
+                  {HERO_ELEMENT_IDS.map((elId) => {
+                    const pos = activeDeviceLayout.elements[elId];
+                    const isSelected = !previewOnly && selectedElement === elId;
+                    const isDragging = draggingElement === elId;
+
+                    const hasContent =
+                      elId === "badge"
+                        ? Boolean(draft.badgeText.trim())
+                        : elId === "heading"
+                          ? Boolean(draft.headingLine1.trim() || draft.headingLine2.trim())
+                          : elId === "description"
+                            ? Boolean(draft.description.trim())
+                            : elId === "primaryButton"
+                              ? Boolean(draft.primaryButtonText.trim())
+                              : elId === "secondaryButton"
+                                ? Boolean(draft.secondaryButtonText.trim())
+                                : elId === "optionalButton"
+                                  ? Boolean(draft.optionalButtonText?.trim())
+                                  : Boolean(draft.optionalText?.trim());
+
+                    if (!hasContent) return null;
+
+                    const alignFlex =
+                      pos.textAlign === "center"
+                        ? "justify-center"
+                        : pos.textAlign === "right"
+                          ? "justify-end"
+                          : "justify-start";
+
+                    const baseHeadingPx =
+                      previewDevice === "mobile" ? 23 : previewDevice === "tablet" ? 31 : 36;
+                    const baseDescPx = previewDevice === "mobile" ? 12.5 : 14.5;
+                    const baseBtnPx = previewDevice === "mobile" ? 12 : 13;
+
+                    return (
+                      <div
+                        key={elId}
+                        onPointerDown={(e) => startElementDrag(e, elId, "move")}
+                        onPointerMove={handleElementPointerMove}
+                        onPointerUp={endElementDrag}
+                        onPointerCancel={endElementDrag}
+                        style={getElementCanvasStyle(pos, isSelected ? 35 : 22)}
+                        className={`group touch-none rounded-lg transition-shadow ${
+                          previewOnly
+                            ? ""
+                            : isSelected
+                              ? "cursor-grab active:cursor-grabbing ring-2 ring-amber-300 bg-black/15"
+                              : "cursor-grab hover:ring-1 hover:ring-white/55"
+                        } ${isDragging ? "ring-amber-400 shadow-lg" : ""}`}
+                      >
+                        {!previewOnly && isSelected && (
+                          <div className="pointer-events-none -top-5 left-0 absolute z-40 inline-flex items-center gap-1 rounded bg-amber-400 px-1.5 py-0.5 text-[9.5px] font-extrabold text-emerald-950 shadow">
+                            <GripVertical className="h-2.5 w-2.5" />
+                            <span>{HERO_ELEMENT_LABELS_BN[elId]}</span>
+                            <span className="font-mono opacity-80">
+                              ({pos.xPercent}%, {pos.yPercent}%)
+                            </span>
+                          </div>
+                        )}
+
+                        {elId === "badge" && (
+                          <span
+                            className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-white/15 px-3 py-1 font-semibold tracking-wide backdrop-blur-sm"
+                            style={{
+                              color: draft.badgeColor,
+                              backgroundColor: draft.badgeBgColor,
+                              fontSize: `${Math.round(11 * pos.fontScale * 10) / 10}px`,
+                            }}
+                          >
+                            <Droplet className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{draft.badgeText}</span>
+                          </span>
+                        )}
+
+                        {elId === "heading" && (
+                          <h1
+                            className="font-bangla font-extrabold leading-[1.2] tracking-tight drop-shadow-xs"
+                            style={{
+                              color: draft.headingColor,
+                              fontSize: `${Math.round(baseHeadingPx * pos.fontScale)}px`,
+                            }}
+                          >
+                            {draft.headingLine1}
+                            {draft.headingLine2 && (
+                              <>
+                                <br />
+                                {draft.headingLine2}
+                              </>
+                            )}
+                          </h1>
+                        )}
+
+                        {elId === "description" && (
+                          <p
+                            className="leading-relaxed"
+                            style={{
+                              color: draft.descriptionColor,
+                              opacity: 0.94,
+                              fontSize: `${Math.round(baseDescPx * pos.fontScale * 10) / 10}px`,
+                            }}
+                          >
+                            {draft.description}
+                          </p>
+                        )}
+
+                        {elId === "primaryButton" && (
+                          <div className={`flex ${alignFlex}`}>
+                            <span
+                              className="inline-flex min-h-[38px] items-center gap-2 rounded-full px-4 py-2 font-extrabold shadow-sm"
+                              style={{
+                                color: draft.primaryButtonColor,
+                                backgroundColor: draft.primaryButtonBgColor,
+                                fontSize: `${Math.round(baseBtnPx * pos.fontScale * 10) / 10}px`,
+                              }}
+                            >
+                              <Phone className="h-3.5 w-3.5 shrink-0" /> {draft.primaryButtonText}
+                            </span>
+                          </div>
+                        )}
+
+                        {elId === "secondaryButton" && (
+                          <div className={`flex ${alignFlex}`}>
+                            <span
+                              className="inline-flex min-h-[38px] items-center gap-2 rounded-full border border-white/30 px-4 py-2 font-bold backdrop-blur-sm"
+                              style={{
+                                color: draft.secondaryButtonColor,
+                                backgroundColor: draft.secondaryButtonBgColor,
+                                fontSize: `${Math.round(baseBtnPx * pos.fontScale * 10) / 10}px`,
+                              }}
+                            >
+                              <Send className="h-3.5 w-3.5 shrink-0" /> {draft.secondaryButtonText}
+                            </span>
+                          </div>
+                        )}
+
+                        {elId === "optionalButton" && (
+                          <div className={`flex ${alignFlex}`}>
+                            <span
+                              className="inline-flex min-h-[38px] items-center gap-2 rounded-full border border-white/25 px-4 py-2 font-bold backdrop-blur-sm"
+                              style={{
+                                color: draft.optionalButtonColor,
+                                backgroundColor: draft.optionalButtonBgColor,
+                                fontSize: `${Math.round(baseBtnPx * pos.fontScale * 10) / 10}px`,
+                              }}
+                            >
+                              {draft.optionalButtonText}
+                            </span>
+                          </div>
+                        )}
+
+                        {elId === "optionalText" && (
+                          <p
+                            className="font-semibold tracking-wide"
+                            style={{
+                              color: draft.optionalTextColor || "#fde68a",
+                              fontSize: `${Math.round((previewDevice === "mobile" ? 11.5 : 13) * pos.fontScale * 10) / 10}px`,
+                            }}
+                          >
+                            {draft.optionalText}
+                          </p>
+                        )}
+
+                        {/* Right-edge resize handle when selected */}
+                        {!previewOnly && isSelected && (
+                          <div
+                            onPointerDown={(e) => startElementDrag(e, elId, "resize")}
+                            onPointerMove={handleElementPointerMove}
+                            onPointerUp={endElementDrag}
+                            onPointerCancel={endElementDrag}
+                            title="প্রস্থ বাড়াতে বা কমাতে টানুন"
+                            className="absolute right-0 top-1/2 h-6 w-2.5 -translate-y-1/2 translate-x-1/2 cursor-ew-resize rounded-full bg-amber-300 shadow ring-1 ring-emerald-950"
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div
+                  className={`relative z-20 ${
+                    previewDevice !== "mobile" &&
+                    hasPreviewImage &&
+                    (draft.layoutMode === "split_left" || draft.layoutMode === "split_right")
+                      ? "grid grid-cols-12 items-center gap-6"
+                      : ""
+                  }`}
+                >
+                  {previewDevice !== "mobile" &&
+                    hasPreviewImage &&
+                    draft.layoutMode === "split_right" && (
+                      <div className="col-span-5 h-56 overflow-hidden rounded-2xl border border-white/15 bg-black/15">
+                        <img
+                          src={activePreviewImg}
+                          alt="Hero Split Preview"
+                          className={`h-full w-full ${
+                            draft.imageFit === "contain" ? "object-contain" : "object-cover"
+                          }`}
+                          style={{ objectPosition: activeFocal }}
+                        />
+                      </div>
+                    )}
 
                   <div
-                    className={`mt-5 flex flex-wrap items-center gap-2.5 ${
-                      draft.textAlign === "left"
-                        ? "justify-start"
-                        : draft.textAlign === "right"
-                          ? "justify-end"
-                          : "justify-center"
-                    }`}
+                    className={
+                      previewDevice !== "mobile" &&
+                      hasPreviewImage &&
+                      (draft.layoutMode === "split_left" || draft.layoutMode === "split_right")
+                        ? "col-span-7"
+                        : ""
+                    }
                   >
-                    {draft.primaryButtonText.trim() && (
+                    {draft.badgeText.trim() && (
                       <span
-                        className="inline-flex min-h-[38px] items-center gap-2 rounded-full px-4 py-2 text-xs font-extrabold shadow-sm"
+                        className="inline-flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1 text-[11px] font-semibold tracking-wide backdrop-blur-sm"
                         style={{
-                          color: draft.primaryButtonColor,
-                          backgroundColor: draft.primaryButtonBgColor,
+                          color: draft.badgeColor,
+                          backgroundColor: draft.badgeBgColor,
                         }}
                       >
-                        <Phone className="h-3.5 w-3.5" /> {draft.primaryButtonText}
+                        <Droplet className="h-3 w-3" /> {draft.badgeText}
                       </span>
                     )}
-                    {draft.secondaryButtonText.trim() && (
-                      <span
-                        className="inline-flex min-h-[38px] items-center gap-2 rounded-full border border-white/30 px-4 py-2 text-xs font-bold backdrop-blur-sm"
-                        style={{
-                          color: draft.secondaryButtonColor,
-                          backgroundColor: draft.secondaryButtonBgColor,
-                        }}
+
+                    <h1
+                      className={`mt-3.5 font-bangla font-extrabold leading-[1.24] tracking-tight drop-shadow-xs ${
+                        previewDevice === "mobile"
+                          ? "text-[22px]"
+                          : previewDevice === "tablet"
+                            ? "text-[28px]"
+                            : "text-[32px]"
+                      }`}
+                      style={{ color: draft.headingColor }}
+                    >
+                      {draft.headingLine1}
+                      {draft.headingLine2 && (
+                        <>
+                          <br />
+                          {draft.headingLine2}
+                        </>
+                      )}
+                    </h1>
+
+                    {draft.description.trim() && (
+                      <p
+                        className={`mt-2.5 max-w-xl text-[12.5px] leading-relaxed sm:text-sm ${
+                          draft.textAlign === "center"
+                            ? "mx-auto"
+                            : draft.textAlign === "right"
+                              ? "ml-auto"
+                              : ""
+                        }`}
+                        style={{ color: draft.descriptionColor, opacity: 0.94 }}
                       >
-                        <Send className="h-3.5 w-3.5" /> {draft.secondaryButtonText}
-                      </span>
+                        {draft.description}
+                      </p>
                     )}
-                    {draft.optionalButtonText?.trim() && (
-                      <span
-                        className="inline-flex min-h-[38px] items-center gap-2 rounded-full border border-white/25 px-4 py-2 text-xs font-bold backdrop-blur-sm"
-                        style={{
-                          color: draft.optionalButtonColor,
-                          backgroundColor: draft.optionalButtonBgColor,
-                        }}
+
+                    <div
+                      className={`mt-5 flex flex-wrap items-center gap-2.5 ${
+                        draft.textAlign === "left"
+                          ? "justify-start"
+                          : draft.textAlign === "right"
+                            ? "justify-end"
+                            : "justify-center"
+                      }`}
+                    >
+                      {draft.primaryButtonText.trim() && (
+                        <span
+                          className="inline-flex min-h-[38px] items-center gap-2 rounded-full px-4 py-2 text-xs font-extrabold shadow-sm"
+                          style={{
+                            color: draft.primaryButtonColor,
+                            backgroundColor: draft.primaryButtonBgColor,
+                          }}
+                        >
+                          <Phone className="h-3.5 w-3.5" /> {draft.primaryButtonText}
+                        </span>
+                      )}
+                      {draft.secondaryButtonText.trim() && (
+                        <span
+                          className="inline-flex min-h-[38px] items-center gap-2 rounded-full border border-white/30 px-4 py-2 text-xs font-bold backdrop-blur-sm"
+                          style={{
+                            color: draft.secondaryButtonColor,
+                            backgroundColor: draft.secondaryButtonBgColor,
+                          }}
+                        >
+                          <Send className="h-3.5 w-3.5" /> {draft.secondaryButtonText}
+                        </span>
+                      )}
+                      {draft.optionalButtonText?.trim() && (
+                        <span
+                          className="inline-flex min-h-[38px] items-center gap-2 rounded-full border border-white/25 px-4 py-2 text-xs font-bold backdrop-blur-sm"
+                          style={{
+                            color: draft.optionalButtonColor,
+                            backgroundColor: draft.optionalButtonBgColor,
+                          }}
+                        >
+                          {draft.optionalButtonText}
+                        </span>
+                      )}
+                    </div>
+
+                    {draft.optionalText?.trim() && (
+                      <p
+                        className="mt-2 text-xs font-semibold tracking-wide"
+                        style={{ color: draft.optionalTextColor || "#fde68a" }}
                       >
-                        {draft.optionalButtonText}
-                      </span>
+                        {draft.optionalText}
+                      </p>
                     )}
                   </div>
+
+                  {previewDevice !== "mobile" &&
+                    hasPreviewImage &&
+                    draft.layoutMode === "split_left" && (
+                      <div className="col-span-5 h-56 overflow-hidden rounded-2xl border border-white/15 bg-black/15">
+                        <img
+                          src={activePreviewImg}
+                          alt="Hero Split Preview"
+                          className={`h-full w-full ${
+                            draft.imageFit === "contain" ? "object-contain" : "object-cover"
+                          }`}
+                          style={{ objectPosition: activeFocal }}
+                        />
+                      </div>
+                    )}
                 </div>
-              </section>
+              )}
+            </section>
+          </div>
+        </div>
+
+        {/* Numerical & Fine-Tuning Inspector Panel for Active Device */}
+        <div className="rounded-2xl border border-border/80 bg-background/80 p-3.5 sm:p-4 space-y-3.5">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-2.5">
+            <span className="text-xs font-bold text-foreground">
+              সুনির্দিষ্ট অবস্থান নিয়ন্ত্রণ ({previewDevice === "desktop" ? "ডেস্কটপ" : previewDevice === "tablet" ? "ট্যাবলেট" : "মোবাইল"} ব্র্যাকপয়েন্ট)
+            </span>
+            <div className="flex items-center gap-2 text-[11px] font-semibold text-muted-foreground">
+              <span>সার্বিক গ্যাপ:</span>
+              <input
+                type="number"
+                min={0}
+                max={48}
+                value={activeDeviceLayout.elementSpacingPx}
+                onChange={(e) =>
+                  updateDeviceLayout(previewDevice, (cur) => ({
+                    ...cur,
+                    mode: "custom",
+                    elementSpacingPx: Math.round(clampNumber(Number(e.target.value) || 0, 0, 48)),
+                  }))
+                }
+                className="w-14 rounded-lg border border-border bg-card px-2 py-0.5 text-center font-mono text-xs text-foreground"
+              />
+              <span>px</span>
             </div>
-          )}
+          </div>
+
+          {/* Element selector tabs */}
+          <div className="flex flex-wrap gap-1.5">
+            {HERO_ELEMENT_IDS.map((elId) => (
+              <button
+                key={elId}
+                type="button"
+                onClick={() => setSelectedElement(elId)}
+                className={`rounded-lg border px-2.5 py-1 text-[11px] font-bold transition ${
+                  selectedElement === elId
+                    ? "border-primary bg-primary text-primary-foreground shadow-xs"
+                    : "border-border bg-card text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {HERO_ELEMENT_LABELS_BN[elId]}
+              </button>
+            ))}
+          </div>
+
+          {/* Selected Element Controls */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <div>
+              <label className="flex items-center justify-between text-[10.5px] font-bold text-muted-foreground">
+                <span>বাম থেকে (X %)</span>
+                <span className="font-mono text-primary">{selectedElPos.xPercent}%</span>
+              </label>
+              <input
+                type="number"
+                min={2}
+                max={88}
+                step={0.5}
+                value={selectedElPos.xPercent}
+                onChange={(e) =>
+                  updateElementPosition(selectedElement, { xPercent: Number(e.target.value) || 2 })
+                }
+                className="mt-1 w-full rounded-lg border border-border bg-card px-2 py-1 font-mono text-xs font-semibold"
+              />
+            </div>
+
+            <div>
+              <label className="flex items-center justify-between text-[10.5px] font-bold text-muted-foreground">
+                <span>উপর থেকে (Y %)</span>
+                <span className="font-mono text-primary">{selectedElPos.yPercent}%</span>
+              </label>
+              <input
+                type="number"
+                min={2}
+                max={88}
+                step={0.5}
+                value={selectedElPos.yPercent}
+                onChange={(e) =>
+                  updateElementPosition(selectedElement, { yPercent: Number(e.target.value) || 2 })
+                }
+                className="mt-1 w-full rounded-lg border border-border bg-card px-2 py-1 font-mono text-xs font-semibold"
+              />
+            </div>
+
+            <div>
+              <label className="flex items-center justify-between text-[10.5px] font-bold text-muted-foreground">
+                <span>বক্স প্রস্থ (%)</span>
+                <span className="font-mono text-primary">{selectedElPos.widthPercent}%</span>
+              </label>
+              <input
+                type="number"
+                min={14}
+                max={96}
+                step={1}
+                value={selectedElPos.widthPercent}
+                onChange={(e) =>
+                  updateElementPosition(selectedElement, {
+                    widthPercent: Number(e.target.value) || 20,
+                  })
+                }
+                className="mt-1 w-full rounded-lg border border-border bg-card px-2 py-1 font-mono text-xs font-semibold"
+              />
+            </div>
+
+            <div>
+              <label className="flex items-center justify-between text-[10.5px] font-bold text-muted-foreground">
+                <span>সর্বোচ্চ প্রস্থ (px)</span>
+                <span className="font-mono text-primary">{selectedElPos.maxWidthPx}</span>
+              </label>
+              <input
+                type="number"
+                min={120}
+                max={1100}
+                step={10}
+                value={selectedElPos.maxWidthPx}
+                onChange={(e) =>
+                  updateElementPosition(selectedElement, {
+                    maxWidthPx: Number(e.target.value) || 240,
+                  })
+                }
+                className="mt-1 w-full rounded-lg border border-border bg-card px-2 py-1 font-mono text-xs font-semibold"
+              />
+            </div>
+
+            <div>
+              <label className="flex items-center justify-between text-[10.5px] font-bold text-muted-foreground">
+                <span>টেক্সট স্কেল</span>
+                <span className="font-mono text-primary">{selectedElPos.fontScale.toFixed(2)}x</span>
+              </label>
+              <input
+                type="range"
+                min={0.7}
+                max={1.6}
+                step={0.05}
+                value={selectedElPos.fontScale}
+                onChange={(e) =>
+                  updateElementPosition(selectedElement, { fontScale: Number(e.target.value) })
+                }
+                className="mt-2.5 w-full accent-emerald-700"
+              />
+            </div>
+
+            <div>
+              <label className="text-[10.5px] font-bold text-muted-foreground">এলাইনমেন্ট</label>
+              <div className="mt-1 grid grid-cols-3 gap-1 rounded-lg border border-border bg-card p-0.5">
+                {(["left", "center", "right"] as const).map((al) => (
+                  <button
+                    key={al}
+                    type="button"
+                    onClick={() => updateElementPosition(selectedElement, { textAlign: al })}
+                    className={`rounded py-1 text-[10.5px] font-bold transition ${
+                      selectedElPos.textAlign === al
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {al === "left" ? "বাম" : al === "center" ? "মাঝ" : "ডান"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <div className="flex items-center justify-between text-[10.5px] font-bold text-muted-foreground">
+                <span>এলিমেন্ট প্যাডিং / স্পেসিং</span>
+                <span className="font-mono text-primary">{selectedElPos.paddingPx}px</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={28}
+                step={2}
+                value={selectedElPos.paddingPx}
+                onChange={(e) =>
+                  updateElementPosition(selectedElement, { paddingPx: Number(e.target.value) })
+                }
+                className="mt-1.5 w-full accent-emerald-700"
+              />
+            </div>
+            <div className="flex items-end justify-end">
+              <p className="text-[11px] text-muted-foreground">
+                টিপস: প্রিভিউতে এলিমেন্ট টেনে আনুন বা ডান পাশের সোনালি হ্যান্ডেল টেনে প্রস্থ পরিবর্তন করুন।
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1759,17 +2634,17 @@ export function HeroBannerManager() {
             />
           </div>
 
-          {/* Optional 3rd CTA Button */}
+          {/* Optional 3rd CTA Button & Extra Note Text */}
           <div className="sm:col-span-2 rounded-2xl border border-border/70 bg-muted/20 p-3.5 space-y-2.5">
             <p className="flex items-center gap-1.5 text-xs font-bold text-primary-deep">
-              <Link2 className="h-3.5 w-3.5 text-emerald-600" /> অতিরিক্ত ৩য় বাটন (ঐচ্ছিক)
+              <Link2 className="h-3.5 w-3.5 text-emerald-600" /> অতিরিক্ত ৩য় বাটন ও নোট টেক্সট (ঐচ্ছিক)
             </p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <input
                 type="text"
                 value={draft.optionalButtonText || ""}
                 onChange={(e) => setDraft({ ...draft, optionalButtonText: e.target.value })}
-                placeholder="বাটনের লেখা (ফাঁকা রাখলে দেখাবে না)"
+                placeholder="৩য় বাটনের লেখা (ফাঁকা রাখলে দেখাবে না)"
                 className="rounded-xl border border-border bg-background px-3 py-1.5 text-xs font-bold"
               />
               <input
@@ -1792,6 +2667,20 @@ export function HeroBannerManager() {
                 defaultValue={DEFAULT_HERO_BANNER_ITEM.optionalButtonBgColor}
                 disabled={!canEditColors}
                 onChange={(v) => setDraft({ ...draft, optionalButtonBgColor: v })}
+              />
+              <input
+                type="text"
+                value={draft.optionalText || ""}
+                onChange={(e) => setDraft({ ...draft, optionalText: e.target.value })}
+                placeholder="অতিরিক্ত ছোট টেক্সট / নোট (যেমন: ২৪/৭ জরুরি সেবা চালু)"
+                className="rounded-xl border border-border bg-background px-3 py-1.5 text-xs font-semibold"
+              />
+              <ColorInputField
+                label="অতিরিক্ত টেক্সটের রঙ"
+                value={draft.optionalTextColor || "#fde68a"}
+                defaultValue={DEFAULT_HERO_BANNER_ITEM.optionalTextColor}
+                disabled={!canEditColors}
+                onChange={(v) => setDraft({ ...draft, optionalTextColor: v })}
               />
             </div>
           </div>

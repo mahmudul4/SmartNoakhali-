@@ -197,7 +197,7 @@ function CategoryPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl overflow-x-hidden px-3.5 pb-24 pt-4 sm:px-4">
+    <div className="mx-auto w-full max-w-6xl overflow-x-hidden px-3.5 pb-24 pt-4 sm:px-6">
       <div className="mb-3 flex w-full min-w-0 items-center justify-between gap-2">
         <Link to="/" className="inline-flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4 shrink-0" /> হোম
@@ -243,7 +243,7 @@ function CategoryPage() {
           </Link>
         </div>
       ) : (
-        <div className="grid w-full min-w-0 grid-cols-1 gap-3">
+        <div className="grid w-full min-w-0 grid-cols-1 gap-3 md:grid-cols-2 lg:gap-4">
           {filtered.map((l: Listing) =>
             cat.slug === "blood" || cat.slug === "blood-donor" ? (
               <BloodCard
