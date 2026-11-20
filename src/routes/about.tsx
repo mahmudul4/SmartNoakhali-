@@ -54,7 +54,7 @@ function About() {
   );
 
   return (
-    <div className="mx-auto max-w-6xl px-3.5 pb-24 pt-4 sm:px-6">
+    <div className="w-full px-3.5 pb-24 pt-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
       {/* Back button */}
       <Link
         to="/"
@@ -117,7 +117,7 @@ function About() {
             বর্তমানে কোনো সেবা সক্রিয় নেই।
           </div>
         ) : (
-          <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {activeServices.map((service, idx) => (
               <ServiceCard key={service.id || idx} service={service} index={idx} />
             ))}

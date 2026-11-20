@@ -112,10 +112,14 @@ import {
   useEmergencyBanners,
   useChatThreads,
   useThreadMessages,
+  sendChatMessageDirect,
+  getCachedChatOperatorsDirectory,
+  refreshChatOperatorUidsCache,
   markThreadRead,
   updateChatThreadMeta,
   uploadPublicImage,
   getUserSubmissionCounts,
+  type ChatOperatorDirectoryEntry,
   type BannerRow,
   type ChatThreadRow,
   type ChatThreadStatus,
@@ -953,7 +957,7 @@ function Dashboard({
   }
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-3.5 pb-28 pt-4 sm:px-6">
+    <div className="w-full px-3.5 pb-28 pt-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
       {/* Top Personal Profile & Control Header */}
       <div className="mb-4 rounded-3xl bg-gradient-hero p-4 text-primary-foreground shadow-elevated sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1107,7 +1111,7 @@ function Dashboard({
       </div>
 
       {/* Desktop Two-Column Institutional Workspace */}
-      <div className="mt-4 lg:mt-6 lg:grid lg:grid-cols-[260px_minmax(0,1fr)] lg:items-start lg:gap-6">
+      <div className="mt-4 lg:mt-6 lg:grid lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)] lg:items-start lg:gap-6">
         {/* Desktop Grouped Sidebar */}
         <aside
           aria-label="অ্যাডমিন সাইডবার"
@@ -9737,7 +9741,7 @@ const CHAT_STATUS_LABELS: Record<ChatThreadStatus, { label: string; badge: strin
 
 function ChatThreadsAdmin() {
   const [threads, setThreads] = useState<ThreadView[]>([]);
-  const [operators, setOperators] = useState<AdminUserRecord[]>([]);
+  const [operators, setOperators] = useState<ChatOperatorDirectoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [active, setActive] = useState<ThreadView | null>(null);
   const [search, setSearch] = useState("");
@@ -9769,7 +9773,8 @@ function ChatThreadsAdmin() {
   const canCloseReopen = isMainAdmin || hasPermission("chat_close_reopen");
   const canViewHistory = isMainAdmin || hasPermission("chat_view_history");
 
-  const me = user?.id || (isMainAdmin ? "super_admin_mahmudul" : "operator");
+  const me = user?.id || auth.currentUser?.uid || (isMainAdmin ? "super_admin_mahmudul" : "operator");
+  const currentAuthUid = auth.currentUser?.uid || "";
   const myStaff = getStaffProfile(me) || getStaffProfile(user?.email);
   const resolvedRole = resolveUserRoleDisplay({
     email: user?.email,
@@ -9789,20 +9794,57 @@ function ChatThreadsAdmin() {
 
   async function refresh() {
     try {
+      await refreshChatOperatorUidsCache(true).catch(() => {});
       const [list, allUsers] = await Promise.all([
-        listThreadsWithUsers(),
+        listThreadsWithUsers({ canViewAll }),
         listUsers().catch(() => [] as AdminUserRecord[]),
       ]);
       setThreads(list as ThreadView[]);
-      const eligibleOperators = allUsers.filter(
-        (u) =>
+
+      const opMap = new Map<string, ChatOperatorDirectoryEntry>();
+      for (const dirOp of getCachedChatOperatorsDirectory()) {
+        opMap.set(dirOp.uid, dirOp);
+      }
+      for (const u of allUsers) {
+        if (u.profile?.suspended) continue;
+        const isEligible =
           u.roles.includes("admin") ||
           u.roles.includes("editor") ||
           u.roles.includes("moderator") ||
           Boolean(u.custom_role_id || u.profile?.custom_role_id) ||
-          isProtectedMainSuperAdmin({ id: u.id, email: u.email, username: u.profile?.username })
-      );
-      setOperators(eligibleOperators);
+          isProtectedMainSuperAdmin({ id: u.id, email: u.email, username: u.profile?.username });
+        if (!isEligible) continue;
+        const r = resolveUserRoleDisplay({
+          email: u.email,
+          roles: u.roles,
+          isMainAdmin: isProtectedMainSuperAdmin({
+            id: u.id,
+            email: u.email,
+            username: u.profile?.username,
+          }),
+          customRoleId: u.custom_role_id || u.profile?.custom_role_id,
+          customRoleName: u.custom_role_name || u.profile?.custom_role_name,
+          customRoles,
+          designation: u.profile?.designation || u.designation,
+        });
+        opMap.set(u.id, {
+          uid: u.id,
+          name: u.profile?.full_name || u.email.split("@")[0] || r.labelBn,
+          email: u.email,
+          role_label: r.labelBn,
+          photo_url: u.profile?.photo_url || u.photo_url || "",
+        });
+      }
+      if (me && !opMap.has(me)) {
+        opMap.set(me, {
+          uid: me,
+          name: myName,
+          email: user?.email || "",
+          role_label: myRoleLabel,
+          photo_url: myPhoto,
+        });
+      }
+      setOperators(Array.from(opMap.values()));
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -9812,13 +9854,13 @@ function ChatThreadsAdmin() {
 
   useEffect(() => {
     void refresh();
-    const timer = setInterval(refresh, 4000);
+    const timer = setInterval(refresh, 5000);
     return () => clearInterval(timer);
-  }, []);
+  }, [canViewAll]);
 
   useEffect(() => {
     void refresh();
-  }, [liveThreads.items.length, liveThreads.items.map((t) => t.last_message_at).join(",")]);
+  }, [liveThreads.items.length, liveThreads.items.map((t) => `${t.id}:${t.last_message_at}:${t.assigned_to_uid || ""}:${t.status || ""}`).join(",")]);
 
   async function sendQuickInlineReply(thread: ThreadView, customText?: string) {
     if (!canReply) {
@@ -9843,49 +9885,33 @@ function ChatThreadsAdmin() {
         designation: myStaff?.designation || myRoleLabel,
       }).catch(() => {});
 
-      const resp = await fetch("/api/chat/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          thread_id: thread.id,
-          user_id: thread.user_id,
-          user_name: thread.profile?.full_name || undefined,
-          user_email: thread.email || undefined,
-          user_phone: thread.profile?.phone || undefined,
-          sender_id: me,
-          sender_role: "staff",
+      const { error } = await sendChatMessageDirect({
+        threadId: thread.id,
+        sender_id: me,
+        sender_role: "staff",
+        body: replyBody,
+        meta: {
           sender_name: myName,
           sender_photo: myPhoto,
           sender_role_label: myRoleLabel,
-          body: replyBody,
-        }),
-      });
-
-      if (!resp.ok) {
-        throw new Error("উত্তর পাঠানো যায়নি");
-      }
-
-      if (thread.status === "new" || !thread.status) {
-        await updateChatThreadMeta(thread.id, {
-          status: "in_progress",
+          user_name: thread.profile?.full_name || thread.user_name || undefined,
+          user_email: thread.email || thread.user_email || undefined,
+          user_phone: thread.profile?.phone || undefined,
+          status:
+            thread.status === "new" || !thread.status ? "in_progress" : thread.status,
           assigned_to_uid: thread.assigned_to_uid || me,
           assigned_to_name: thread.assigned_to_name || myName,
           assigned_role: thread.assigned_role || myRoleLabel,
-        });
-      }
-
-      void recordStaffActivity({
-        action_type: "reply",
-        action_label: "গ্রাহকের লাইভ চ্যাটে দ্রুত উত্তর দিয়েছে",
-        module: "chat",
-        module_label: "লাইভ চ্যাট",
-        target_id: thread.id,
-        target_title: thread.profile?.full_name || thread.email || `গ্রাহক (${thread.id.slice(0, 10)})`,
-        target_detail: `উত্তর: "${replyBody}"`,
+        },
       });
 
+      if (error) {
+        throw new Error(error.message);
+      }
+
       setInlineDrafts((prev) => ({ ...prev, [thread.id]: "" }));
-      toast.success(`${thread.profile?.full_name || "গ্রাহক"}-কে উত্তর পাঠানো হয়েছে!`);
+      toast.success(`${thread.profile?.full_name || thread.user_name || "গ্রাহক"}-কে উত্তর পাঠানো হয়েছে!`);
+      liveThreads.refresh();
       await refresh();
     } catch (err: any) {
       toast.error(err?.message || "উত্তর পাঠানো ব্যর্থ হয়েছে");
@@ -9908,32 +9934,24 @@ function ChatThreadsAdmin() {
       });
       if (res.ok) {
         toast.success("অ্যাসাইনমেন্ট সরানো হয়েছে");
+        liveThreads.refresh();
         await refresh();
       } else {
         toast.error(res.error || "আপডেট ব্যর্থ");
       }
       return;
     }
-    const op = operators.find((o) => o.id === operatorId);
+    const op = operators.find((o) => o.uid === operatorId);
     if (!op) return;
-    const opRole = resolveUserRoleDisplay({
-      email: op.email,
-      roles: op.roles,
-      isMainAdmin: isProtectedMainSuperAdmin({ id: op.id, email: op.email, username: op.profile?.username }),
-      customRoleId: op.custom_role_id || op.profile?.custom_role_id,
-      customRoleName: op.custom_role_name || op.profile?.custom_role_name,
-      customRoles,
-      designation: op.profile?.designation || op.designation,
-    });
-    const opName = op.profile?.full_name || op.email.split("@")[0] || opRole.labelBn;
     const res = await updateChatThreadMeta(thread.id, {
-      assigned_to_uid: op.id,
-      assigned_to_name: opName,
-      assigned_role: opRole.labelBn,
+      assigned_to_uid: op.uid,
+      assigned_to_name: op.name,
+      assigned_role: op.role_label,
       status: thread.status === "new" || !thread.status ? "assigned" : thread.status,
     });
     if (res.ok) {
-      toast.success(`${opName} (${opRole.labelBn})-কে চ্যাট অ্যাসাইন করা হয়েছে`);
+      toast.success(`${op.name} (${op.role_label})-কে চ্যাট অ্যাসাইন করা হয়েছে`);
+      liveThreads.refresh();
       await refresh();
     } else {
       toast.error(res.error || "অ্যাসাইন ব্যর্থ হয়েছে");
@@ -9954,6 +9972,7 @@ function ChatThreadsAdmin() {
     const res = await updateChatThreadMeta(thread.id, patch);
     if (res.ok) {
       toast.success(`চ্যাট স্ট্যাটাস "${CHAT_STATUS_LABELS[status].label}" করা হয়েছে`);
+      liveThreads.refresh();
       await refresh();
     } else {
       toast.error(res.error || "স্ট্যাটাস পরিবর্তন ব্যর্থ হয়েছে");
@@ -9964,6 +9983,7 @@ function ChatThreadsAdmin() {
     const res = await updateChatThreadMeta(thread.id, { priority });
     if (res.ok) {
       toast.success(priority === "urgent" ? "জরুরি হিসেবে চিহ্নিত" : "সাধারণ অগ্রাধিকার");
+      liveThreads.refresh();
       await refresh();
     } else {
       toast.error(res.error || "আপডেট ব্যর্থ হয়েছে");
@@ -9987,7 +10007,7 @@ function ChatThreadsAdmin() {
   }
 
   async function confirmDeleteAllNow() {
-    if (!isMainAdmin || threads.length === 0) return;
+    if (!isMainAdmin || mergedAllThreads.length === 0) return;
     setConfirmDeleteAll(false);
     const { error } = await liveThreads.removeAll();
     if (error) {
@@ -9999,12 +10019,44 @@ function ChatThreadsAdmin() {
     toast.success("সকল লাইভ চ্যাট ডিলিট করা হয়েছে");
   }
 
+  // Merge real-time Firestore subscription with enriched user metadata
+  const mergedAllThreads = (() => {
+    const map = new Map<string, ThreadView>();
+    for (const t of threads) {
+      map.set(t.id, t);
+    }
+    for (const lt of liveThreads.items) {
+      const ex = map.get(lt.id);
+      if (!ex || lt.last_message_at >= ex.last_message_at) {
+        map.set(lt.id, {
+          ...ex,
+          ...lt,
+          email: ex?.email || lt.user_email || "",
+          profile: ex?.profile || {
+            full_name: lt.user_name ?? null,
+            username: null,
+            phone: null,
+          },
+        });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) =>
+      (b.last_message_at || "").localeCompare(a.last_message_at || "")
+    );
+  })();
+
+  const isAssignedToMe = (t: ThreadView) =>
+    Boolean(
+      t.assigned_to_uid &&
+      (t.assigned_to_uid === me || (currentAuthUid && t.assigned_to_uid === currentAuthUid))
+    );
+
   const visibleThreads = canViewAll
-    ? threads
-    : threads.filter((t) => !t.assigned_to_uid || t.assigned_to_uid === me);
+    ? mergedAllThreads
+    : mergedAllThreads.filter((t) => isAssignedToMe(t));
 
   const unreadTotal = visibleThreads.filter((t) => Number(t.staff_unread) > 0).length;
-  const mineTotal = visibleThreads.filter((t) => t.assigned_to_uid === me).length;
+  const mineTotal = visibleThreads.filter((t) => isAssignedToMe(t)).length;
   const unassignedTotal = visibleThreads.filter((t) => !t.assigned_to_uid).length;
   const newTotal = visibleThreads.filter((t) => (t.status || "new") === "new").length;
   const resolvedTotal = visibleThreads.filter((t) => t.status === "resolved").length;
@@ -10014,7 +10066,7 @@ function ChatThreadsAdmin() {
     const status = (t.status || "new") as ChatThreadStatus;
     if (filterMode === "new" && status !== "new") return false;
     if (filterMode === "unread" && !(Number(t.staff_unread) > 0)) return false;
-    if (filterMode === "mine" && t.assigned_to_uid !== me) return false;
+    if (filterMode === "mine" && !isAssignedToMe(t)) return false;
     if (filterMode === "unassigned" && Boolean(t.assigned_to_uid)) return false;
     if (filterMode === "in_progress" && status !== "in_progress" && status !== "assigned")
       return false;
@@ -10026,6 +10078,8 @@ function ChatThreadsAdmin() {
     if (!q) return true;
     return [
       t?.email,
+      t?.user_email,
+      t?.user_name,
       t?.profile?.full_name,
       t?.profile?.username,
       t?.profile?.phone,
@@ -10039,27 +10093,10 @@ function ChatThreadsAdmin() {
       .includes(q);
   });
 
-  if (active) {
-    return (
-      <AdminChatPanel
-        thread={active}
-        operators={operators}
-        canReply={canReply}
-        canAssign={canAssign}
-        canCloseReopen={canCloseReopen}
-        canViewHistory={canViewHistory}
-        onBack={() => {
-          setActive(null);
-          void refresh();
-        }}
-        onRequestDeleteThread={() => setConfirmDeleteThread(active)}
-        onAssignOperator={(opId) => void handleAssignOperator(active, opId)}
-        onStatusChange={(st) => void handleStatusChange(active, st)}
-        onPriorityChange={(pr) => void handlePriorityChange(active, pr)}
-        me={me}
-      />
-    );
-  }
+  const resolvedActive = active
+    ? visibleThreads.find((x) => x.id === active.id) || active
+    : null;
+  const desktopPreviewThread = resolvedActive || filtered[0] || null;
 
   return (
     <div className="space-y-3">
@@ -10079,25 +10116,33 @@ function ChatThreadsAdmin() {
               <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary-deep">
                 {myRoleLabel}
               </span>
+              {!canViewAll && (
+                <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                  শুধু অ্যাসাইনকৃত চ্যাট
+                </span>
+              )}
             </div>
             <p className="mt-0.5 text-[11px] text-muted-foreground">
-              চ্যাট অ্যাসাইন, ট্রান্সফার, AI হ্যান্ডঅফ সারাংশ এবং স্ট্যাটাস ম্যানেজমেন্ট সহ পূর্ণাঙ্গ সাপোর্ট ইনবক্স।
+              চ্যাট অ্যাসাইন, ট্রান্সফার, AI হ্যান্ডঅফ সারাংশ এবং স্ট্যাটাস ম্যানেজমেন্ট সহ পূর্ণাঙ্গ রিয়েল-টাইম সাপোর্ট ইনবক্স।
             </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {isMainAdmin && threads.length > 0 && (
+          {isMainAdmin && mergedAllThreads.length > 0 && (
             <button
               type="button"
               onClick={() => setConfirmDeleteAll(true)}
               className="inline-flex items-center gap-1.5 rounded-full bg-destructive/15 px-3 py-1.5 text-xs font-bold text-destructive transition hover:bg-destructive hover:text-white"
             >
-              <Trash2 className="h-3.5 w-3.5" /> সব চ্যাট ডিলিট ({threads.length})
+              <Trash2 className="h-3.5 w-3.5" /> সব চ্যাট ডিলিট ({mergedAllThreads.length})
             </button>
           )}
           <button
             type="button"
-            onClick={() => void refresh()}
+            onClick={() => {
+              liveThreads.refresh();
+              void refresh();
+            }}
             className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-xs font-semibold text-primary-deep hover:bg-primary/10"
           >
             <RefreshCcw className="h-3.5 w-3.5" /> রিফ্রেশ
@@ -10105,304 +10150,364 @@ function ChatThreadsAdmin() {
         </div>
       </div>
 
-      {/* Inbox Workflow Filter Pills & Search */}
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap gap-1.5">
-          {[
-            { key: "all", label: `সব (${visibleThreads.length})` },
-            { key: "unread", label: `অপঠিত (${unreadTotal})` },
-            { key: "new", label: `নতুন (${newTotal})` },
-            { key: "mine", label: `আমার চ্যাট (${mineTotal})` },
-            { key: "unassigned", label: `আন-অ্যাসাইনড (${unassignedTotal})` },
-            { key: "in_progress", label: "চলমান / অ্যাসাইনড" },
-            { key: "waiting_customer", label: "গ্রাহকের অপেক্ষায়" },
-            { key: "resolved", label: `সমাধান (${resolvedTotal})` },
-            { key: "closed", label: `বন্ধ (${closedTotal})` },
-          ].map((pill) => (
-            <button
-              key={pill.key}
-              type="button"
-              onClick={() => setFilterMode(pill.key as typeof filterMode)}
-              className={`rounded-full px-3 py-1 text-[11px] font-bold transition ${
-                filterMode === pill.key
-                  ? "bg-gradient-hero text-white shadow-card"
-                  : "border border-border bg-card text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {pill.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="গ্রাহকের নাম, ফোন, অ্যাসাইনকৃত অপারেটর বা AI সারাংশ খুঁজুন..."
-            className="w-full rounded-full border border-border bg-card py-1.5 pl-8 pr-3 text-xs shadow-sm outline-none focus:border-primary"
-          />
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="rounded-2xl bg-card/50 p-8 text-center">
-          <Loader2 className="mx-auto h-5 w-5 animate-spin text-primary" />
-          <p className="mt-2 text-xs text-muted-foreground">চ্যাট মেসেজ লোড হচ্ছে...</p>
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center text-sm text-muted-foreground">
-          <MessageCircle className="mx-auto mb-2 h-8 w-8 text-muted-foreground/50" />
-          <p className="font-semibold text-foreground">এই ফিল্টারে কোনো লাইভ চ্যাট মেসেজ নেই</p>
-          <p className="mt-1 text-xs">
-            গ্রাহকরা ফ্লোটিং লাইভ চ্যাটে বা AI হ্যান্ডঅফ থেকে মেসেজ পাঠালেই এখানে তাৎক্ষণিকভাবে দেখা যাবে।
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {filtered.map((t) => {
-            const customerName =
-              t.profile?.full_name || t.email?.split("@")[0] || `গ্রাহক #${t.user_id.slice(0, 6)}`;
-            const isUnread = Number(t.staff_unread) > 0;
-            const draft = inlineDrafts[t.id] || "";
-            const isSending = sendingThreadId === t.id;
-            const status = (t.status || "new") as ChatThreadStatus;
-            const statusMeta = CHAT_STATUS_LABELS[status] || CHAT_STATUS_LABELS.new;
-            const isUrgent = t.priority === "urgent";
-
-            return (
-              <div
-                key={t.id}
-                className={`rounded-3xl border p-4 shadow-card transition ${
-                  isUrgent
-                    ? "border-amber-400 bg-gradient-to-br from-amber-50/70 to-card"
-                    : isUnread
-                      ? "border-rose-300 bg-gradient-to-br from-rose-50/60 to-card"
-                      : "border-border bg-card"
-                }`}
-              >
-                {/* Customer Info & Open Chat / Delete Buttons */}
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="flex items-center gap-2.5">
-                    <div
-                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full font-bold ${
-                        isUnread
-                          ? "bg-rose-600 text-white shadow-sm"
-                          : "bg-emerald-500/15 text-emerald-700"
-                      }`}
-                    >
-                      <MessageCircle className="h-5 w-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <p className="font-display text-sm font-bold text-primary-deep">
-                          {customerName}
-                        </p>
-                        <span
-                          className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusMeta.badge}`}
-                        >
-                          {statusMeta.label}
-                        </span>
-                        {isUrgent && (
-                          <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-extrabold text-white">
-                            <AlertTriangle className="h-3 w-3" /> জরুরি
-                          </span>
-                        )}
-                        {t.source === "ai_handoff" && (
-                          <span className="inline-flex items-center gap-0.5 rounded-full bg-indigo-500/15 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
-                            <Bot className="h-3 w-3" /> AI হ্যান্ডঅফ
-                          </span>
-                        )}
-                        {isUnread && (
-                          <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-extrabold text-white">
-                            {t.staff_unread} টি নতুন
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-muted-foreground">
-                        {t.profile?.phone ? `📞 ${t.profile.phone} • ` : ""}
-                        {t.email || ""} •{" "}
-                        {new Date(t.last_message_at).toLocaleString("bn-BD", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                          day: "2-digit",
-                          month: "2-digit",
-                        })}
-                        {t.assigned_to_name && (
-                          <span className="ml-1 font-semibold text-primary-deep">
-                            • অ্যাসাইনড: {t.assigned_to_name} ({t.assigned_role || "অপারেটর"})
-                          </span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setActive(t)}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary-deep transition hover:bg-primary hover:text-white"
-                    >
-                      <MessageCircle className="h-3.5 w-3.5" /> সম্পূর্ণ চ্যাট ও ফাইল/ভয়েস (
-                      {isUnread ? "উত্তর দিন" : "খুলুন"})
-                    </button>
-                    {isMainAdmin && (
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDeleteThread(t)}
-                        className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-3 py-1.5 text-xs font-bold text-destructive transition hover:bg-destructive hover:text-white"
-                        title="এই লাইভ চ্যাট ডিলিট করুন"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" /> ডিলিট
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Operator Workflow Controls */}
-                {(canAssign || canCloseReopen) && (
-                  <div className="mt-2.5 flex flex-wrap items-center gap-2 rounded-2xl bg-muted/40 p-2 text-[11px]">
-                    {canAssign && (
-                      <label className="flex items-center gap-1.5 font-semibold text-muted-foreground">
-                        <ArrowRightLeft className="h-3.5 w-3.5 text-primary" />
-                        <span>অপারেটর:</span>
-                        <select
-                          value={t.assigned_to_uid || ""}
-                          onChange={(e) => void handleAssignOperator(t, e.target.value)}
-                          className="rounded-lg border border-border bg-background px-2 py-1 text-[11px] font-semibold text-foreground outline-none focus:border-primary"
-                        >
-                          <option value="">আন-অ্যাসাইনড</option>
-                          {operators.map((op) => {
-                            const r = resolveUserRoleDisplay({
-                              email: op.email,
-                              roles: op.roles,
-                              isMainAdmin: isProtectedMainSuperAdmin({
-                                id: op.id,
-                                email: op.email,
-                                username: op.profile?.username,
-                              }),
-                              customRoleId: op.custom_role_id || op.profile?.custom_role_id,
-                              customRoleName: op.custom_role_name || op.profile?.custom_role_name,
-                              customRoles,
-                            });
-                            return (
-                              <option key={op.id} value={op.id}>
-                                {op.profile?.full_name || op.email.split("@")[0]} ({r.labelBn})
-                              </option>
-                            );
-                          })}
-                        </select>
-                      </label>
-                    )}
-                    {canCloseReopen && (
-                      <>
-                        <select
-                          value={status}
-                          onChange={(e) =>
-                            void handleStatusChange(t, e.target.value as ChatThreadStatus)
-                          }
-                          className="rounded-lg border border-border bg-background px-2 py-1 text-[11px] font-semibold text-foreground outline-none focus:border-primary"
-                        >
-                          {Object.entries(CHAT_STATUS_LABELS).map(([k, v]) => (
-                            <option key={k} value={k}>
-                              স্ট্যাটাস: {v.label}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void handlePriorityChange(t, isUrgent ? "normal" : "urgent")
-                          }
-                          className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${
-                            isUrgent
-                              ? "bg-amber-500 text-white"
-                              : "border border-border bg-background text-muted-foreground hover:text-foreground"
-                          }`}
-                        >
-                          {isUrgent ? "⚡ জরুরি" : "সাধারণ"}
-                        </button>
-                      </>
-                    )}
-                  </div>
-                )}
-
-                {/* AI Handoff Summary */}
-                {canViewHistory && t.handoff_summary && (
-                  <div className="mt-2 rounded-2xl border border-indigo-200 bg-indigo-50/70 px-3 py-2 text-[11px] text-indigo-950">
-                    <span className="font-bold text-indigo-700">🤖 AI হ্যান্ডঅফ সারাংশ: </span>
-                    <span>{t.handoff_summary}</span>
-                  </div>
-                )}
-
-                {/* Latest Message Preview Bubble */}
-                <div
-                  onClick={() => setActive(t)}
-                  className="mt-2.5 cursor-pointer rounded-2xl border border-border/80 bg-background/90 px-3.5 py-2.5 text-xs transition hover:border-primary/40"
-                >
-                  <span className="font-bold text-muted-foreground">সর্বশেষ বার্তা: </span>
-                  <span className="font-medium text-foreground">
-                    {t.last_message_preview || "কোনো টেক্সট নেই — ক্লিক করে চ্যাট খুলুন"}
-                  </span>
-                </div>
-
-                {/* 1-Click Quick Reply Pills + Inline Reply */}
-                {canReply ? (
-                  <>
-                    <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                      <span className="text-[10px] font-bold text-muted-foreground">⚡ ১-ক্লিক উত্তর:</span>
-                      {QUICK_STAFF_REPLIES.slice(0, 3).map((qr, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          disabled={isSending}
-                          onClick={() => void sendQuickInlineReply(t, qr)}
-                          className="rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-[10px] font-semibold text-primary-deep transition hover:bg-primary hover:text-white disabled:opacity-50"
-                        >
-                          {qr.length > 34 ? `${qr.slice(0, 34)}...` : qr}
-                        </button>
-                      ))}
-                    </div>
-
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        void sendQuickInlineReply(t);
-                      }}
-                      className="mt-2.5 flex items-center gap-2"
-                    >
-                      <input
-                        value={draft}
-                        onChange={(e) =>
-                          setInlineDrafts((prev) => ({ ...prev, [t.id]: e.target.value }))
-                        }
-                        placeholder={`${customerName}-কে সরাসরি এখানেই উত্তর লিখুন...`}
-                        className="min-w-0 flex-1 rounded-full border border-border bg-background px-3.5 py-2 text-xs outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-                      />
-                      <button
-                        type="submit"
-                        disabled={isSending}
-                        className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-gradient-hero px-4 py-2 text-xs font-bold text-primary-foreground shadow-card transition active:scale-95 disabled:opacity-60"
-                      >
-                        {isSending ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Send className="h-3.5 w-3.5" />
-                        )}
-                        উত্তর পাঠান
-                      </button>
-                    </form>
-                  </>
-                ) : (
-                  <p className="mt-2 text-[11px] font-semibold text-muted-foreground">
-                    🔒 আপনার অ্যাকাউন্টে উত্তর দেওয়ার পারমিশন (chat_reply) দেওয়া হয়নি।
-                  </p>
-                )}
-              </div>
-            );
-          })}
+      {liveThreads.error && (
+        <div className="flex items-center justify-between gap-2 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-2.5 text-xs font-semibold text-rose-800">
+          <span>{liveThreads.error}</span>
+          <button
+            type="button"
+            onClick={() => {
+              liveThreads.refresh();
+              void refresh();
+            }}
+            className="rounded-lg bg-rose-600 px-2.5 py-1 text-[11px] font-bold text-white"
+          >
+            পুনরায় চেষ্টা করুন
+          </button>
         </div>
       )}
+
+      {/* Mobile Conversation View (< lg) when active thread is selected */}
+      {resolvedActive && (
+        <div className="lg:hidden">
+          <AdminChatPanel
+            thread={resolvedActive}
+            operators={operators}
+            canReply={canReply}
+            canAssign={canAssign}
+            canCloseReopen={canCloseReopen}
+            canViewHistory={canViewHistory}
+            onBack={() => {
+              setActive(null);
+              void refresh();
+            }}
+            onRequestDeleteThread={() => setConfirmDeleteThread(resolvedActive)}
+            onAssignOperator={(opId) => void handleAssignOperator(resolvedActive, opId)}
+            onStatusChange={(st) => void handleStatusChange(resolvedActive, st)}
+            onPriorityChange={(pr) => void handlePriorityChange(resolvedActive, pr)}
+            me={me}
+          />
+        </div>
+      )}
+
+      {/* Inbox Filter Pills + Split-Pane Desktop Workspace */}
+      <div className={resolvedActive ? "hidden lg:block space-y-3" : "space-y-3"}>
+        {/* Inbox Workflow Filter Pills & Search */}
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              { key: "all", label: `সব (${visibleThreads.length})` },
+              { key: "unread", label: `অপঠিত (${unreadTotal})` },
+              { key: "new", label: `নতুন (${newTotal})` },
+              { key: "mine", label: `আমার চ্যাট (${mineTotal})` },
+              { key: "unassigned", label: `আন-অ্যাসাইনড (${unassignedTotal})` },
+              { key: "in_progress", label: "চলমান / অ্যাসাইনড" },
+              { key: "waiting_customer", label: "গ্রাহকের অপেক্ষায়" },
+              { key: "resolved", label: `সমাধান (${resolvedTotal})` },
+              { key: "closed", label: `বন্ধ (${closedTotal})` },
+            ].map((pill) => (
+              <button
+                key={pill.key}
+                type="button"
+                onClick={() => setFilterMode(pill.key as typeof filterMode)}
+                className={`rounded-full px-3 py-1 text-[11px] font-bold transition ${
+                  filterMode === pill.key
+                    ? "bg-gradient-hero text-white shadow-card"
+                    : "border border-border bg-card text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {pill.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="relative w-full lg:max-w-sm">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="গ্রাহকের নাম, ফোন, অপারেটর বা সারাংশ খুঁজুন..."
+              className="w-full rounded-full border border-border bg-card py-1.5 pl-8 pr-3 text-xs shadow-sm outline-none focus:border-primary"
+            />
+          </div>
+        </div>
+
+        {loading && liveThreads.loading ? (
+          <div className="rounded-2xl bg-card/50 p-8 text-center">
+            <Loader2 className="mx-auto h-5 w-5 animate-spin text-primary" />
+            <p className="mt-2 text-xs text-muted-foreground">চ্যাট মেসেজ লোড হচ্ছে...</p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center text-sm text-muted-foreground">
+            <MessageCircle className="mx-auto mb-2 h-8 w-8 text-muted-foreground/50" />
+            <p className="font-semibold text-foreground">এই ফিল্টারে কোনো লাইভ চ্যাট মেসেজ নেই</p>
+            <p className="mt-1 text-xs">
+              গ্রাহকরা ফ্লোটিং লাইভ চ্যাটে বা AI হ্যান্ডঅফ থেকে মেসেজ পাঠালেই এখানে তাৎক্ষণিকভাবে দেখা যাবে।
+            </p>
+          </div>
+        ) : (
+          <div className="lg:grid lg:grid-cols-[400px_minmax(0,1fr)] xl:grid-cols-[450px_minmax(0,1fr)] lg:items-start lg:gap-4">
+            {/* Left Thread List */}
+            <div className="space-y-3 lg:max-h-[75dvh] lg:overflow-y-auto lg:pr-1">
+              {filtered.map((t) => {
+                const customerName =
+                  t.profile?.full_name ||
+                  t.user_name ||
+                  t.email?.split("@")[0] ||
+                  `গ্রাহক #${t.user_id.slice(0, 6)}`;
+                const isUnread = Number(t.staff_unread) > 0;
+                const draft = inlineDrafts[t.id] || "";
+                const isSending = sendingThreadId === t.id;
+                const status = (t.status || "new") as ChatThreadStatus;
+                const statusMeta = CHAT_STATUS_LABELS[status] || CHAT_STATUS_LABELS.new;
+                const isUrgent = t.priority === "urgent";
+                const isSelectedDesktop = desktopPreviewThread?.id === t.id;
+
+                return (
+                  <div
+                    key={t.id}
+                    className={`rounded-3xl border p-4 shadow-card transition ${
+                      isSelectedDesktop ? "ring-2 ring-primary/60 " : ""
+                    }${
+                      isUrgent
+                        ? "border-amber-400 bg-gradient-to-br from-amber-50/70 to-card"
+                        : isUnread
+                          ? "border-rose-300 bg-gradient-to-br from-rose-50/60 to-card"
+                          : "border-border bg-card"
+                    }`}
+                  >
+                    {/* Customer Info & Open Chat / Delete Buttons */}
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div
+                        className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5"
+                        onClick={() => setActive(t)}
+                      >
+                        <div
+                          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full font-bold ${
+                            isUnread
+                              ? "bg-rose-600 text-white shadow-sm"
+                              : "bg-emerald-500/15 text-emerald-700"
+                          }`}
+                        >
+                          <MessageCircle className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <p className="font-display text-sm font-bold text-primary-deep truncate">
+                              {customerName}
+                            </p>
+                            <span
+                              className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusMeta.badge}`}
+                            >
+                              {statusMeta.label}
+                            </span>
+                            {isUrgent && (
+                              <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                                <AlertTriangle className="h-3 w-3" /> জরুরি
+                              </span>
+                            )}
+                            {t.source === "ai_handoff" && (
+                              <span className="inline-flex items-center gap-0.5 rounded-full bg-indigo-500/15 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
+                                <Bot className="h-3 w-3" /> AI হ্যান্ডঅফ
+                              </span>
+                            )}
+                            {isUnread && (
+                              <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                                {t.staff_unread} টি নতুন
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-muted-foreground truncate">
+                            {t.profile?.phone ? `📞 ${t.profile.phone} • ` : ""}
+                            {t.email || t.user_email || ""} •{" "}
+                            {new Date(t.last_message_at).toLocaleString("bn-BD", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              day: "2-digit",
+                              month: "2-digit",
+                            })}
+                            {t.assigned_to_name && (
+                              <span className="ml-1 font-semibold text-primary-deep">
+                                • {t.assigned_to_name} ({t.assigned_role || "অপারেটর"})
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setActive(t)}
+                          className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary-deep transition hover:bg-primary hover:text-white"
+                        >
+                          <MessageCircle className="h-3 w-3" />{" "}
+                          {isUnread ? "উত্তর দিন" : "খুলুন"}
+                        </button>
+                        {isMainAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteThread(t)}
+                            className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2.5 py-1 text-[11px] font-bold text-destructive transition hover:bg-destructive hover:text-white"
+                            title="এই লাইভ চ্যাট ডিলিট করুন"
+                          >
+                            <Trash2 className="h-3 w-3" /> ডিলিট
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Operator Workflow Controls */}
+                    {(canAssign || canCloseReopen) && (
+                      <div className="mt-2.5 flex flex-wrap items-center gap-2 rounded-2xl bg-muted/40 p-2 text-[11px]">
+                        {canAssign && (
+                          <label className="flex items-center gap-1.5 font-semibold text-muted-foreground">
+                            <ArrowRightLeft className="h-3.5 w-3.5 text-primary" />
+                            <select
+                              value={t.assigned_to_uid || ""}
+                              onChange={(e) => void handleAssignOperator(t, e.target.value)}
+                              className="max-w-[175px] rounded-lg border border-border bg-background px-2 py-1 text-[11px] font-semibold text-foreground outline-none focus:border-primary"
+                            >
+                              <option value="">আন-অ্যাসাইনড</option>
+                              {operators.map((op) => (
+                                <option key={op.uid} value={op.uid}>
+                                  {op.name} ({op.role_label})
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+                        {canCloseReopen && (
+                          <>
+                            <select
+                              value={status}
+                              onChange={(e) =>
+                                void handleStatusChange(t, e.target.value as ChatThreadStatus)
+                              }
+                              className="rounded-lg border border-border bg-background px-2 py-1 text-[11px] font-semibold text-foreground outline-none focus:border-primary"
+                            >
+                              {Object.entries(CHAT_STATUS_LABELS).map(([k, v]) => (
+                                <option key={k} value={k}>
+                                  {v.label}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handlePriorityChange(t, isUrgent ? "normal" : "urgent")
+                              }
+                              className={`rounded-lg px-2 py-1 text-[11px] font-bold transition ${
+                                isUrgent
+                                  ? "bg-amber-500 text-white"
+                                  : "border border-border bg-background text-muted-foreground hover:text-foreground"
+                              }`}
+                            >
+                              {isUrgent ? "⚡ জরুরি" : "সাধারণ"}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    {/* AI Handoff Summary */}
+                    {canViewHistory && t.handoff_summary && (
+                      <div className="mt-2 rounded-2xl border border-indigo-200 bg-indigo-50/70 px-3 py-2 text-[11px] text-indigo-950">
+                        <span className="font-bold text-indigo-700">🤖 AI সারাংশ: </span>
+                        <span>{t.handoff_summary}</span>
+                      </div>
+                    )}
+
+                    {/* Latest Message Preview Bubble */}
+                    <div
+                      onClick={() => setActive(t)}
+                      className="mt-2.5 cursor-pointer rounded-2xl border border-border/80 bg-background/90 px-3 py-2 text-xs transition hover:border-primary/40"
+                    >
+                      <span className="font-bold text-muted-foreground">সর্বশেষ বার্তা: </span>
+                      <span className="font-medium text-foreground">
+                        {t.last_message_preview || "কোনো টেক্সট নেই — ক্লিক করে চ্যাট খুলুন"}
+                      </span>
+                    </div>
+
+                    {/* 1-Click Quick Reply Pills + Inline Reply (Mobile / Compact card action) */}
+                    {canReply ? (
+                      <>
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          <span className="text-[10px] font-bold text-muted-foreground">⚡ দ্রুত উত্তর:</span>
+                          {QUICK_STAFF_REPLIES.slice(0, 2).map((qr, i) => (
+                            <button
+                              key={i}
+                              type="button"
+                              disabled={isSending}
+                              onClick={() => void sendQuickInlineReply(t, qr)}
+                              className="rounded-full border border-primary/20 bg-primary/5 px-2.5 py-0.5 text-[10px] font-semibold text-primary-deep transition hover:bg-primary hover:text-white disabled:opacity-50"
+                            >
+                              {qr.length > 28 ? `${qr.slice(0, 28)}...` : qr}
+                            </button>
+                          ))}
+                        </div>
+
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            void sendQuickInlineReply(t);
+                          }}
+                          className="mt-2 flex items-center gap-2 lg:hidden"
+                        >
+                          <input
+                            value={draft}
+                            onChange={(e) =>
+                              setInlineDrafts((prev) => ({ ...prev, [t.id]: e.target.value }))
+                            }
+                            placeholder={`${customerName}-কে দ্রুত উত্তর লিখুন...`}
+                            className="min-w-0 flex-1 rounded-full border border-border bg-background px-3.5 py-2 text-xs outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                          />
+                          <button
+                            type="submit"
+                            disabled={isSending}
+                            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-gradient-hero px-3.5 py-2 text-xs font-bold text-primary-foreground shadow-card active:scale-95 disabled:opacity-60"
+                          >
+                            {isSending ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Send className="h-3.5 w-3.5" />
+                            )}
+                            পাঠান
+                          </button>
+                        </form>
+                      </>
+                    ) : (
+                      <p className="mt-2 text-[11px] font-semibold text-muted-foreground">
+                        🔒 উত্তর দেওয়ার পারমিশন (chat_reply) দেওয়া হয়নি।
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Right Pane: Desktop Live Conversation Workspace */}
+            <div className="hidden lg:block sticky top-20">
+              {desktopPreviewThread ? (
+                <AdminChatPanel
+                  thread={desktopPreviewThread}
+                  operators={operators}
+                  canReply={canReply}
+                  canAssign={canAssign}
+                  canCloseReopen={canCloseReopen}
+                  canViewHistory={canViewHistory}
+                  onBack={() => setActive(null)}
+                  onRequestDeleteThread={() => setConfirmDeleteThread(desktopPreviewThread)}
+                  onAssignOperator={(opId) => void handleAssignOperator(desktopPreviewThread, opId)}
+                  onStatusChange={(st) => void handleStatusChange(desktopPreviewThread, st)}
+                  onPriorityChange={(pr) => void handlePriorityChange(desktopPreviewThread, pr)}
+                  me={me}
+                  compactDesktopPane
+                />
+              ) : null}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Delete Single Thread Modal */}
       {confirmDeleteThread && (
@@ -10458,7 +10563,7 @@ function ChatThreadsAdmin() {
               সকল লাইভ চ্যাট ডিলিট নিশ্চিতকরণ
             </p>
             <p className="text-xs text-muted-foreground">
-              সতর্কতা: সকল ({threads.length} টি) লাইভ চ্যাট থ্রেড ও বার্তা স্থায়ীভাবে মুছে যাবে। আপনি কি নিশ্চিত?
+              সতর্কতা: সকল ({mergedAllThreads.length} টি) লাইভ চ্যাট থ্রেড ও বার্তা স্থায়ীভাবে মুছে যাবে। আপনি কি নিশ্চিত?
             </p>
             <div className="flex justify-end gap-2 pt-2">
               <button
@@ -10496,9 +10601,10 @@ function AdminChatPanel({
   onStatusChange,
   onPriorityChange,
   me,
+  compactDesktopPane = false,
 }: {
   thread: ThreadView;
-  operators: AdminUserRecord[];
+  operators: ChatOperatorDirectoryEntry[];
   canReply: boolean;
   canAssign: boolean;
   canCloseReopen: boolean;
@@ -10509,8 +10615,10 @@ function AdminChatPanel({
   onStatusChange: (status: ChatThreadStatus) => void;
   onPriorityChange: (priority: ChatThreadPriority) => void;
   me: string;
+  compactDesktopPane?: boolean;
 }) {
-  const { items, send, remove } = useThreadMessages(thread.id);
+  const { items, loading: msgsLoading, error: msgsError, send, retrySend, remove, refresh: refreshMsgs } =
+    useThreadMessages(thread.id);
   const { user, roles, isMainAdmin, customRoleId, customRoleName } = useAuth();
   const { customRoles } = useRolePermissions();
   const { getStaffProfile, upsertStaffProfile } = useStaffProfiles();
@@ -10572,8 +10680,8 @@ function AdminChatPanel({
       sender_name: myName,
       sender_photo: myPhoto,
       sender_role_label: myRoleLabel,
-      user_name: thread.profile?.full_name || undefined,
-      user_email: thread.email || undefined,
+      user_name: thread.profile?.full_name || thread.user_name || undefined,
+      user_email: thread.email || thread.user_email || undefined,
       user_phone: thread.profile?.phone || undefined,
     });
     if (error) toast.error(error.message);
@@ -10609,23 +10717,26 @@ function AdminChatPanel({
   }
 
   return (
-    <div className="flex h-[75dvh] flex-col">
-      <div className="mb-2 space-y-2 rounded-2xl bg-card p-3 shadow-card">
+    <div className="flex h-[75dvh] flex-col rounded-3xl border border-border/80 bg-card p-3 shadow-card">
+      <div className="mb-2 space-y-2 rounded-2xl bg-muted/30 p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onBack}
-              className="rounded-full bg-muted px-3 py-1.5 text-xs font-semibold hover:bg-primary/10"
-            >
-              <ArrowLeft className="inline h-3.5 w-3.5" /> তালিকায় ফেরত
-            </button>
+          <div className="flex items-center gap-2 min-w-0">
+            {!compactDesktopPane && (
+              <button
+                type="button"
+                onClick={onBack}
+                className="rounded-full bg-card px-3 py-1.5 text-xs font-semibold shadow-sm ring-1 ring-border hover:bg-primary/10"
+              >
+                <ArrowLeft className="inline h-3.5 w-3.5" /> তালিকায় ফেরত
+              </button>
+            )}
             <div className="min-w-0">
               <p className="truncate text-sm font-bold text-primary-deep">
-                {thread.profile?.full_name || thread.email || "গ্রাহক"}
+                {thread.profile?.full_name || thread.user_name || thread.email || "গ্রাহক"}
               </p>
               <p className="truncate text-[11px] text-muted-foreground">
                 {thread.profile?.phone ? `📞 ${thread.profile.phone} • ` : ""}
-                {thread.email}
+                {thread.email || thread.user_email || thread.id}
               </p>
             </div>
           </div>
@@ -10637,7 +10748,7 @@ function AdminChatPanel({
                 className="h-6 w-6 rounded-full border border-primary/30 bg-white object-cover"
               />
               <span className="text-[11px] font-bold text-primary-deep">
-                উত্তরদাতা: {myName} ({myRoleLabel})
+                {myName} ({myRoleLabel})
               </span>
             </div>
             {isMainAdmin && (
@@ -10646,7 +10757,7 @@ function AdminChatPanel({
                 onClick={onRequestDeleteThread}
                 className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-3 py-1.5 text-xs font-bold text-destructive transition hover:bg-destructive hover:text-white"
               >
-                <Trash2 className="h-3.5 w-3.5" /> এই চ্যাট ডিলিট করুন
+                <Trash2 className="h-3.5 w-3.5" /> ডিলিট
               </button>
             )}
           </div>
@@ -10662,25 +10773,11 @@ function AdminChatPanel({
                 className="rounded-lg border border-border bg-background px-2 py-1 text-[11px] font-semibold outline-none focus:border-primary"
               >
                 <option value="">অপারেটর: আন-অ্যাসাইনড</option>
-                {operators.map((op) => {
-                  const r = resolveUserRoleDisplay({
-                    email: op.email,
-                    roles: op.roles,
-                    isMainAdmin: isProtectedMainSuperAdmin({
-                      id: op.id,
-                      email: op.email,
-                      username: op.profile?.username,
-                    }),
-                    customRoleId: op.custom_role_id || op.profile?.custom_role_id,
-                    customRoleName: op.custom_role_name || op.profile?.custom_role_name,
-                    customRoles,
-                  });
-                  return (
-                    <option key={op.id} value={op.id}>
-                      {op.profile?.full_name || op.email.split("@")[0]} ({r.labelBn})
-                    </option>
-                  );
-                })}
+                {operators.map((op) => (
+                  <option key={op.uid} value={op.uid}>
+                    {op.name} ({op.role_label})
+                  </option>
+                ))}
               </select>
             )}
             {canCloseReopen && (
@@ -10720,8 +10817,26 @@ function AdminChatPanel({
         )}
       </div>
 
-      <div className="flex-1 space-y-2.5 overflow-y-auto rounded-2xl border border-border bg-card/40 p-3">
-        {items.length === 0 && (
+      <div className="flex-1 space-y-2.5 overflow-y-auto rounded-2xl border border-border bg-background/50 p-3">
+        {msgsError && (
+          <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800">
+            <span>{msgsError}</span>
+            <button
+              type="button"
+              onClick={() => refreshMsgs()}
+              className="rounded-lg bg-rose-600 px-2.5 py-1 text-[11px] font-bold text-white"
+            >
+              আবার লোড করুন
+            </button>
+          </div>
+        )}
+        {msgsLoading && items.length === 0 && (
+          <div className="py-12 text-center text-muted-foreground">
+            <Loader2 className="mx-auto h-5 w-5 animate-spin text-primary" />
+            <p className="mt-2 text-xs">মেসেজ লোড হচ্ছে...</p>
+          </div>
+        )}
+        {!msgsLoading && items.length === 0 && (
           <p className="py-12 text-center text-xs text-muted-foreground">
             এখনো কোনো বার্তা নেই — নিচের যেকোনো রেডি বাটনে ক্লিক করে কথোপকথন শুরু করুন।
           </p>
@@ -10740,22 +10855,18 @@ function AdminChatPanel({
             : "";
 
           const displaySenderName = !isStaffMsg
-            ? m.sender_name || thread.profile?.full_name || "গ্রাহক"
+            ? m.sender_name || thread.profile?.full_name || thread.user_name || "গ্রাহক"
             : isMyMsg
               ? `${myName} (আপনি)`
-              : isMainAdmin
-                ? `${m.sender_name || staffSender?.full_name || resolvedMsgRole || "সাপোর্ট অ্যাডমিন"} (${
-                    resolvedMsgRole || "সাপোর্ট অ্যাডমিন"
-                  })`
-                : "সাপোর্ট টিম";
+              : `${m.sender_name || staffSender?.full_name || resolvedMsgRole || "সাপোর্ট অ্যাডমিন"} (${
+                  resolvedMsgRole || "সাপোর্ট অ্যাডমিন"
+                })`;
 
           const displayAvatar = !isStaffMsg
             ? null
             : isMyMsg
               ? myPhoto
-              : isMainAdmin
-                ? m.sender_photo || staffSender?.photo_url || logo
-                : logo;
+              : m.sender_photo || staffSender?.photo_url || logo;
 
           return (
             <div
@@ -10799,16 +10910,31 @@ function AdminChatPanel({
                 </div>
                 {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
                 {m.attachment_url && <AttachmentView url={m.attachment_url} />}
-                <p
-                  className={`mt-0.5 text-[9px] ${
-                    isStaffMsg ? "opacity-75" : "text-muted-foreground"
-                  }`}
-                >
-                  {new Date(m.created_at).toLocaleTimeString("bn-BD", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </p>
+                <div className="mt-0.5 flex items-center justify-between gap-2 text-[9px]">
+                  <span className={isStaffMsg ? "opacity-75" : "text-muted-foreground"}>
+                    {new Date(m.created_at).toLocaleTimeString("bn-BD", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                  {isStaffMsg && (
+                    <span className="flex items-center gap-1 text-[9px]">
+                      {m.status === "sending" && <span className="opacity-75 animate-pulse">পাঠানো হচ্ছে...</span>}
+                      {m.status === "failed" && (
+                        <button
+                          type="button"
+                          onClick={() => void retrySend(m.id)}
+                          className="rounded bg-rose-600 px-1.5 py-0.5 text-[9px] font-bold text-white hover:bg-rose-700"
+                        >
+                          ব্যর্থ · পুনরায় পাঠান
+                        </button>
+                      )}
+                      {(!m.status || m.status === "sent") && (
+                        <span className="text-gold font-bold">✓</span>
+                      )}
+                    </span>
+                  )}
+                </div>
               </div>
               {isStaffMsg && displayAvatar && (
                 <img
@@ -10841,7 +10967,7 @@ function AdminChatPanel({
           <form onSubmit={onSend} className="mt-1.5 flex items-center gap-2">
             <label
               title="ছবি বা ফাইল পাঠান"
-              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-card text-primary shadow-card"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-card text-primary shadow-card ring-1 ring-border"
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
               <input

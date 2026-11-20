@@ -143,7 +143,7 @@ function ComplaintTrackingPage() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-5xl overflow-x-hidden px-3.5 pb-24 pt-4 sm:px-6">
+    <div className="w-full overflow-x-hidden px-3.5 pb-24 pt-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
       {/* Hero Banner */}
       <section className="relative overflow-hidden rounded-3xl bg-gradient-hero p-5 text-primary-foreground shadow-elevated">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-[11px] font-medium backdrop-blur">

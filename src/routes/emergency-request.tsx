@@ -28,9 +28,9 @@ function Page() {
   }
 
   return (
-    <div className="mx-auto max-w-md px-4 pb-24 pt-4">
+    <div className="w-full px-3.5 pb-24 pt-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
       <Link to="/" className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground"><ArrowLeft className="h-4 w-4" /> হোম</Link>
-      <div className="rounded-3xl bg-gradient-to-br from-rose-500/10 to-rose-700/5 p-5 shadow-elevated">
+      <div className="mx-auto max-w-xl rounded-3xl bg-gradient-to-br from-rose-500/10 to-rose-700/5 p-5 shadow-elevated sm:p-6">
         <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-600 text-white shadow-sm">
           <Droplet className="h-6 w-6" />
         </div>

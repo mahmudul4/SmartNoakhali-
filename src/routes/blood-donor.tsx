@@ -56,7 +56,7 @@ function BloodPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl overflow-x-hidden px-3.5 pb-24 pt-4 sm:px-6">
+    <div className="w-full overflow-x-hidden px-3.5 pb-24 pt-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
       <Link to="/" className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="h-4 w-4 shrink-0" /> হোম
       </Link>
@@ -104,9 +104,9 @@ function BloodPage() {
         </select>
       </div>
 
-      <div className="grid w-full min-w-0 grid-cols-1 gap-3 md:grid-cols-2 lg:gap-4">
+      <div className="grid w-full min-w-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 lg:gap-4">
         {filtered.length === 0 && (
-          <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground md:col-span-2">
+          <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground md:col-span-2 xl:col-span-3 2xl:col-span-4">
             কোনো রক্তদাতা নেই।
           </div>
         )}

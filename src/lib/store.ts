@@ -3155,7 +3155,12 @@ export type HeroImageFocalPosition =
   | "center top"
   | "center bottom"
   | "left center"
-  | "right center";
+  | "right center"
+  | "center 20%"
+  | "center 35%"
+  | "center 70%"
+  | "25% 25%"
+  | "75% 25%";
 
 export type HeroLayoutMode = "centered" | "full_width" | "split_left" | "split_right";
 export type HeroImageFit = "cover" | "contain";
@@ -3192,6 +3197,7 @@ export interface HeroBannerConfig {
   desktopImageUrl: string;
   mobileImageUrl: string;
   imagePositionDesktop: HeroImageFocalPosition;
+  imagePositionTablet?: HeroImageFocalPosition;
   imagePositionMobile: HeroImageFocalPosition;
   overlayColor: string;
   overlayOpacity: number;
@@ -3252,6 +3258,10 @@ export interface HeroCarouselSettings {
   showDots: boolean;
   pauseOnHover: boolean;
   transitionStyle: HeroTransitionStyle;
+  lockUniformDimensions?: boolean;
+  uniformDesktopHeightPx?: number;
+  uniformTabletHeightPx?: number;
+  uniformMobileHeightPx?: number;
 }
 
 export interface HeroBannersStorePayload {
@@ -3267,6 +3277,10 @@ export const DEFAULT_HERO_CAROUSEL_SETTINGS: HeroCarouselSettings = {
   showDots: true,
   pauseOnHover: true,
   transitionStyle: "slide",
+  lockUniformDimensions: true,
+  uniformDesktopHeightPx: 336,
+  uniformTabletHeightPx: 324,
+  uniformMobileHeightPx: 308,
 };
 
 export const DEFAULT_HERO_BANNER_ITEM: HeroBannerItem = {
@@ -3300,6 +3314,7 @@ export const DEFAULT_HERO_BANNER_ITEM: HeroBannerItem = {
   desktopImageUrl: "",
   mobileImageUrl: "",
   imagePositionDesktop: "center center",
+  imagePositionTablet: "center center",
   imagePositionMobile: "center center",
   overlayColor: "#042316",
   overlayOpacity: 55,
@@ -3368,6 +3383,10 @@ function normalizeHeroBannerItem(
     desktopHeightPx,
     tabletHeightPx,
     mobileHeightPx,
+    imagePositionDesktop: rawItem.imagePositionDesktop || "center center",
+    imagePositionTablet:
+      rawItem.imagePositionTablet || rawItem.imagePositionDesktop || "center center",
+    imagePositionMobile: rawItem.imagePositionMobile || "center center",
     visible: rawItem.visible !== false,
     showDecorativeGlow: rawItem.showDecorativeGlow !== false,
     overlayOpacity:
@@ -3419,6 +3438,19 @@ function parseHeroBannersPayload(raw: string | null | undefined): HeroBannersSto
             ...DEFAULT_HERO_CAROUSEL_SETTINGS,
             ...(parsed.carousel && typeof parsed.carousel === "object" ? parsed.carousel : {}),
             transitionStyle,
+            lockUniformDimensions: parsed?.carousel?.lockUniformDimensions !== false,
+            uniformDesktopHeightPx: Math.min(
+              560,
+              Math.max(240, Number(parsed?.carousel?.uniformDesktopHeightPx ?? 336))
+            ),
+            uniformTabletHeightPx: Math.min(
+              520,
+              Math.max(240, Number(parsed?.carousel?.uniformTabletHeightPx ?? 324))
+            ),
+            uniformMobileHeightPx: Math.min(
+              480,
+              Math.max(240, Number(parsed?.carousel?.uniformMobileHeightPx ?? 308))
+            ),
             intervalSeconds: Math.min(
               20,
               Math.max(2, Number(parsed?.carousel?.intervalSeconds ?? 5))
@@ -3764,6 +3796,19 @@ export function useHeroBannerConfig() {
     const cleanCarousel: HeroCarouselSettings = {
       ...DEFAULT_HERO_CAROUSEL_SETTINGS,
       ...nextPayload.carousel,
+      lockUniformDimensions: nextPayload.carousel?.lockUniformDimensions !== false,
+      uniformDesktopHeightPx: Math.min(
+        560,
+        Math.max(240, Number(nextPayload.carousel?.uniformDesktopHeightPx ?? 336))
+      ),
+      uniformTabletHeightPx: Math.min(
+        520,
+        Math.max(240, Number(nextPayload.carousel?.uniformTabletHeightPx ?? 324))
+      ),
+      uniformMobileHeightPx: Math.min(
+        480,
+        Math.max(240, Number(nextPayload.carousel?.uniformMobileHeightPx ?? 308))
+      ),
       intervalSeconds: Math.min(20, Math.max(2, Number(nextPayload.carousel?.intervalSeconds ?? 5))),
     };
 

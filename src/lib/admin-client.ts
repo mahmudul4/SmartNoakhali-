@@ -24,12 +24,18 @@ import {
 } from "@/lib/firebase";
 import {
   type ChatThreadRow,
+  type ChatOperatorDirectoryEntry,
   isChatThreadDeleted,
   mergeServerChatDeletions,
   syncChatDeletionsFromFirestore,
   backfillChatThreadsStaffUids,
 } from "@/lib/cloud";
 import { recordStaffActivity } from "@/lib/staff-audit";
+import {
+  getEffectivePermissions,
+  readStoredRolePermissionsPayload,
+  resolveUserRoleDisplay,
+} from "@/lib/permissions";
 
 export interface AdminUserRecord {
   id: string;
@@ -591,38 +597,107 @@ function isVerifiedFirebaseChatOperator(): boolean {
   } catch {
     // ignore
   }
-  return false;
-}
-
-export function listAuthorizedChatOperatorUids(): string[] {
   const vault = readLocalVault();
-  const uids = new Set<string>(["super_admin_mahmudul"]);
-  if (auth.currentUser && !auth.currentUser.isAnonymous && auth.currentUser.uid) {
-    uids.add(auth.currentUser.uid);
-  }
-  for (const v of Object.values(vault)) {
-    if (!v || !v.uid || v.suspended) continue;
+  const v = vault[u.uid] || (u.email ? vault[u.email.toLowerCase()] : undefined);
+  if (v && !v.suspended) {
     const roles = Array.isArray(v.roles) ? v.roles : [];
     if (
       roles.includes("admin") ||
       roles.includes("editor") ||
       roles.includes("moderator") ||
-      Boolean(v.custom_role_id) ||
-      isBootstrappedAdminEmail(v.email)
+      Boolean(v.custom_role_id)
     ) {
-      uids.add(v.uid);
+      return true;
     }
   }
-  return Array.from(uids).slice(0, 24);
+  return false;
+}
+
+export function listAuthorizedChatOperatorsDirectory(): {
+  uids: string[];
+  operators: ChatOperatorDirectoryEntry[];
+} {
+  const vault = readLocalVault();
+  const payload = readStoredRolePermissionsPayload();
+  const viewAllUids = new Set<string>(["super_admin_mahmudul"]);
+  const operatorsMap = new Map<string, ChatOperatorDirectoryEntry>();
+
+  if (auth.currentUser && !auth.currentUser.isAnonymous && auth.currentUser.uid) {
+    if (isSuperAdminEmail(auth.currentUser.email) || isBootstrappedAdminEmail(auth.currentUser.email)) {
+      viewAllUids.add(auth.currentUser.uid);
+    }
+  }
+
+  for (const v of Object.values(vault)) {
+    if (!v || !v.uid || v.suspended) continue;
+    const roles = Array.isArray(v.roles) ? v.roles : [];
+    const isSuper = isSuperAdminEmail(v.email);
+    const isStaffMember =
+      isSuper ||
+      isBootstrappedAdminEmail(v.email) ||
+      roles.includes("admin") ||
+      roles.includes("editor") ||
+      roles.includes("moderator") ||
+      Boolean(v.custom_role_id);
+    if (!isStaffMember) continue;
+
+    const effectivePerms = getEffectivePermissions({
+      email: v.email,
+      roles,
+      isMainAdmin: isSuper,
+      customRoleId: v.custom_role_id,
+      payload,
+    });
+    const canViewAll =
+      isSuper || isBootstrappedAdminEmail(v.email) || effectivePerms.includes("chat_view_all");
+    const canOperateChat =
+      canViewAll ||
+      effectivePerms.includes("chat_view_assigned") ||
+      effectivePerms.includes("chat_reply");
+
+    if (canViewAll) {
+      viewAllUids.add(v.uid);
+    }
+    if (canOperateChat) {
+      const display = resolveUserRoleDisplay({
+        email: v.email,
+        roles,
+        isMainAdmin: isSuper,
+        customRoleId: v.custom_role_id,
+        customRoleName: v.custom_role_name,
+        customRoles: payload.customRoles,
+        designation: v.designation,
+      });
+      operatorsMap.set(v.uid, {
+        uid: v.uid,
+        name: v.full_name || v.email?.split("@")[0] || display.labelBn,
+        email: v.email || "",
+        role_label: display.labelBn,
+        photo_url: v.photo_url || "",
+        can_view_all: canViewAll,
+      });
+    }
+  }
+
+  return {
+    uids: Array.from(viewAllUids).slice(0, 48),
+    operators: Array.from(operatorsMap.values()),
+  };
+}
+
+export function listAuthorizedChatOperatorUids(): string[] {
+  return listAuthorizedChatOperatorsDirectory().uids;
 }
 
 const CHAT_OPERATORS_CONFIG_ID = "chat_operators_config";
 const LOCAL_CHAT_OPERATOR_UIDS_KEY = "sn_chat_operator_uids_v1";
+const LOCAL_CHAT_OPERATORS_DIR_KEY = "sn_chat_operators_dir_v1";
 
 export async function syncChatOperatorUidsSetting(): Promise<string[]> {
-  const uids = listAuthorizedChatOperatorUids();
+  const { uids, operators } = listAuthorizedChatOperatorsDirectory();
   try {
     localStorage.setItem(LOCAL_CHAT_OPERATOR_UIDS_KEY, JSON.stringify(uids));
+    localStorage.setItem(LOCAL_CHAT_OPERATORS_DIR_KEY, JSON.stringify(operators));
   } catch {
     // ignore
   }
@@ -630,7 +705,7 @@ export async function syncChatOperatorUidsSetting(): Promise<string[]> {
     await fetch("/api/chat/operators", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ uids }),
+      body: JSON.stringify({ uids, operators }),
     });
   } catch {
     // ignore
@@ -638,8 +713,8 @@ export async function syncChatOperatorUidsSetting(): Promise<string[]> {
   if (isVerifiedFirebaseSuperAdmin()) {
     try {
       const payload = sanitizeString(
-        JSON.stringify({ uids, updatedAt: new Date().toISOString() }),
-        50000,
+        JSON.stringify({ uids, operators, updatedAt: new Date().toISOString() }),
+        120000,
         "{}"
       );
       await setDoc(
@@ -1641,9 +1716,10 @@ export async function updateUserProfile(opts?: {
   return { ok: true };
 }
 
-export async function listThreadsWithUsers() {
+export async function listThreadsWithUsers(options?: { canViewAll?: boolean }) {
   const vault = await syncVaultFromCloud();
   await syncChatDeletionsFromFirestore();
+  const canViewAll = options?.canViewAll !== false;
 
   const mergedMap = new Map<
     string,
@@ -1653,10 +1729,10 @@ export async function listThreadsWithUsers() {
     }
   >();
 
-  // 1. Load from Server Live Chat Hub (/api/chat/threads) — accessible by all staff
+  // 1. Load from Server Live Chat Hub (/api/chat/threads) when running with Express
   try {
     const resp = await fetch("/api/chat/threads");
-    if (resp.ok) {
+    if (resp.ok && (resp.headers.get("content-type") || "").includes("application/json")) {
       const data = await resp.json();
       if (data.deletedThreads || data.deletedAllBefore || data.deletedMessages) {
         mergeServerChatDeletions({
@@ -1666,10 +1742,14 @@ export async function listThreadsWithUsers() {
         });
       }
       if (Array.isArray(data.threads)) {
+        const currentUid = auth.currentUser?.uid || "";
         for (const t of data.threads) {
           const tid = String(t.id);
           const lastAt = String(t.last_message_at || new Date().toISOString());
           if (isChatThreadDeleted(tid, lastAt)) continue;
+          if (!canViewAll && !isVerifiedFirebaseSuperAdmin() && t.assigned_to_uid !== currentUid) {
+            continue;
+          }
           const vUser = vault[t.user_id] || (t.user_email ? vault[String(t.user_email).toLowerCase()] : undefined);
           mergedMap.set(tid, {
             id: tid,
@@ -1709,11 +1789,32 @@ export async function listThreadsWithUsers() {
     try {
       const currentUid = auth.currentUser?.uid || "";
       const canScanAllDirectly = isVerifiedFirebaseSuperAdmin();
-      const threadsSnap = canScanAllDirectly
-        ? await getDocs(collection(db, "chat_threads"))
-        : await getDocs(
-            query(collection(db, "chat_threads"), where("staff_uids", "array-contains", currentUid))
-          ).catch(() => ({ docs: [] as Array<{ id: string; data: () => Record<string, any> }> }));
+      const threadDocsMap = new Map<string, { id: string; data: () => Record<string, any> }>();
+
+      if (canScanAllDirectly) {
+        const snap = await getDocs(collection(db, "chat_threads"));
+        snap.docs.forEach((d) => threadDocsMap.set(d.id, d));
+      } else if (currentUid) {
+        if (canViewAll) {
+          const [staffSnap, assignedSnap] = await Promise.all([
+            getDocs(
+              query(collection(db, "chat_threads"), where("staff_uids", "array-contains", currentUid))
+            ).catch(() => null),
+            getDocs(
+              query(collection(db, "chat_threads"), where("assigned_to_uid", "==", currentUid))
+            ).catch(() => null),
+          ]);
+          staffSnap?.docs.forEach((d) => threadDocsMap.set(d.id, d));
+          assignedSnap?.docs.forEach((d) => threadDocsMap.set(d.id, d));
+        } else {
+          const assignedSnap = await getDocs(
+            query(collection(db, "chat_threads"), where("assigned_to_uid", "==", currentUid))
+          ).catch(() => null);
+          assignedSnap?.docs.forEach((d) => threadDocsMap.set(d.id, d));
+        }
+      }
+
+      const threadsSnap = { docs: Array.from(threadDocsMap.values()) };
       const usersSnap = isVerifiedFirebaseSuperAdmin()
         ? await getDocs(collection(db, "users")).catch(() => null)
         : null;

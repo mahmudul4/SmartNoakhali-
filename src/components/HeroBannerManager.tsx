@@ -82,9 +82,14 @@ import { recordSuperAdminAudit } from "@/lib/staff-audit";
 const FOCAL_POSITIONS: Array<{ value: HeroImageFocalPosition; label: string }> = [
   { value: "center center", label: "মাঝখান (Center)" },
   { value: "center top", label: "উপরে (Top)" },
+  { value: "center 20%", label: "উপরে-মাঝে (Top 20%)" },
+  { value: "center 35%", label: "হালকা উপরে (35%)" },
+  { value: "center 70%", label: "হালকা নিচে (70%)" },
   { value: "center bottom", label: "নিচে (Bottom)" },
   { value: "left center", label: "বামে (Left)" },
   { value: "right center", label: "ডানে (Right)" },
+  { value: "25% 25%", label: "বাম-উপরে (25% 25%)" },
+  { value: "75% 25%", label: "ডান-উপরে (75% 25%)" },
 ];
 
 const RADIUS_OPTIONS: Array<{
@@ -701,7 +706,9 @@ export function HeroBannerManager() {
   const activeFocal =
     previewDevice === "mobile"
       ? draft.imagePositionMobile
-      : draft.imagePositionDesktop;
+      : previewDevice === "tablet"
+        ? draft.imagePositionTablet || draft.imagePositionDesktop
+        : draft.imagePositionDesktop;
   const hasPreviewImage = draft.backgroundMode === "image" && Boolean(activePreviewImg);
 
   const previewBgForContrast =
@@ -985,6 +992,78 @@ export function HeroBannerManager() {
                 <option value="none">তাৎক্ষণিক (Instant)</option>
               </select>
             </label>
+          </div>
+
+          <div className="mt-2.5 flex flex-wrap items-center gap-3 border-t border-border/60 pt-2.5 text-xs">
+            <label className="inline-flex cursor-pointer items-center gap-1.5 font-bold text-primary-deep">
+              <input
+                type="checkbox"
+                checked={carouselDraft.lockUniformDimensions !== false}
+                onChange={(e) =>
+                  setCarouselDraft({
+                    ...carouselDraft,
+                    lockUniformDimensions: e.target.checked,
+                  })
+                }
+                className="accent-emerald-700"
+              />
+              সব ব্যানারের উচ্চতা অভিন্ন রাখুন (Uniform Height Lock)
+            </label>
+            {carouselDraft.lockUniformDimensions !== false && (
+              <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                <label className="inline-flex items-center gap-1 font-semibold">
+                  ডেস্কটপ (px):
+                  <input
+                    type="number"
+                    min={240}
+                    max={560}
+                    step={4}
+                    value={carouselDraft.uniformDesktopHeightPx ?? 336}
+                    onChange={(e) =>
+                      setCarouselDraft({
+                        ...carouselDraft,
+                        uniformDesktopHeightPx: Math.min(560, Math.max(240, Number(e.target.value) || 336)),
+                      })
+                    }
+                    className="w-16 rounded-lg border border-border bg-background px-2 py-0.5 text-center font-mono text-xs"
+                  />
+                </label>
+                <label className="inline-flex items-center gap-1 font-semibold">
+                  ট্যাবলেট (px):
+                  <input
+                    type="number"
+                    min={240}
+                    max={520}
+                    step={4}
+                    value={carouselDraft.uniformTabletHeightPx ?? 324}
+                    onChange={(e) =>
+                      setCarouselDraft({
+                        ...carouselDraft,
+                        uniformTabletHeightPx: Math.min(520, Math.max(240, Number(e.target.value) || 324)),
+                      })
+                    }
+                    className="w-16 rounded-lg border border-border bg-background px-2 py-0.5 text-center font-mono text-xs"
+                  />
+                </label>
+                <label className="inline-flex items-center gap-1 font-semibold">
+                  মোবাইল (px):
+                  <input
+                    type="number"
+                    min={240}
+                    max={480}
+                    step={4}
+                    value={carouselDraft.uniformMobileHeightPx ?? 308}
+                    onChange={(e) =>
+                      setCarouselDraft({
+                        ...carouselDraft,
+                        uniformMobileHeightPx: Math.min(480, Math.max(240, Number(e.target.value) || 308)),
+                      })
+                    }
+                    className="w-16 rounded-lg border border-border bg-background px-2 py-0.5 text-center font-mono text-xs"
+                  />
+                </label>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1460,10 +1539,16 @@ export function HeroBannerManager() {
               style={{
                 height: `${
                   previewDevice === "mobile"
-                    ? draft.mobileHeightPx ?? 308
+                    ? carouselDraft.lockUniformDimensions !== false
+                      ? carouselDraft.uniformMobileHeightPx ?? 308
+                      : draft.mobileHeightPx ?? 308
                     : previewDevice === "tablet"
-                      ? draft.tabletHeightPx ?? 324
-                      : draft.desktopHeightPx ?? 336
+                      ? carouselDraft.lockUniformDimensions !== false
+                        ? carouselDraft.uniformTabletHeightPx ?? 324
+                        : draft.tabletHeightPx ?? 324
+                      : carouselDraft.lockUniformDimensions !== false
+                        ? carouselDraft.uniformDesktopHeightPx ?? 336
+                        : draft.desktopHeightPx ?? 336
                 }px`,
                 background:
                   draft.backgroundMode === "solid"
@@ -2194,21 +2279,39 @@ export function HeroBannerManager() {
               </div>
             )}
 
-            <div>
-              <label className="text-[11px] font-semibold text-muted-foreground">ডেস্কটপ ফোকাল পজিশন</label>
-              <select
-                value={draft.imagePositionDesktop}
-                onChange={(e) =>
-                  setDraft({ ...draft, imagePositionDesktop: e.target.value as HeroImageFocalPosition })
-                }
-                className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-1.5 text-xs font-medium"
-              >
-                {FOCAL_POSITIONS.map((p) => (
-                  <option key={p.value} value={p.value}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div>
+                <label className="text-[11px] font-semibold text-muted-foreground">ডেস্কটপ ফোকাল পজিশন</label>
+                <select
+                  value={draft.imagePositionDesktop}
+                  onChange={(e) =>
+                    setDraft({ ...draft, imagePositionDesktop: e.target.value as HeroImageFocalPosition })
+                  }
+                  className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-1.5 text-xs font-medium"
+                >
+                  {FOCAL_POSITIONS.map((p) => (
+                    <option key={p.value} value={p.value}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-muted-foreground">ট্যাবলেট ফোকাল পজিশন</label>
+                <select
+                  value={draft.imagePositionTablet || draft.imagePositionDesktop}
+                  onChange={(e) =>
+                    setDraft({ ...draft, imagePositionTablet: e.target.value as HeroImageFocalPosition })
+                  }
+                  className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-1.5 text-xs font-medium"
+                >
+                  {FOCAL_POSITIONS.map((p) => (
+                    <option key={p.value} value={p.value}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 

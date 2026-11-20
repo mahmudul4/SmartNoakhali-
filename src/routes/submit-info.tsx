@@ -211,7 +211,7 @@ function SubmitInfo() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-3.5 pb-28 pt-4 sm:px-6">
+    <div className="w-full px-3.5 pb-28 pt-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
       <Link
         to="/"
         className="mb-3 inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"

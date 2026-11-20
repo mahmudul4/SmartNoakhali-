@@ -68,7 +68,7 @@ function AppDownloadPage() {
   };
 
   return (
-    <div className="mx-auto max-w-5xl px-3.5 pb-28 pt-4 sm:px-6">
+    <div className="w-full px-3.5 pb-28 pt-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
       {/* Top Nav */}
       <div className="mb-3 flex items-center justify-between">
         <Link

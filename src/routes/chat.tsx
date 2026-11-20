@@ -233,7 +233,14 @@ function ChatPage() {
     if (threadId && mode === "live") void markThreadRead(threadId, isStaff ? "staff" : "user");
   }, [threadId, mode, isStaff]);
 
-  const { items, send } = useThreadMessages(threadId);
+  const {
+    items,
+    loading: msgsLoading,
+    error: msgsError,
+    send,
+    retrySend,
+    refresh: refreshMsgs,
+  } = useThreadMessages(threadId);
   const [text, setText] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -428,7 +435,7 @@ function ChatPage() {
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100dvh-72px)] max-w-5xl flex-col px-3 pb-2 pt-3 sm:px-6">
+    <div className="flex h-[calc(100dvh-72px)] w-full flex-col px-3.5 pb-2 pt-3 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
       {/* Header bar */}
       <div className="mb-2.5 flex items-center justify-between">
         <Link to="/" className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground transition hover:text-foreground">
@@ -836,7 +843,25 @@ function ChatPage() {
         /* Live Chat Messages View */
         <>
           <div className="flex-1 space-y-2.5 overflow-y-auto rounded-2xl border border-border bg-card/50 p-3.5 shadow-inner">
-            {items.length === 0 && (
+            {msgsError && (
+              <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800">
+                <span>{msgsError}</span>
+                <button
+                  type="button"
+                  onClick={() => refreshMsgs()}
+                  className="rounded-lg bg-rose-600 px-2.5 py-1 text-[11px] font-bold text-white"
+                >
+                  আবার লোড করুন
+                </button>
+              </div>
+            )}
+            {msgsLoading && items.length === 0 && (
+              <div className="py-12 text-center text-muted-foreground space-y-2">
+                <Loader2 className="mx-auto h-6 w-6 animate-spin text-primary" />
+                <p className="text-xs">কথোপকথন লোড হচ্ছে...</p>
+              </div>
+            )}
+            {!msgsLoading && items.length === 0 && (
               <div className="py-12 text-center text-muted-foreground space-y-2">
                 <MessageCircle className="mx-auto h-8 w-8 text-primary/50" />
                 <p className="text-xs font-semibold">আপনার প্রথম বার্তা পাঠান</p>
@@ -907,7 +932,13 @@ function ChatPage() {
                             <span className="opacity-75 animate-pulse">পাঠানো হচ্ছে...</span>
                           )}
                           {m.status === "failed" && (
-                            <span className="text-red-300 font-bold">ব্যর্থ</span>
+                            <button
+                              type="button"
+                              onClick={() => void retrySend(m.id)}
+                              className="rounded bg-rose-600 px-1.5 py-0.5 text-[9px] font-bold text-white hover:bg-rose-700"
+                            >
+                              ব্যর্থ · পুনরায় পাঠান
+                            </button>
                           )}
                           {(!m.status || m.status === "sent") && (
                             <span className="text-gold font-bold">✓</span>

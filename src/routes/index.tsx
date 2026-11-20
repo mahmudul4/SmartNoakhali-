@@ -246,17 +246,31 @@ function HeroBannerSlide({
             />
           )}
           {desktopImg && !isSplitDesktop && (
-            <img
-              src={desktopImg}
-              alt={banner.headingLine1 || "Smart Noakhali"}
-              loading="eager"
-              decoding="sync"
-              draggable={false}
-              className={`pointer-events-none absolute inset-0 hidden h-full w-full select-none ${imgFitClass} md:block`}
-              style={{
-                objectPosition: banner.imagePositionDesktop || "center center",
-              }}
-            />
+            <>
+              <img
+                src={desktopImg}
+                alt={banner.headingLine1 || "Smart Noakhali"}
+                loading="eager"
+                decoding="sync"
+                draggable={false}
+                className={`pointer-events-none absolute inset-0 hidden h-full w-full select-none ${imgFitClass} md:block lg:hidden`}
+                style={{
+                  objectPosition:
+                    banner.imagePositionTablet || banner.imagePositionDesktop || "center center",
+                }}
+              />
+              <img
+                src={desktopImg}
+                alt={banner.headingLine1 || "Smart Noakhali"}
+                loading="eager"
+                decoding="sync"
+                draggable={false}
+                className={`pointer-events-none absolute inset-0 hidden h-full w-full select-none ${imgFitClass} lg:block`}
+                style={{
+                  objectPosition: banner.imagePositionDesktop || "center center",
+                }}
+              />
+            </>
           )}
           <div
             aria-hidden="true"
@@ -458,7 +472,10 @@ function HeroBannerSlide({
                   draggable={false}
                   className={`h-full w-full ${imgFitClass}`}
                   style={{
-                    objectPosition: banner.imagePositionDesktop || "center center",
+                    objectPosition:
+                      breakpoint === "tablet"
+                        ? banner.imagePositionTablet || banner.imagePositionDesktop || "center center"
+                        : banner.imagePositionDesktop || "center center",
                   }}
                 />
               </div>
@@ -572,7 +589,10 @@ function HeroBannerSlide({
                   draggable={false}
                   className={`h-full w-full ${imgFitClass}`}
                   style={{
-                    objectPosition: banner.imagePositionDesktop || "center center",
+                    objectPosition:
+                      breakpoint === "tablet"
+                        ? banner.imagePositionTablet || banner.imagePositionDesktop || "center center"
+                        : banner.imagePositionDesktop || "center center",
                   }}
                 />
               </div>
@@ -778,14 +798,28 @@ function Index() {
     ? "none"
     : carousel.transitionStyle || "slide";
 
+  const lockUniform = carousel.lockUniformDimensions !== false;
+  const baseBanner = displayBanners[0] || currentHeroBanner;
   const heroStageStyle = {
-    "--hero-h-mobile": `${currentHeroBanner?.mobileHeightPx || 308}px`,
-    "--hero-h-tablet": `${currentHeroBanner?.tabletHeightPx || 324}px`,
-    "--hero-h-desktop": `${currentHeroBanner?.desktopHeightPx || 336}px`,
+    "--hero-h-mobile": `${
+      lockUniform
+        ? carousel.uniformMobileHeightPx || baseBanner?.mobileHeightPx || 308
+        : currentHeroBanner?.mobileHeightPx || 308
+    }px`,
+    "--hero-h-tablet": `${
+      lockUniform
+        ? carousel.uniformTabletHeightPx || baseBanner?.tabletHeightPx || 324
+        : currentHeroBanner?.tabletHeightPx || 324
+    }px`,
+    "--hero-h-desktop": `${
+      lockUniform
+        ? carousel.uniformDesktopHeightPx || baseBanner?.desktopHeightPx || 336
+        : currentHeroBanner?.desktopHeightPx || 336
+    }px`,
   } as React.CSSProperties;
 
   return (
-    <div className="mx-auto w-full max-w-7xl overflow-x-hidden px-3.5 pb-28 pt-3 sm:px-6 sm:pt-5">
+    <div className="w-full overflow-x-hidden px-3.5 pb-28 pt-3 sm:px-6 sm:pt-5 lg:px-8 xl:px-10 2xl:px-12">
       {/* Optional Top Super Admin Announcement Strip */}
       {homepageConfig.announcement?.visible && homepageConfig.announcement.text.trim() && (
         <HeroActionLink
@@ -1136,7 +1170,7 @@ function DivisionHorizontalSection({
         ref={scrollRef}
         className={`grid grid-flow-col ${
           items.length === 1 ? "grid-rows-1" : "grid-rows-2"
-        } auto-cols-[80px] min-[360px]:auto-cols-[86px] sm:auto-cols-[106px] md:auto-cols-[114px] gap-2 sm:gap-2.5 lg:grid-flow-row lg:grid-rows-none lg:grid-cols-6 xl:grid-cols-7 lg:auto-cols-auto lg:gap-3.5 overflow-x-auto lg:overflow-visible overscroll-x-contain touch-pan-x touch-pan-y scroll-smooth pb-1 scrollbar-none`}
+        } auto-cols-[80px] min-[360px]:auto-cols-[86px] sm:auto-cols-[106px] md:auto-cols-[114px] gap-2 sm:gap-2.5 lg:grid-flow-row lg:grid-rows-none lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 lg:auto-cols-auto lg:gap-3.5 overflow-x-auto lg:overflow-visible overscroll-x-contain touch-pan-x touch-pan-y scroll-smooth pb-1 scrollbar-none`}
       >
         {items.map((cat) => (
           <ServiceCategoryCard key={cat.slug} category={cat} />

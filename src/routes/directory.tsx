@@ -162,7 +162,7 @@ function DirectoryPage() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-7xl overflow-x-hidden px-3.5 pb-24 pt-4 sm:px-6">
+    <div className="w-full overflow-x-hidden px-3.5 pb-24 pt-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
       {/* Header Banner */}
       <section className="relative overflow-hidden rounded-3xl bg-gradient-hero p-5 text-primary-foreground shadow-elevated">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -284,7 +284,7 @@ function DirectoryPage() {
           </button>
         </div>
       ) : (
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {filtered.map((inst) => (
             <div
               key={inst.id}

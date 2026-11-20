@@ -14,7 +14,7 @@ const links = [
 
 function BoardResult() {
   return (
-    <div className="mx-auto max-w-5xl px-3.5 pb-24 pt-4 sm:px-6">
+    <div className="w-full px-3.5 pb-24 pt-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
       <Link to="/" className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground"><ArrowLeft className="h-4 w-4" /> হোম</Link>
       <div className="mb-4 flex items-center gap-3 rounded-2xl bg-gradient-card p-4 shadow-card">
         <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary"><FileText className="h-6 w-6" /></div>

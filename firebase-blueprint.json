@@ -749,6 +749,11 @@
           "maxLength": 300000,
           "description": "Optional image or audio attachment URL/data URL."
         },
+        "assigned_to_uid": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Assigned operator UID copied from thread for least-privilege message queries."
+        },
         "staff_uids": { "type": "array" },
         "createdAt": {
           "type": "string",

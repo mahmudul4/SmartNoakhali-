@@ -174,7 +174,7 @@ function CareerPage() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-7xl overflow-x-hidden px-3.5 pb-24 pt-4 sm:px-6">
+    <div className="w-full overflow-x-hidden px-3.5 pb-24 pt-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
       {/* Hero Header */}
       <section className="relative overflow-hidden rounded-3xl bg-gradient-hero p-5 text-primary-foreground shadow-elevated">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -306,7 +306,7 @@ function CareerPage() {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2 xl:grid-cols-3">
               {filteredJobs.map((job) => {
                 const typeMeta = JOB_TYPE_LABELS[job.job_type] || JOB_TYPE_LABELS.private;
                 const isSaved = isFavorite(job.id);
@@ -421,7 +421,7 @@ function CareerPage() {
               বিশ্ববিদ্যালয়, কলেজ, পলিটেকনিক ও মাদ্রাসার তালিকা ও ভর্তি বিষয়ক তথ্য।
             </p>
 
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {[
                 {
                   name: "নোয়াখালী বিজ্ঞান ও প্রযুক্তি বিশ্ববিদ্যালয় (NSTU)",

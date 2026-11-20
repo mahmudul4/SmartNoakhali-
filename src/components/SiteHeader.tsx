@@ -57,7 +57,7 @@ export function SiteHeader() {
   return (
     <>
       <header className="sticky top-0 z-40 w-full max-w-[100vw] overflow-x-hidden border-t-2 border-amber-400/80 border-b border-emerald-200/15 bg-[#063924]/[0.97] text-white shadow-[0_6px_24px_-10px_rgba(4,35,22,0.5)] backdrop-blur-md">
-        <div className="mx-auto flex w-full max-w-7xl min-w-0 items-center justify-between gap-2 px-3 py-2 sm:gap-4 sm:px-6 sm:py-2.5 lg:gap-6">
+        <div className="flex w-full min-w-0 items-center justify-between gap-2 px-3.5 py-2 sm:gap-4 sm:px-6 sm:py-2.5 lg:gap-6 lg:px-8 xl:px-10 2xl:px-12">
           <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3 lg:flex-none">
             <Sheet open={open} onOpenChange={setOpen}>
               <SheetTrigger

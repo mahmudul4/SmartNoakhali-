@@ -287,7 +287,7 @@ function DonationPage() {
   }, [approvedDonations, donorCategoryFilter, donorSearch]);
 
   return (
-    <div className="mx-auto max-w-6xl px-4 pb-24 pt-4 sm:px-6">
+    <div className="w-full px-3.5 pb-24 pt-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
       {/* Top Breadcrumb & Admin Quick Action */}
       <div className="mb-3 flex items-center justify-between">
         <Link
@@ -607,7 +607,7 @@ function DonationPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
               {DONATION_CATEGORIES_CONFIG.filter((c) => c.group === "main").map((cat) => {
                 const stat = categoryStats[cat.key] || { collected: 0, donorCount: 0 };
                 const goal = cat.suggestedGoal || 300000;

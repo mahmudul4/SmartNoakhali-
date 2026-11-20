@@ -575,63 +575,107 @@ service cloud.firestore {
     // =========================================================
     // 14. /chat_threads/{threadId} & Subcollection /messages
     // =========================================================
+    function isChatThreadCustomer(data) {
+      return isSignedIn() && (
+        data.user_id == request.auth.uid ||
+        ('customer_uid' in data && data.customer_uid == request.auth.uid)
+      );
+    }
+
+    function isChatThreadListedStaff(data) {
+      return isSignedIn() && (
+        ('assigned_to_uid' in data && data.assigned_to_uid == request.auth.uid) ||
+        ('staff_uids' in data && data.staff_uids is list && request.auth.uid in data.staff_uids)
+      );
+    }
+
+    function isValidChatThreadWrite(data) {
+      return data.user_id is string && data.user_id.size() >= 1 && data.user_id.size() <= 128 &&
+        (!('customer_uid' in data) || (data.customer_uid is string && data.customer_uid.size() <= 128)) &&
+        (!('user_name' in data) || (data.user_name is string && data.user_name.size() <= 150)) &&
+        (!('user_email' in data) || (data.user_email is string && data.user_email.size() <= 254)) &&
+        (!('last_message_at' in data) || (data.last_message_at is string && data.last_message_at.size() <= 64)) &&
+        (!('last_message_preview' in data) || (data.last_message_preview is string && data.last_message_preview.size() <= 300)) &&
+        (!('assigned_to_uid' in data) || (data.assigned_to_uid is string && data.assigned_to_uid.size() <= 128)) &&
+        (!('assigned_to_name' in data) || (data.assigned_to_name is string && data.assigned_to_name.size() <= 150)) &&
+        (!('assigned_role' in data) || (data.assigned_role is string && data.assigned_role.size() <= 120)) &&
+        (!('handoff_summary' in data) || (data.handoff_summary is string && data.handoff_summary.size() <= 1000)) &&
+        (!('staff_uids' in data) || (data.staff_uids is list && data.staff_uids.size() <= 50));
+    }
+
+    function isValidChatMessageCreate(threadId, data) {
+      return data.keys().hasAll(['thread_id', 'sender_id', 'sender_role', 'body', 'attachment_url', 'createdAt']) &&
+        data.thread_id == threadId &&
+        data.sender_id == request.auth.uid &&
+        data.sender_role is string && (data.sender_role == 'user' || data.sender_role == 'staff') &&
+        data.body is string && data.body.size() <= 2000 &&
+        data.attachment_url is string && data.attachment_url.size() <= 300000 &&
+        (!('customer_uid' in data) || (data.customer_uid is string && data.customer_uid.size() <= 128)) &&
+        (!('assigned_to_uid' in data) || (data.assigned_to_uid is string && data.assigned_to_uid.size() <= 128)) &&
+        (!('sender_name' in data) || (data.sender_name is string && data.sender_name.size() <= 150)) &&
+        (!('sender_photo' in data) || (data.sender_photo is string && data.sender_photo.size() <= 300000)) &&
+        (!('sender_role_label' in data) || (data.sender_role_label is string && data.sender_role_label.size() <= 120)) &&
+        (!('staff_uids' in data) || (data.staff_uids is list && data.staff_uids.size() <= 50)) &&
+        data.createdAt == request.time;
+    }
+
     match /chat_threads/{threadId} {
       allow get: if isValidId(threadId) && (
         (resource == null && isSignedIn()) ||
-        (isSignedIn() && (existing().user_id == request.auth.uid || ('customer_uid' in existing() && existing().customer_uid == request.auth.uid))) ||
-        (isSignedIn() && 'staff_uids' in existing() && existing().staff_uids is list && request.auth.uid in existing().staff_uids) ||
-        (isSignedIn() && 'assigned_to_uid' in existing() && existing().assigned_to_uid == request.auth.uid) ||
+        isChatThreadCustomer(existing()) ||
+        isChatThreadListedStaff(existing()) ||
         isEditor()
       );
       allow list: if isMainAdmin() ||
         isBootstrappedOrdinaryAdmin() ||
         (isSignedIn() && existing().user_id == request.auth.uid) ||
         (isSignedIn() && 'customer_uid' in existing() && existing().customer_uid == request.auth.uid) ||
-        (isSignedIn() && 'staff_uids' in existing() && existing().staff_uids is list && request.auth.uid in existing().staff_uids) ||
-        (isSignedIn() && 'assigned_to_uid' in existing() && existing().assigned_to_uid == request.auth.uid);
+        (isSignedIn() && 'assigned_to_uid' in existing() && existing().assigned_to_uid == request.auth.uid) ||
+        (isSignedIn() && 'staff_uids' in existing() && existing().staff_uids is list && request.auth.uid in existing().staff_uids);
       allow create: if isValidId(threadId) && isSignedIn() &&
-        incoming().user_id is string && (
+        isValidChatThreadWrite(incoming()) && (
           incoming().user_id == request.auth.uid ||
           ('customer_uid' in incoming() && incoming().customer_uid == request.auth.uid) ||
           isEditor()
-        ) &&
-        (!('staff_uids' in incoming()) || (incoming().staff_uids is list && incoming().staff_uids.size() <= 50));
-      allow update: if isValidId(threadId) && isSignedIn() && (
-        (
-          (existing().user_id == request.auth.uid || ('customer_uid' in existing() && existing().customer_uid == request.auth.uid)) &&
-          incoming().user_id == existing().user_id
-        ) ||
-        ('staff_uids' in existing() && existing().staff_uids is list && request.auth.uid in existing().staff_uids) ||
-        ('assigned_to_uid' in existing() && existing().assigned_to_uid == request.auth.uid) ||
-        isEditor()
-      );
+        );
+      allow update: if isValidId(threadId) && isSignedIn() &&
+        isValidChatThreadWrite(incoming()) && (
+          isMainAdmin() ||
+          (
+            isChatThreadCustomer(existing()) &&
+            incoming().user_id == existing().user_id
+          ) ||
+          (
+            (isChatThreadListedStaff(existing()) || isEditor()) &&
+            incoming().user_id == existing().user_id
+          )
+        );
       allow delete: if isValidId(threadId) && isMainAdmin();
 
       match /messages/{messageId} {
         allow get: if isValidId(threadId) && isValidId(messageId) && (
-          (isSignedIn() && (
-            get(/databases/$(database)/documents/chat_threads/$(threadId)).data.user_id == request.auth.uid ||
-            ('customer_uid' in get(/databases/$(database)/documents/chat_threads/$(threadId)).data && get(/databases/$(database)/documents/chat_threads/$(threadId)).data.customer_uid == request.auth.uid)
-          )) ||
-          (isSignedIn() && 'staff_uids' in get(/databases/$(database)/documents/chat_threads/$(threadId)).data && get(/databases/$(database)/documents/chat_threads/$(threadId)).data.staff_uids is list && request.auth.uid in get(/databases/$(database)/documents/chat_threads/$(threadId)).data.staff_uids) ||
+          isChatThreadCustomer(get(/databases/$(database)/documents/chat_threads/$(threadId)).data) ||
+          isChatThreadListedStaff(get(/databases/$(database)/documents/chat_threads/$(threadId)).data) ||
           isEditor()
         );
         allow list: if isMainAdmin() ||
           isBootstrappedOrdinaryAdmin() ||
           (isSignedIn() && existing().thread_id == request.auth.uid) ||
           (isSignedIn() && 'customer_uid' in existing() && existing().customer_uid == request.auth.uid) ||
+          (isSignedIn() && 'assigned_to_uid' in existing() && existing().assigned_to_uid == request.auth.uid) ||
           (isSignedIn() && 'staff_uids' in existing() && existing().staff_uids is list && request.auth.uid in existing().staff_uids);
         allow create: if isValidId(threadId) && isValidId(messageId) && isSignedIn() &&
-          incoming().thread_id == threadId &&
-          incoming().sender_id == request.auth.uid && (
-            get(/databases/$(database)/documents/chat_threads/$(threadId)).data.user_id == request.auth.uid ||
-            ('customer_uid' in get(/databases/$(database)/documents/chat_threads/$(threadId)).data && get(/databases/$(database)/documents/chat_threads/$(threadId)).data.customer_uid == request.auth.uid) ||
-            ('staff_uids' in get(/databases/$(database)/documents/chat_threads/$(threadId)).data && get(/databases/$(database)/documents/chat_threads/$(threadId)).data.staff_uids is list && request.auth.uid in get(/databases/$(database)/documents/chat_threads/$(threadId)).data.staff_uids) ||
+          isValidChatMessageCreate(threadId, incoming()) && (
+            isChatThreadCustomer(get(/databases/$(database)/documents/chat_threads/$(threadId)).data) ||
+            isChatThreadListedStaff(get(/databases/$(database)/documents/chat_threads/$(threadId)).data) ||
             isEditor()
           );
-        allow update: if isValidId(threadId) && isValidId(messageId) && isMainAdmin() &&
-          incoming().diff(existing()).affectedKeys().hasOnly(['staff_uids']) &&
-          incoming().staff_uids is list && incoming().staff_uids.size() <= 50;
+        allow update: if isValidId(threadId) && isValidId(messageId) &&
+          (isMainAdmin() || isEditor()) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['staff_uids', 'assigned_to_uid', 'customer_uid']) &&
+          (!('staff_uids' in incoming()) || (incoming().staff_uids is list && incoming().staff_uids.size() <= 50)) &&
+          (!('assigned_to_uid' in incoming()) || (incoming().assigned_to_uid is string && incoming().assigned_to_uid.size() <= 128)) &&
+          (!('customer_uid' in incoming()) || (incoming().customer_uid is string && incoming().customer_uid.size() <= 128));
         allow delete: if isValidId(threadId) && isValidId(messageId) && isMainAdmin();
       }
     }

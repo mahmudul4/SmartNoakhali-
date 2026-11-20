@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 import {
   MessageCircle,
   X,
@@ -198,9 +198,16 @@ export function FloatingLiveChat() {
     }
   }, [user, effectiveThreadId]);
 
-  const { items, send } = useThreadMessages(
-    open && chatMode === "live" ? threadId : null
-  );
+  const {
+    items,
+    loading: msgsLoading,
+    error: msgsError,
+    send,
+    retrySend,
+    refresh: refreshMsgs,
+  } = useThreadMessages(open && chatMode === "live" ? threadId : null);
+
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
 
   useEffect(() => {
     if (open && chatMode === "live" && threadId) {
@@ -372,11 +379,14 @@ export function FloatingLiveChat() {
 
   const activeThreadRow = threadsHook.items.find((t) => t.id === threadId);
 
+  const myStaffProfile = isStaff ? getStaffProfile(user?.id) || getStaffProfile(user?.email) : null;
+
   const userMeta = {
     user_name: effectiveSenderName,
     user_email: isStaff && isMainAdmin ? undefined : user?.email || undefined,
     user_phone: isStaff && isMainAdmin ? undefined : user?.phone || guestPhone || undefined,
     sender_name: effectiveSenderName,
+    sender_photo: isStaff ? myStaffProfile?.photo_url || logo : undefined,
     sender_role_label: senderRoleLabel,
   };
 
@@ -430,6 +440,10 @@ export function FloatingLiveChat() {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (pathname.startsWith("/mdmahmudulhashan") || pathname.startsWith("/chat")) {
+    return null;
   }
 
   return (
@@ -815,7 +829,25 @@ export function FloatingLiveChat() {
                 </div>
               )}
               <div className="flex-1 space-y-2.5 overflow-y-auto bg-background/60 p-3">
-                {items.length === 0 && (
+                {msgsError && (
+                  <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-800">
+                    <span>{msgsError}</span>
+                    <button
+                      type="button"
+                      onClick={() => refreshMsgs()}
+                      className="rounded-lg bg-rose-600 px-2 py-0.5 text-[10px] font-bold text-white"
+                    >
+                      পুনরায় লোড
+                    </button>
+                  </div>
+                )}
+                {msgsLoading && items.length === 0 && (
+                  <div className="py-8 text-center text-xs text-muted-foreground">
+                    <Loader2 className="mx-auto mb-1.5 h-5 w-5 animate-spin text-primary" />
+                    বার্তা লোড হচ্ছে...
+                  </div>
+                )}
+                {!msgsLoading && items.length === 0 && (
                   <div className="rounded-2xl border border-dashed border-border bg-card/80 p-5 text-center text-xs text-muted-foreground">
                     আপনার যেকোনো প্রশ্ন বা জরুরী তথ্যের জন্য বার্তা লিখুন — এডমিন/মডারেটর উত্তর দিলে তার নাম ও ছবি এখানে দেখতে পাবেন।
                   </div>
@@ -889,7 +921,13 @@ export function FloatingLiveChat() {
                                 <span className="opacity-75 animate-pulse">পাঠানো হচ্ছে...</span>
                               )}
                               {m.status === "failed" && (
-                                <span className="text-red-300 font-bold">ব্যর্থ</span>
+                                <button
+                                  type="button"
+                                  onClick={() => void retrySend(m.id)}
+                                  className="inline-flex items-center gap-1 rounded bg-rose-600 px-1.5 py-0.5 text-[9px] font-bold text-white hover:bg-rose-700"
+                                >
+                                  ব্যর্থ · পুনরায় পাঠান
+                                </button>
                               )}
                               {(!m.status || m.status === "sent") && (
                                 <span className="text-gold font-bold">✓</span>

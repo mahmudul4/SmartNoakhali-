@@ -791,6 +791,9 @@ export function useRolePermissions() {
         } catch {}
         setPayload(sanitized);
         await upsertSettingDoc(ROLE_PERMISSIONS_CONFIG_ID, serialized);
+        void import("@/lib/admin-client")
+          .then((m) => m.syncChatOperatorUidsSetting())
+          .catch(() => {});
         return sanitized;
       } finally {
         setSaving(false);
