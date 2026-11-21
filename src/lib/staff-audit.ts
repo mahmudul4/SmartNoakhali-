@@ -556,7 +556,7 @@ export async function restoreDeletedAuditItem(
       } else if (col === "emergency_banners") {
         await setDoc(doc(db, "emergency_banners", id), {
           author_id: uid,
-          title: sanitizeString(String(snap.title || "জরুরী রক্তের প্রয়োজন"), 150, "জরুরী রক্তের প্রয়োজন"),
+          title: sanitizeString(String(snap.title || "জরুরি রক্তের প্রয়োজন"), 150, "জরুরি রক্তের প্রয়োজন"),
           message: sanitizeString(String(snap.message || entry.target_title), 1000, "বার্তা"),
           blood_group: sanitizeString(String(snap.blood_group || ""), 10, ""),
           hospital: sanitizeString(String(snap.hospital || ""), 200, ""),

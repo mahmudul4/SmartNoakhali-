@@ -2800,12 +2800,12 @@ export interface SiteMetaConfig {
 
 export const DEFAULT_SITE_META: SiteMetaConfig = {
   siteTitle: "স্মার্ট নোয়াখালী",
-  tagline: "নোয়াখালী জেলার সকল জরুরী সেবা ও তথ্যের ডিজিটাল প্ল্যাটফর্ম",
+  tagline: "নোয়াখালী জেলার সকল জরুরি সেবা ও তথ্যের ডিজিটাল প্ল্যাটফর্ম",
   helplinePhone: "01850999178",
   contactPhone: "01850999178",
   contactEmail: "e.smartnoakhali@gmail.com",
   contactAddress: "কালাসর্দ্দা, গোবিন্দপুর, কুতুবের হাট-৩৮৬২, নবীপুর, সেনবাগ, নোয়াখালী, বাংলাদেশ।",
-  emergencyNotice: "জরুরী রক্ত বা যেকোনো তথ্যের জন্য নিচের লাইভ চ্যাট বা এআই সহকারী ব্যবহার করুন।",
+  emergencyNotice: "জরুরি রক্ত বা যেকোনো তথ্যের জন্য নিচের লাইভ চ্যাট বা সহায়তা ব্যবহার করুন।",
   aiChatEnabled: true,
   aiWelcomeMessage:
     "আসসালামু আলাইকুম! আমি স্মার্ট নোয়াখালী এআই সহকারী। ডাক্তার, হাসপাতাল, অ্যাম্বুলেন্স, ফায়ার সার্ভিস, রক্তদাতা বা যেকোনো নাম্বার খুঁজতে আমাকে প্রশ্ন করুন!",
@@ -2921,8 +2921,8 @@ export const DEFAULT_SERVICES_CONFIG: ServicesConfig = {
   services: [
     {
       id: "srv_emergency_directory",
-      title: "জরুরী যোগাযোগ ডিরেক্টরি",
-      description: "এলাকার সকল জরুরী সেবার নম্বর (আইনজীবী, ডাক্তার, পুলিশ, ফায়ার সার্ভিস) এক জায়গায় রাখা ও তাৎক্ষণিক কল করার সুবিধা।",
+      title: "জরুরি যোগাযোগ ডিরেক্টরি",
+      description: "এলাকার সকল জরুরি সেবার নম্বর (আইনজীবী, ডাক্তার, পুলিশ, ফায়ার সার্ভিস) এক জায়গায় রাখা ও তাৎক্ষণিক কল করার সুবিধা।",
       iconName: "PhoneCall",
       active: true,
       sort_order: 1,
@@ -2930,7 +2930,7 @@ export const DEFAULT_SERVICES_CONFIG: ServicesConfig = {
     {
       id: "srv_blood_donor_network",
       title: "স্বেচ্ছা রক্তদাতা নেটওয়ার্ক",
-      description: "রক্তদাতাদের সাথে দ্রুত যোগাযোগের সুযোগ ও জরুরী প্রয়োজনে রক্তের আবেদন প্রকাশের সার্বক্ষণিক সুবিধা।",
+      description: "রক্তদাতাদের সাথে দ্রুত যোগাযোগের সুযোগ ও জরুরি প্রয়োজনে রক্তের আবেদন প্রকাশের সার্বক্ষণিক সুবিধা।",
       iconName: "Droplet",
       active: true,
       sort_order: 2,
@@ -3217,7 +3217,7 @@ export interface HeroBannerConfig {
   secondaryButtonBgColor?: string;
   optionalButtonColor?: string;
   optionalButtonBgColor?: string;
-  borderRadius: "rounded-2xl" | "rounded-[26px]" | "rounded-3xl" | "rounded-[32px]";
+  borderRadius: "rounded-[12px]" | "rounded-2xl" | "rounded-[26px]" | "rounded-3xl" | "rounded-[32px]";
   showDecorativeGlow: boolean;
   updatedAt?: string;
 }
@@ -3297,45 +3297,44 @@ export const DEFAULT_HERO_BANNER_ITEM: HeroBannerItem = {
   tabletHeightPx: 324,
   mobileHeightPx: 308,
   visible: true,
-  badgeText: "নোয়াখালীর ডিজিটাল সিটিজেন প্ল্যাটফর্ম",
-  headingLine1: "এক ক্লিকে নোয়াখালীর",
-  headingLine2: "সকল সেবা ও যোগাযোগ",
-  description:
-    "২২টি বিভাগ • রক্তদাতা • ডাক্তার • আইনি সহায়তা • চাকরি • পরিবহন ও জরুরি হেল্পলাইন",
-  primaryButtonText: "জরুরী 999",
+  badgeText: "",
+  headingLine1: "নোয়াখালীর প্রয়োজনে, এক জায়গায়",
+  headingLine2: "",
+  description: "রক্ত, চিকিৎসা, আইনি সহায়তা ও জরুরি যোগাযোগ",
+  primaryButtonText: "জরুরি ৯৯৯",
   primaryButtonLink: "tel:999",
-  secondaryButtonText: "নতুন তথ্য দিন",
+  secondaryButtonText: "",
   secondaryButtonLink: "/submit-info",
   optionalButtonText: "",
   optionalButtonLink: "",
   optionalText: "",
-  optionalTextColor: "#fde68a",
-  backgroundMode: "gradient",
-  desktopImageUrl: "",
-  mobileImageUrl: "",
+  optionalTextColor: "#ffffff",
+  backgroundMode: "image",
+  desktopImageUrl: "/hero-noakhali.jpg",
+  mobileImageUrl: "/hero-noakhali.jpg",
   imagePositionDesktop: "center center",
   imagePositionTablet: "center center",
   imagePositionMobile: "center center",
-  overlayColor: "#042316",
-  overlayOpacity: 55,
-  solidColor: "#093f28",
-  gradientFrom: "#073622",
-  gradientVia: "#0d4d31",
-  gradientTo: "#146842",
+  overlayColor: "#0F4D3A",
+  overlayOpacity: 45,
+  solidColor: "#0F4D3A",
+  gradientFrom: "#0F4D3A",
+  gradientVia: "#0F4D3A",
+  gradientTo: "#0F4D3A",
   textColor: "#ffffff",
-  subtextColor: "#ecfdf5",
+  subtextColor: "#FAF7F2",
   badgeColor: "#ffffff",
   badgeBgColor: "rgba(255,255,255,0.14)",
   headingColor: "#ffffff",
-  descriptionColor: "#ecfdf5",
+  descriptionColor: "#FAF7F2",
   primaryButtonColor: "#ffffff",
-  primaryButtonBgColor: "#dc2626",
-  secondaryButtonColor: "#064e3b",
+  primaryButtonBgColor: "#C62828",
+  secondaryButtonColor: "#0F4D3A",
   secondaryButtonBgColor: "#ffffff",
   optionalButtonColor: "#ffffff",
   optionalButtonBgColor: "rgba(255,255,255,0.16)",
-  borderRadius: "rounded-[26px]",
-  showDecorativeGlow: true,
+  borderRadius: "rounded-[12px]",
+  showDecorativeGlow: false,
 };
 
 export const DEFAULT_HERO_BANNER_CONFIG: HeroBannerConfig = DEFAULT_HERO_BANNER_ITEM;
@@ -3388,7 +3387,7 @@ function normalizeHeroBannerItem(
       rawItem.imagePositionTablet || rawItem.imagePositionDesktop || "center center",
     imagePositionMobile: rawItem.imagePositionMobile || "center center",
     visible: rawItem.visible !== false,
-    showDecorativeGlow: rawItem.showDecorativeGlow !== false,
+    showDecorativeGlow: Boolean(rawItem.showDecorativeGlow),
     overlayOpacity:
       typeof rawItem.overlayOpacity === "number"
         ? Math.min(90, Math.max(0, rawItem.overlayOpacity))
@@ -4055,7 +4054,7 @@ export const DEFAULT_HOMEPAGE_CONFIG: HomepageConfig = {
   quickActions: [
     {
       id: "qa_emergency_blood",
-      label: "জরুরী রক্ত",
+      label: "জরুরি রক্ত",
       to: "/emergency-request",
       tone: "red",
       iconName: "ShieldAlert",
@@ -4063,18 +4062,10 @@ export const DEFAULT_HOMEPAGE_CONFIG: HomepageConfig = {
     },
     {
       id: "qa_blood_donor",
-      label: "রক্তদাতা",
+      label: "রক্তদাতা খুঁজুন",
       to: "/blood-donor",
-      tone: "rose",
-      iconName: "Droplet",
-      visible: true,
-    },
-    {
-      id: "qa_donation",
-      label: "অনুদান তহবিল",
-      to: "/donation",
       tone: "emerald",
-      iconName: "HandCoins",
+      iconName: "Droplet",
       visible: true,
     },
   ],
@@ -4256,21 +4247,21 @@ export interface WebsiteContentConfig {
 export const DEFAULT_WEBSITE_CONTENT_CONFIG: WebsiteContentConfig = {
   aboutMissionGoals: [
     "নোয়াখালী জেলার প্রতিটি উপজেলা ও ইউনিয়নের সঠিক যোগাযোগ তথ্য এক ক্লিকে প্রদান।",
-    "জরুরী প্রয়োজনে ২৪ ঘণ্টা স্বেচ্ছায় রক্তদাতাদের সাথে দ্রুত সংযোগ স্থাপন।",
-    "সব ধরণের সরকারি, বেসরকারি, আইনি ও জরুরি সেবা সম্পূর্ণ বিনামূল্যে পৌঁছে দেওয়া।",
-    "এলাকাবাসীর সহজ ব্যবহার ও সার্বক্ষণিক লাইভ চ্যাট ও এআই সহায়তা নিশ্চিত করা।",
+    "জরুরি প্রয়োজনে ২৪ ঘণ্টা স্বেচ্ছায় রক্তদাতাদের সাথে দ্রুত সংযোগ স্থাপন।",
+    "সব ধরনের সরকারি, বেসরকারি, আইনি ও জরুরি সেবা সম্পূর্ণ বিনামূল্যে পৌঁছে দেওয়া।",
+    "এলাকাবাসীর সহজ ব্যবহার ও সার্বক্ষণিক লাইভ চ্যাট ও সহায়তা নিশ্চিত করা।",
   ],
   faqItems: [
     {
       id: "faq_1",
       question: "স্মার্ট নোয়াখালী প্ল্যাটফর্মে নতুন তথ্য বা প্রতিষ্ঠান কীভাবে যোগ করবো?",
-      answer: "হোম পেজের 'নতুন তথ্য দিন' বা মেনু থেকে 'নতুন সেবা যোগ করুন' পেজে গিয়ে ফর্ম পূরণ করে জমা দিন। অনুমোদনের পর তা ডিরেক্টরিতে প্রকাশিত হবে।",
+      answer: "মেনু থেকে 'নতুন সেবা যোগ করুন' পেজে গিয়ে ফর্ম পূরণ করে জমা দিন। অনুমোদনের পর তা ডিরেক্টরিতে প্রকাশিত হবে।",
       visible: true,
     },
     {
       id: "faq_2",
-      question: "জরুরী রক্তের প্রয়োজনে কীভাবে রক্তদাতা খুঁজবো?",
-      answer: "হোম পেজ থেকে 'রক্তদাতা' বা 'জরুরী রক্ত' বাটনে ক্লিক করে রক্তের গ্রুপ ও উপজেলা অনুযায়ী সরাসরি রক্তদাতাদের সাথে যোগাযোগ করতে পারবেন।",
+      question: "জরুরি রক্তের প্রয়োজনে কীভাবে রক্তদাতা খুঁজবো?",
+      answer: "হোম পেজ থেকে 'রক্তদাতা খুঁজুন' বা 'জরুরি রক্ত' বাটনে ক্লিক করে রক্তের গ্রুপ ও উপজেলা অনুযায়ী সরাসরি রক্তদাতাদের সাথে যোগাযোগ করতে পারবেন।",
       visible: true,
     },
   ],
@@ -4428,7 +4419,7 @@ export const DEFAULT_AI_CHAT_CONFIG: AiChatConfig = {
       id: "ai_faq_1",
       question: "নোয়াখালী সদর / জেনারেল হাসপাতাল কোথায় ও যোগাযোগ নম্বর কী?",
       answer:
-        "২৫০ শয্যা বিশিষ্ট নোয়াখালী জেনারেল হাসপাতাল মাইজদী কোর্টে অবস্থিত। ওয়েবসাইটের 'স্বাস্থ্য ও চিকিৎসা' বিভাগের 'হাসপাতাল ও ক্লিনিক' ক্যাটাগরিতে অনুমোদিত সকল হাসপাতাল ও জরুরি নম্বর দেখতে পারবেন। জরুরি অ্যাম্বুলেন্স বা পুলিশের জন্য 999 কল করুন।",
+        "২৫০ শয্যা বিশিষ্ট নোয়াখালী জেনারেল হাসপাতাল মাইজদী কোর্টে অবস্থিত। ওয়েবসাইটের 'স্বাস্থ্য ও চিকিৎসা' বিভাগের 'হাসপাতাল ও ক্লিনিক' ক্যাটাগরিতে অনুমোদিত সকল হাসপাতাল ও জরুরি নম্বর দেখতে পারবেন। জরুরি অ্যাম্বুলেন্স বা পুলিশের জন্য ৯৯৯ কল করুন।",
       keywords: "হাসপাতাল,haspatal,hospital,maijdee,মাইজদী,জেনারেল হাসপাতাল",
       visible: true,
     },

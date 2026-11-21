@@ -51,72 +51,71 @@ export function SiteHeader() {
 
   return (
     <>
-      <header className="sticky top-0 z-40 w-full max-w-[100vw] overflow-x-hidden border-t-[3px] border-t-[#064e3b] border-b border-emerald-950/10 bg-white/[0.97] text-[#063924] shadow-[0_4px_20px_-8px_rgba(6,57,36,0.14)] backdrop-blur-md">
-        {/* Keyboard & Screen-Reader Accessible Skip / Drawer Controls (zero visual clutter) */}
-        <div className="sr-only focus-within:not-sr-only focus-within:flex focus-within:items-center focus-within:gap-3 focus-within:bg-emerald-950/[0.04] focus-within:px-4 focus-within:py-2 focus-within:border-b focus-within:border-emerald-950/10">
+      <header className="sticky top-0 z-40 w-full max-w-[100vw] overflow-x-hidden border-b border-[#E6E1D6] bg-[#FFFFFF] text-[#1C1C1C]">
+        {/* Keyboard & Screen-Reader Accessible Skip / Drawer Controls */}
+        <div className="sr-only focus-within:not-sr-only focus-within:flex focus-within:items-center focus-within:gap-3 focus-within:border-b focus-within:border-[#E6E1D6] focus-within:bg-[#FAF7F2] focus-within:px-4 focus-within:py-2">
           <a
             href="#main-content"
-            className="rounded-lg bg-[#064e3b] px-3 py-1.5 font-bangla text-xs font-semibold text-white outline-none focus-visible:ring-2 focus-visible:ring-[#064e3b]"
+            className="rounded-[8px] bg-[#0F4D3A] px-3 py-1.5 font-bangla text-xs font-semibold text-white outline-none focus-visible:ring-2 focus-visible:ring-[#0F4D3A]"
           >
             মূল কন্টেন্টে যান
           </a>
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="rounded-lg border border-[#064e3b]/30 bg-white px-3 py-1.5 font-bangla text-xs font-semibold text-[#064e3b] outline-none focus-visible:ring-2 focus-visible:ring-[#064e3b]"
+            className="rounded-[8px] border border-[#E6E1D6] bg-white px-3 py-1.5 font-bangla text-xs font-semibold text-[#0F4D3A] outline-none focus-visible:ring-2 focus-visible:ring-[#0F4D3A]"
           >
             সম্পূর্ণ নেভিগেশন মেনু খুলুন (Alt+M)
           </button>
         </div>
 
-        <div className="flex w-full min-w-0 items-center justify-between gap-2.5 px-3.5 py-2 sm:gap-4 sm:px-6 sm:py-2.5 lg:gap-6 lg:px-8 xl:px-10 2xl:px-12">
-          {/* Left: Official Circular Logo + Refined English & Bangla Brand Lockup */}
+        <div className="mx-auto flex w-full max-w-7xl min-w-0 items-center justify-between gap-2.5 px-4 py-2.5 sm:px-6 lg:px-8">
+          {/* Left: Official Circular Logo + Calm Civic Title */}
           <Link
             to="/"
-            className="group flex min-w-0 items-center gap-2.5 sm:gap-3 focus-visible:rounded-xl"
+            className="flex min-w-0 items-center gap-2.5 focus-visible:rounded-[10px]"
           >
-            <div className="relative flex h-10 w-10 shrink-0 items-center justify-center min-[360px]:h-11 min-[360px]:w-11 sm:h-12 sm:w-12 lg:h-[50px] lg:w-[50px]">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#E6E1D6] bg-white p-0.5 sm:h-11 sm:w-11">
               <img
                 src={logo}
-                alt="Smart Noakhali Logo"
+                alt="স্মার্ট নোয়াখালী লোগো"
                 loading="eager"
                 decoding="sync"
-                className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.03]"
+                className="h-full w-full object-contain"
               />
             </div>
             <div className="flex min-w-0 flex-col justify-center text-left">
-              <div className="flex items-baseline gap-1.5 whitespace-nowrap font-brand text-[17.5px] font-bold tracking-[-0.015em] leading-[1.12] min-[360px]:text-[19px] sm:text-[21px] lg:text-[23px]">
-                <span className="text-[#064e3b]">Smart</span>
-                <span className="text-[#b91c1c]">Noakhali</span>
-              </div>
-              <span className="mt-0.5 truncate font-bangla text-[11px] font-medium leading-[1.35] text-emerald-900/80 sm:text-[11.5px]">
+              <span className="truncate font-display text-[19px] font-bold leading-tight text-[#0F4D3A] sm:text-[21px]">
                 স্মার্ট নোয়াখালী
+              </span>
+              <span className="hidden truncate font-bangla text-[11px] font-medium leading-none text-[#5F5F5A] sm:block">
+                Smart Noakhali • নাগরিক সেবা
               </span>
             </div>
           </Link>
 
-          {/* Right Cluster: Desktop Navigation + Action Controls */}
-          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2.5 lg:gap-5">
+          {/* Right Cluster: Desktop Navigation + Action Controls (Mobile strictly 2 controls: Search + Profile) */}
+          <div className="flex shrink-0 items-center gap-2 lg:gap-5">
             <nav
               aria-label="প্রধান নেভিগেশন"
-              className="hidden lg:flex items-center gap-5 xl:gap-6 font-bangla text-[14px] font-semibold text-[#064e3b]"
+              className="hidden lg:flex items-center gap-5 font-bangla text-[14px] font-medium text-[#1C1C1C]"
             >
-              <Link to="/" className="whitespace-nowrap py-1 underline-offset-4 transition-colors hover:text-[#b91c1c] hover:underline">
+              <Link to="/" className="whitespace-nowrap py-1 transition-colors hover:text-[#0F4D3A]">
                 হোম
               </Link>
-              <Link to="/directory" className="whitespace-nowrap py-1 underline-offset-4 transition-colors hover:text-[#b91c1c] hover:underline">
+              <Link to="/directory" className="whitespace-nowrap py-1 transition-colors hover:text-[#0F4D3A]">
                 ডিরেক্টরি
               </Link>
-              <Link to="/blood-donor" className="whitespace-nowrap py-1 underline-offset-4 transition-colors hover:text-[#b91c1c] hover:underline">
+              <Link to="/blood-donor" className="whitespace-nowrap py-1 transition-colors hover:text-[#0F4D3A]">
                 রক্তদাতা
               </Link>
-              <Link to="/map" className="whitespace-nowrap py-1 underline-offset-4 transition-colors hover:text-[#b91c1c] hover:underline">
+              <Link to="/map" className="whitespace-nowrap py-1 transition-colors hover:text-[#0F4D3A]">
                 জেলা ম্যাপ
               </Link>
-              <Link to="/chat" className="whitespace-nowrap py-1 underline-offset-4 transition-colors hover:text-[#b91c1c] hover:underline">
+              <Link to="/chat" className="whitespace-nowrap py-1 transition-colors hover:text-[#0F4D3A]">
                 লাইভ চ্যাট
               </Link>
-              <Link to="/submit-info" className="whitespace-nowrap py-1 underline-offset-4 transition-colors hover:text-[#b91c1c] hover:underline">
+              <Link to="/submit-info" className="whitespace-nowrap py-1 transition-colors hover:text-[#0F4D3A]">
                 তথ্য দিন
               </Link>
               <button
@@ -125,68 +124,58 @@ export function SiteHeader() {
                 onClick={() => setOpen(true)}
                 aria-expanded={open}
                 aria-label="সকল সেবা ও বিভাগ ড্রয়ার খুলুন"
-                className="inline-flex items-center gap-1.5 whitespace-nowrap py-1 underline-offset-4 transition-colors hover:text-[#b91c1c] hover:underline"
+                className="inline-flex items-center gap-1.5 whitespace-nowrap py-1 transition-colors hover:text-[#0F4D3A]"
               >
-                <LayoutGrid className="h-3.5 w-3.5 shrink-0 opacity-80" />
+                <LayoutGrid className="h-4 w-4 shrink-0 text-[#0F4D3A]" strokeWidth={1.5} />
                 <span>সকল সেবা</span>
               </button>
             </nav>
 
-            <button
-              type="button"
-              onClick={() => setOpen(true)}
-              aria-expanded={open}
-              aria-label="সকল সেবা ও বিভাগ ড্রয়ার খুলুন"
-              className="hidden md:inline-flex lg:hidden items-center gap-1.5 whitespace-nowrap py-1 font-bangla text-[13.5px] font-semibold text-[#064e3b] underline-offset-4 transition-colors hover:text-[#b91c1c] hover:underline"
-            >
-              <LayoutGrid className="h-3.5 w-3.5 shrink-0 opacity-80" />
-              <span>সকল সেবা</span>
-            </button>
-
-            <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-              <button
-                type="button"
-                onClick={() => setSearchOpen(true)}
-                aria-label="স্মার্ট সার্চ"
-                className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-950/15 bg-emerald-950/[0.04] font-bangla text-xs font-semibold text-[#064e3b] transition-colors hover:bg-emerald-950/[0.09] active:scale-95 sm:h-9 sm:w-auto sm:gap-1.5 sm:px-3"
-                title="স্মার্ট সার্চ (Ctrl+K)"
-              >
-                <Search className="h-4 w-4 text-[#064e3b]" />
-                <span className="hidden sm:inline">সার্চ</span>
-                <kbd className="hidden xl:inline-block rounded border border-emerald-950/15 bg-white px-1.5 py-0.5 font-mono text-[10px] font-semibold text-emerald-900/75">
-                  ⌘K
-                </kbd>
-              </button>
-
+            <div className="flex shrink-0 items-center gap-2">
               {!isOnline && (
                 <span
-                  className="flex h-9 items-center gap-1 rounded-xl border border-amber-500/40 bg-amber-500/15 px-2 font-bangla text-[10.5px] font-bold text-amber-900"
+                  className="hidden lg:inline-flex h-10 items-center gap-1 rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-2.5 font-bangla text-xs font-medium text-[#5F5F5A]"
                   title="অফলাইন মোড সক্রিয়"
                 >
-                  <WifiOff className="h-3.5 w-3.5 shrink-0" />
-                  <span className="hidden sm:inline">অফলাইন</span>
+                  <WifiOff className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} />
+                  <span>অফলাইন</span>
                 </span>
               )}
 
-              <NotificationBell />
+              {/* Control 1 (Always Visible): Search */}
+              <button
+                type="button"
+                onClick={() => setSearchOpen(true)}
+                aria-label="অনুসন্ধান"
+                className="flex h-11 w-11 items-center justify-center rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] font-bangla text-xs font-medium text-[#1C1C1C] transition-colors hover:border-[#0F4D3A] hover:text-[#0F4D3A] lg:h-10 lg:w-auto lg:gap-1.5 lg:px-3"
+                title="অনুসন্ধান (Ctrl+K)"
+              >
+                <Search className="h-[18px] w-[18px] text-[#0F4D3A]" strokeWidth={1.5} />
+                <span className="hidden lg:inline">অনুসন্ধান</span>
+              </button>
 
-              {isAuthed && (isMainAdmin || isStaff) && (
-                <Link
-                  to="/mdmahmudulhashan"
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#b91c1c]/25 bg-[#b91c1c]/[0.07] font-bangla text-xs font-bold text-[#991b1b] transition-colors hover:bg-[#b91c1c]/[0.14] sm:h-9 sm:w-auto sm:gap-1.5 sm:px-3"
-                  title="সিকিউরিটি / এডমিন ড্যাশবোর্ড"
-                  aria-label="সিকিউরিটি ড্যাশবোর্ড"
-                >
-                  <ShieldCheck className="h-4 w-4 shrink-0 text-[#b91c1c]" />
-                  <span className="hidden md:inline">ড্যাশবোর্ড</span>
-                </Link>
-              )}
+              {/* Desktop-only Notifications & Admin Dashboard (available in Navigation Drawer on mobile) */}
+              <div className="hidden lg:flex items-center gap-2">
+                <NotificationBell />
+                {isAuthed && (isMainAdmin || isStaff) && (
+                  <Link
+                    to="/mdmahmudulhashan"
+                    className="inline-flex h-10 items-center gap-1.5 rounded-[10px] border border-[#C62828]/30 bg-white px-3 font-bangla text-xs font-semibold text-[#C62828] transition-colors hover:bg-[#FAF7F2]"
+                    title="এডমিন ড্যাশবোর্ড"
+                    aria-label="এডমিন ড্যাশবোর্ড"
+                  >
+                    <ShieldCheck className="h-4 w-4 shrink-0" strokeWidth={1.5} />
+                    <span>ড্যাশবোর্ড</span>
+                  </Link>
+                )}
+              </div>
 
+              {/* Control 2 (Always Visible): Profile */}
               <Link
                 to="/profile"
                 aria-label={isAuthed && user?.displayName ? `${user.displayName} — আমার প্রোফাইল` : "আমার প্রোফাইল"}
                 title={isAuthed && user?.displayName ? `${user.displayName} — আমার প্রোফাইল` : "আমার প্রোফাইল"}
-                className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#064e3b]/30 bg-emerald-950/[0.06] text-[#064e3b] shadow-2xs transition hover:border-[#b91c1c] active:scale-95 sm:h-9 sm:w-9"
+                className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#E6E1D6] bg-[#FAF7F2] text-[#0F4D3A] transition-colors hover:border-[#0F4D3A] lg:h-10 lg:w-10"
               >
                 {isAuthed && user?.photoURL && !avatarError ? (
                   <img
@@ -196,7 +185,7 @@ export function SiteHeader() {
                     className="h-full w-full object-cover"
                   />
                 ) : (
-                  <UserIcon className="h-4 w-4 text-[#064e3b]" />
+                  <UserIcon className="h-[18px] w-[18px] text-[#0F4D3A]" strokeWidth={1.5} />
                 )}
               </Link>
             </div>
@@ -241,20 +230,20 @@ export function MobileSearch({
 }) {
   return (
     <div className="relative w-full min-w-0">
-      <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#5F5F5A]" strokeWidth={1.5} />
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder ?? "অনুসন্ধান করুন..."}
-        className="w-full min-w-0 rounded-2xl border border-border bg-card py-3 pl-10 pr-20 text-sm shadow-card outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+        className="w-full min-w-0 rounded-[12px] border border-[#E6E1D6] bg-white py-3 pl-10 pr-24 text-sm text-[#1C1C1C] placeholder:text-[#5F5F5A] outline-none transition focus:border-[#0F4D3A] focus:ring-2 focus:ring-[#0F4D3A]/15"
       />
       {onOpenDialog && (
         <button
           type="button"
           onClick={onOpenDialog}
-          className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 rounded-xl bg-primary/10 px-2.5 py-1.5 text-[11px] font-bold text-primary hover:bg-primary/20 transition active:scale-95"
+          className="absolute right-2 top-1/2 -translate-y-1/2 flex min-h-[34px] items-center gap-1 rounded-[8px] border border-[#E6E1D6] bg-[#FAF7F2] px-2.5 py-1 text-[11px] font-semibold text-[#0F4D3A] transition hover:border-[#0F4D3A]"
         >
-          <Search className="h-3 w-3" /> স্মার্ট সার্চ
+          <Search className="h-3 w-3" strokeWidth={1.5} /> খুঁজুন
         </button>
       )}
     </div>

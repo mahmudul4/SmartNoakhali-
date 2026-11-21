@@ -409,7 +409,7 @@ export function RolePermissionsManager() {
     {
       role: "moderator",
       label: "মোডারেটর (Moderator)",
-      desc: "জরুরী রক্তের আবেদন, নাগরিক সাবমিশন ও লাইভ চ্যাট সহায়তা",
+      desc: "জরুরি রক্তের আবেদন, নাগরিক সাবমিশন ও লাইভ চ্যাট সহায়তা",
       tone: "bg-amber-500/10 text-amber-700 border-amber-500/30",
     },
   ];

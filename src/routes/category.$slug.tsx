@@ -213,18 +213,18 @@ function CategoryPage() {
         )}
       </div>
 
-      <div className="mb-4 flex w-full min-w-0 items-center gap-3 overflow-hidden rounded-2xl bg-gradient-card p-3.5 shadow-card sm:p-4">
+      <div className="mb-4 flex w-full min-w-0 items-center gap-3 overflow-hidden rounded-[12px] border border-[#E6E1D6] bg-white p-3.5 sm:p-4">
         <CategoryIconBadge category={cat} size="lg" />
         <div className="min-w-0 flex-1">
-          <h1 className="truncate font-display text-lg font-bold text-primary-deep">{cat.bn}</h1>
-          <p className="truncate text-xs text-muted-foreground">{cat.description}</p>
+          <h1 className="truncate font-display text-lg font-bold text-[#1C1C1C]">{cat.bn}</h1>
+          <p className="truncate text-xs text-[#5F5F5A]">{cat.description}</p>
         </div>
       </div>
 
       <Link
         to="/submit-info"
         onClick={() => { try { sessionStorage.setItem("submit-info:category", cat.slug); } catch { /* ignore */ } }}
-        className="mb-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-hero px-4 py-3 text-sm font-bold text-primary-foreground shadow-elevated transition active:scale-[0.98]"
+        className="mb-4 flex min-h-[48px] w-full items-center justify-center gap-2 rounded-[10px] bg-[#0F4D3A] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#0B3C2D] active:scale-[0.98]"
       >
         + নিবন্ধন করুন
       </Link>
@@ -349,9 +349,9 @@ function PersonCard({
   }, [l.body]);
 
   return (
-    <div className="group w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-border/60 bg-gradient-card p-3.5 shadow-card transition hover:shadow-elevated sm:p-4">
+    <div className="group w-full max-w-full min-w-0 overflow-hidden rounded-[12px] border border-[#E6E1D6] bg-white p-3.5 transition-colors hover:border-[#0F4D3A]/40 sm:p-4">
       <div className="flex w-full min-w-0 items-center justify-between gap-2.5 sm:gap-3">
-        <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/10 text-primary sm:h-12 sm:w-12">
+        <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#0F4D3A]/10 text-[#0F4D3A] sm:h-12 sm:w-12">
           {l.photo ? (
             <img
               src={l.photo}
@@ -365,15 +365,15 @@ function PersonCard({
             />
           ) : null}
           <div className={`person-photo-fallback flex h-full w-full items-center justify-center ${l.photo ? "hidden" : ""}`}>
-            <User className="h-5 w-5 sm:h-6 sm:w-6" />
+            <User className="h-5 w-5 sm:h-6 sm:w-6" strokeWidth={1.5} />
           </div>
         </div>
         <div className="min-w-0 flex-1 overflow-hidden">
-          <p className="truncate text-sm font-bold text-foreground sm:text-base">{l.name}</p>
-          {l.designation && <p className="truncate text-xs text-muted-foreground">{l.designation}</p>}
+          <p className="truncate text-sm font-bold text-[#1C1C1C] sm:text-base">{l.name}</p>
+          {l.designation && <p className="truncate text-xs text-[#5F5F5A]">{l.designation}</p>}
           {l.address && (
-            <p className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-              <MapPin className="h-3 w-3 shrink-0 text-primary" />
+            <p className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-[#5F5F5A]">
+              <MapPin className="h-3 w-3 shrink-0 text-[#0F4D3A]" strokeWidth={1.5} />
               <span className="truncate">{l.address}</span>
             </p>
           )}
@@ -382,9 +382,9 @@ function PersonCard({
           <a
             href={`tel:${l.phone}`}
             aria-label={`কল করুন ${l.name}`}
-            className="flex shrink-0 items-center gap-1.5 rounded-full bg-gradient-gold px-3.5 py-2 text-xs font-extrabold text-primary-deep shadow-gold transition active:scale-95"
+            className="flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-[10px] bg-[#0F4D3A] px-3.5 py-2 text-xs font-bold text-white transition hover:bg-[#0B3C2D] active:scale-95"
           >
-            <Phone className="h-3.5 w-3.5 shrink-0" />
+            <Phone className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} />
             <span>কল</span>
           </a>
         )}
@@ -457,9 +457,9 @@ function BloodCard({
   const days = daysAgo(l.lastDonation);
   const available = days === null || days >= 90;
   return (
-    <div className="w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-border/60 bg-gradient-card p-3.5 shadow-card sm:p-4">
+    <div className="w-full max-w-full min-w-0 overflow-hidden rounded-[12px] border border-[#E6E1D6] bg-white p-3.5 sm:p-4">
       <div className="flex w-full min-w-0 items-center justify-between gap-2.5 sm:gap-3">
-        <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-rose-500/10 text-rose-600 ring-2 ring-rose-500/20 sm:h-12 sm:w-12">
+        <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#C62828]/20 bg-[#C62828]/10 text-[#C62828] sm:h-12 sm:w-12">
           {l.photo ? (
             <img
               src={l.photo}
@@ -473,42 +473,42 @@ function BloodCard({
             />
           ) : null}
           <div className={`blood-photo-fallback flex h-full w-full items-center justify-center ${l.photo ? "hidden" : ""}`}>
-            <Droplet className="h-5 w-5 sm:h-6 sm:w-6" />
+            <Droplet className="h-5 w-5 sm:h-6 sm:w-6" strokeWidth={1.5} />
           </div>
         </div>
         <div className="min-w-0 flex-1 overflow-hidden">
           <div className="flex min-w-0 items-center gap-1.5">
-            <p className="min-w-0 truncate text-sm font-bold text-foreground sm:text-base">{l.name}</p>
-            <span className="shrink-0 rounded-md bg-rose-500/15 px-1.5 py-0.5 text-[11px] font-extrabold text-rose-600">{l.bloodGroup}</span>
+            <p className="min-w-0 truncate text-sm font-bold text-[#1C1C1C] sm:text-base">{l.name}</p>
+            <span className="shrink-0 rounded-[6px] bg-[#C62828]/10 px-1.5 py-0.5 text-[11px] font-bold text-[#C62828]">{l.bloodGroup}</span>
           </div>
           {l.address && (
-            <p className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-              <MapPin className="h-3 w-3 shrink-0 text-rose-500" />
+            <p className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-[#5F5F5A]">
+              <MapPin className="h-3 w-3 shrink-0 text-[#C62828]" strokeWidth={1.5} />
               <span className="truncate">{l.address}</span>
             </p>
           )}
-          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+          <p className="mt-0.5 truncate text-[11px] text-[#5F5F5A]">
             শেষ দান: {days !== null ? `${days} দিন আগে` : "—"} • মোট দান: {l.totalDonations ?? 0}
           </p>
         </div>
         <a
           href={`tel:${l.phone}`}
           aria-label={`কল করুন ${l.name}`}
-          className="flex shrink-0 items-center gap-1.5 rounded-full bg-gradient-gold px-3.5 py-2 text-xs font-extrabold text-primary-deep shadow-gold transition active:scale-95"
+          className="flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-[10px] bg-[#0F4D3A] px-3.5 py-2 text-xs font-bold text-white transition hover:bg-[#0B3C2D] active:scale-95"
         >
-          <Phone className="h-3.5 w-3.5 shrink-0" />
+          <Phone className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} />
           <span>কল</span>
         </a>
       </div>
-      <div className="mt-3 flex w-full min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl bg-muted/60 px-3 py-2">
+      <div className="mt-3 flex w-full min-w-0 flex-wrap items-center justify-between gap-2 rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2">
         {available ? (
-          <span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-primary">
-            <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-[#0F4D3A]">
+            <CheckCircle2 className="h-4 w-4 shrink-0" strokeWidth={1.5} />
             <span className="truncate">রক্তদানের জন্য উপলব্ধ</span>
           </span>
         ) : (
-          <span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-destructive">
-            <XCircle className="h-4 w-4 shrink-0" />
+          <span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-[#C62828]">
+            <XCircle className="h-4 w-4 shrink-0" strokeWidth={1.5} />
             <span className="truncate">{90 - (days ?? 0)} দিন বাকি</span>
           </span>
         )}
@@ -518,25 +518,25 @@ function BloodCard({
               <button
                 type="button"
                 onClick={onEdit}
-                className="inline-flex items-center gap-1 rounded-full bg-blue-500/15 px-2.5 py-1 text-[11px] font-semibold text-blue-800"
+                className="inline-flex min-h-[34px] items-center gap-1 rounded-[8px] border border-[#E6E1D6] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#1C1C1C]"
               >
-                <Edit3 className="h-3 w-3" /> এডিট
+                <Edit3 className="h-3 w-3" strokeWidth={1.5} /> এডিট
               </button>
               <button
                 type="button"
                 onClick={onDelete}
-                className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2.5 py-1 text-[11px] font-semibold text-destructive"
+                className="inline-flex min-h-[34px] items-center gap-1 rounded-[8px] bg-[#C62828]/10 px-2.5 py-1 text-[11px] font-semibold text-[#C62828]"
               >
-                <Trash2 className="h-3 w-3" /> ডিলিট
+                <Trash2 className="h-3 w-3" strokeWidth={1.5} /> ডিলিট
               </button>
             </>
           )}
           <button
             type="button"
             onClick={onDonatedToday}
-            className="flex shrink-0 items-center gap-1 rounded-full bg-rose-600 px-3 py-1 text-[11px] font-semibold text-white shadow-sm transition active:scale-95"
+            className="flex min-h-[34px] shrink-0 items-center gap-1 rounded-[8px] bg-[#C62828] px-3 py-1 text-[11px] font-semibold text-white transition hover:bg-[#B71C1C] active:scale-95"
           >
-            <HeartPulse className="h-3 w-3 shrink-0" /> আজ রক্ত দিয়েছি
+            <HeartPulse className="h-3 w-3 shrink-0" strokeWidth={1.5} /> আজ রক্ত দিয়েছি
           </button>
         </div>
       </div>

@@ -156,10 +156,21 @@ function HeroBannerSlide({
   transitionStyle: "slide" | "fade" | "none";
   hasControls: boolean;
 }) {
-  const desktopImg = banner.desktopImageUrl || banner.mobileImageUrl;
-  const mobileImg = banner.mobileImageUrl || banner.desktopImageUrl;
+  const isLegacyDefaultMain =
+    banner.id === "hero_main_1" &&
+    !banner.desktopImageUrl &&
+    !banner.mobileImageUrl;
+  const desktopImg =
+    banner.desktopImageUrl ||
+    banner.mobileImageUrl ||
+    (isLegacyDefaultMain ? "/hero-noakhali.jpg" : "");
+  const mobileImg =
+    banner.mobileImageUrl ||
+    banner.desktopImageUrl ||
+    (isLegacyDefaultMain ? "/hero-noakhali.jpg" : "");
   const hasImage = Boolean(
-    banner.backgroundMode === "image" && (desktopImg || mobileImg)
+    (banner.backgroundMode === "image" || isLegacyDefaultMain) &&
+      (desktopImg || mobileImg)
   );
   const activeBreakpointLayout = resolveBreakpointLayout(
     banner.responsiveLayouts,
@@ -222,10 +233,7 @@ function HeroBannerSlide({
         willChange: transitionStyle === "slide" ? "transform" : "opacity",
         backfaceVisibility: "hidden",
         WebkitBackfaceVisibility: "hidden",
-        background:
-          banner.backgroundMode === "solid"
-            ? banner.solidColor
-            : `linear-gradient(135deg, ${banner.gradientFrom} 0%, ${banner.gradientVia} 50%, ${banner.gradientTo} 100%)`,
+        backgroundColor: banner.solidColor || "#0F4D3A",
         color: banner.headingColor || banner.textColor || "#ffffff",
       }}
     >
@@ -235,7 +243,7 @@ function HeroBannerSlide({
           {mobileImg && (
             <img
               src={mobileImg}
-              alt={banner.headingLine1 || "Smart Noakhali"}
+              alt={banner.headingLine1 || "স্মার্ট নোয়াখালী"}
               loading="eager"
               decoding="sync"
               draggable={false}
@@ -249,7 +257,7 @@ function HeroBannerSlide({
             <>
               <img
                 src={desktopImg}
-                alt={banner.headingLine1 || "Smart Noakhali"}
+                alt={banner.headingLine1 || "স্মার্ট নোয়াখালী"}
                 loading="eager"
                 decoding="sync"
                 draggable={false}
@@ -261,7 +269,7 @@ function HeroBannerSlide({
               />
               <img
                 src={desktopImg}
-                alt={banner.headingLine1 || "Smart Noakhali"}
+                alt={banner.headingLine1 || "স্মার্ট নোয়াখালী"}
                 loading="eager"
                 decoding="sync"
                 draggable={false}
@@ -276,18 +284,12 @@ function HeroBannerSlide({
             aria-hidden="true"
             className={`pointer-events-none absolute inset-0 ${isSplitDesktop ? "md:hidden" : ""}`}
             style={{
-              backgroundColor: banner.overlayColor || "#042316",
-              opacity: Math.min(90, Math.max(0, banner.overlayOpacity ?? 55)) / 100,
+              backgroundColor: isLegacyDefaultMain ? "#0F4D3A" : banner.overlayColor || "#0F4D3A",
+              opacity: isLegacyDefaultMain
+                ? 0.45
+                : Math.min(90, Math.max(0, banner.overlayOpacity ?? 45)) / 100,
             }}
           />
-        </>
-      )}
-
-      {banner.showDecorativeGlow !== false && (
-        <>
-          <div className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-amber-300/15 blur-3xl" />
-          <div className="pointer-events-none absolute -bottom-14 -left-10 h-44 w-44 rounded-full bg-emerald-300/15 blur-3xl" />
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
         </>
       )}
 
@@ -315,11 +317,11 @@ function HeroBannerSlide({
           {(banner.headingLine1.trim() || banner.headingLine2.trim()) && (() => {
             const pos = activeBreakpointLayout.elements.heading;
             const baseHeadingPx =
-              breakpoint === "mobile" ? 23 : breakpoint === "tablet" ? 31 : 36;
+              breakpoint === "mobile" ? 24 : breakpoint === "tablet" ? 30 : 36;
             return (
               <div style={getElementCanvasStyle(pos, 23)}>
                 <h1
-                  className="font-bangla font-extrabold leading-[1.2] tracking-tight [text-wrap:balance] drop-shadow-xs"
+                  className="font-display font-bold leading-[1.2] tracking-tight [text-wrap:balance]"
                   style={{
                     color: banner.headingColor || banner.textColor || "#ffffff",
                     fontSize: `${Math.round(baseHeadingPx * pos.fontScale)}px`,
@@ -340,14 +342,14 @@ function HeroBannerSlide({
 
           {banner.description.trim() && (() => {
             const pos = activeBreakpointLayout.elements.description;
-            const baseDescPx = breakpoint === "mobile" ? 12.5 : 14.5;
+            const baseDescPx = breakpoint === "mobile" ? 13.5 : 15;
             return (
               <div style={getElementCanvasStyle(pos, 22)}>
                 <p
                   className="leading-relaxed"
                   style={{
-                    color: banner.descriptionColor || banner.subtextColor || "#ecfdf5",
-                    opacity: 0.94,
+                    color: banner.descriptionColor || banner.subtextColor || "#FAF7F2",
+                    opacity: 0.95,
                     fontSize: `${Math.round(baseDescPx * pos.fontScale * 10) / 10}px`,
                   }}
                 >
@@ -369,14 +371,14 @@ function HeroBannerSlide({
               <div style={getElementCanvasStyle(pos, 24)} className={`flex ${alignFlex}`}>
                 <HeroActionLink
                   href={banner.primaryButtonLink || "tel:999"}
-                  className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full px-4 py-2 font-extrabold shadow-md transition hover:brightness-105 active:scale-95 sm:min-h-[42px] sm:gap-2 sm:px-5"
+                  className="inline-flex min-h-[48px] items-center gap-2 rounded-[10px] px-5 py-2.5 font-semibold transition hover:opacity-95"
                   style={{
-                    backgroundColor: banner.primaryButtonBgColor || "#dc2626",
+                    backgroundColor: banner.primaryButtonBgColor || "#C62828",
                     color: banner.primaryButtonColor || "#ffffff",
-                    fontSize: `${Math.round((breakpoint === "mobile" ? 12 : 13) * pos.fontScale * 10) / 10}px`,
+                    fontSize: `${Math.round((breakpoint === "mobile" ? 14 : 15) * pos.fontScale * 10) / 10}px`,
                   }}
                 >
-                  <Phone className="h-3.5 w-3.5 shrink-0" />
+                  <Phone className="h-4 w-4 shrink-0" strokeWidth={1.5} />
                   <span className="truncate">{banner.primaryButtonText}</span>
                 </HeroActionLink>
               </div>
@@ -395,14 +397,14 @@ function HeroBannerSlide({
               <div style={getElementCanvasStyle(pos, 24)} className={`flex ${alignFlex}`}>
                 <HeroActionLink
                   href={banner.secondaryButtonLink || "/submit-info"}
-                  className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-white/25 px-4 py-2 font-bold shadow-xs backdrop-blur-sm transition hover:brightness-95 active:scale-95 sm:min-h-[42px] sm:gap-2 sm:px-4.5"
+                  className="inline-flex min-h-[44px] items-center gap-2 rounded-[10px] border border-[#E6E1D6] px-4 py-2 font-semibold transition hover:opacity-95"
                   style={{
                     backgroundColor: banner.secondaryButtonBgColor || "#ffffff",
-                    color: banner.secondaryButtonColor || "#064e3b",
-                    fontSize: `${Math.round((breakpoint === "mobile" ? 12 : 13) * pos.fontScale * 10) / 10}px`,
+                    color: banner.secondaryButtonColor || "#0F4D3A",
+                    fontSize: `${Math.round((breakpoint === "mobile" ? 13 : 14) * pos.fontScale * 10) / 10}px`,
                   }}
                 >
-                  <Send className="h-3.5 w-3.5 shrink-0" />
+                  <Send className="h-4 w-4 shrink-0" strokeWidth={1.5} />
                   <span className="truncate">{banner.secondaryButtonText}</span>
                 </HeroActionLink>
               </div>
@@ -497,7 +499,7 @@ function HeroBannerSlide({
             )}
 
             <h1
-              className="mt-2.5 font-bangla text-[23px] min-[380px]:text-[24px] font-extrabold leading-[1.2] tracking-tight [text-wrap:balance] drop-shadow-xs sm:mt-3 sm:text-[31px] md:text-[34px] lg:text-[38px]"
+              className="font-display text-[24px] font-bold leading-[1.2] tracking-tight [text-wrap:balance] sm:text-[31px] md:text-[34px] lg:text-[36px]"
               style={{
                 color: banner.headingColor || banner.textColor || "#ffffff",
               }}
@@ -513,10 +515,10 @@ function HeroBannerSlide({
 
             {banner.description.trim() && (
               <p
-                className={`mt-2 max-w-2xl text-[12.5px] leading-relaxed line-clamp-3 sm:line-clamp-2 sm:text-sm md:text-[15px] ${alignDescMarginClass}`}
+                className={`mt-2 max-w-2xl text-[13.5px] leading-relaxed line-clamp-3 sm:line-clamp-2 sm:text-[15px] ${alignDescMarginClass}`}
                 style={{
-                  color: banner.descriptionColor || banner.subtextColor || "#ecfdf5",
-                  opacity: 0.94,
+                  color: banner.descriptionColor || banner.subtextColor || "#FAF7F2",
+                  opacity: 0.95,
                 }}
               >
                 {banner.description}
@@ -527,36 +529,38 @@ function HeroBannerSlide({
               banner.secondaryButtonText.trim() ||
               banner.optionalButtonText?.trim()) && (
               <div
-                className={`mt-3.5 flex flex-wrap items-center gap-2 sm:mt-4 sm:gap-2.5 ${alignButtonsClass}`}
+                className={`mt-4 flex flex-wrap items-center gap-2.5 ${alignButtonsClass}`}
               >
                 {banner.primaryButtonText.trim() && (
                   <HeroActionLink
                     href={banner.primaryButtonLink || "tel:999"}
-                    className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full px-4.5 py-2 text-xs font-extrabold shadow-md transition hover:brightness-105 active:scale-95 sm:min-h-[42px] sm:gap-2 sm:px-5 sm:py-2.5 sm:text-[13px]"
+                    className="inline-flex min-h-[48px] items-center gap-2 rounded-[10px] px-5 py-2.5 text-sm font-semibold transition hover:opacity-95"
                     style={{
-                      backgroundColor: banner.primaryButtonBgColor || "#dc2626",
+                      backgroundColor: banner.primaryButtonBgColor || "#C62828",
                       color: banner.primaryButtonColor || "#ffffff",
                     }}
                   >
-                    <Phone className="h-3.5 w-3.5 shrink-0" /> {banner.primaryButtonText}
+                    <Phone className="h-4 w-4 shrink-0" strokeWidth={1.5} />
+                    <span>{banner.primaryButtonText}</span>
                   </HeroActionLink>
                 )}
                 {banner.secondaryButtonText.trim() && (
                   <HeroActionLink
                     href={banner.secondaryButtonLink || "/submit-info"}
-                    className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-white/25 px-4 py-2 text-xs font-bold shadow-xs backdrop-blur-sm transition hover:brightness-95 active:scale-95 sm:min-h-[42px] sm:gap-2 sm:px-4.5 sm:py-2.5 sm:text-[13px]"
+                    className="inline-flex min-h-[44px] items-center gap-2 rounded-[10px] border border-[#E6E1D6] px-4 py-2 text-xs font-semibold transition hover:opacity-95 sm:text-sm"
                     style={{
                       backgroundColor: banner.secondaryButtonBgColor || "#ffffff",
-                      color: banner.secondaryButtonColor || "#064e3b",
+                      color: banner.secondaryButtonColor || "#0F4D3A",
                     }}
                   >
-                    <Send className="h-3.5 w-3.5 shrink-0" /> {banner.secondaryButtonText}
+                    <Send className="h-4 w-4 shrink-0" strokeWidth={1.5} />
+                    <span>{banner.secondaryButtonText}</span>
                   </HeroActionLink>
                 )}
                 {banner.optionalButtonText?.trim() && (
                   <HeroActionLink
                     href={banner.optionalButtonLink || "/directory"}
-                    className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-white/25 px-3.5 py-2 text-xs font-bold backdrop-blur-sm transition hover:brightness-110 active:scale-95 sm:min-h-[42px] sm:gap-2 sm:px-4 sm:py-2.5 sm:text-[13px]"
+                    className="inline-flex min-h-[44px] items-center gap-1.5 rounded-[10px] border border-white/30 px-4 py-2 text-xs font-semibold transition hover:opacity-95 sm:text-sm"
                     style={{
                       backgroundColor: banner.optionalButtonBgColor || "rgba(255,255,255,0.16)",
                       color: banner.optionalButtonColor || "#ffffff",
@@ -571,7 +575,7 @@ function HeroBannerSlide({
             {banner.optionalText?.trim() && (
               <p
                 className="mt-2 text-xs font-semibold tracking-wide"
-                style={{ color: banner.optionalTextColor || "#fde68a" }}
+                style={{ color: banner.optionalTextColor || "#ffffff" }}
               >
                 {banner.optionalText}
               </p>
@@ -580,10 +584,10 @@ function HeroBannerSlide({
 
           {isSplitDesktop && banner.layoutMode === "split_left" && desktopImg && (
             <div className="hidden md:block md:col-span-5">
-              <div className="h-[220px] lg:h-[256px] w-full overflow-hidden rounded-2xl border border-white/15 bg-black/15 shadow-lg">
+              <div className="h-[220px] lg:h-[256px] w-full overflow-hidden rounded-[12px] border border-white/20 bg-black/15">
                 <img
                   src={desktopImg}
-                  alt={banner.headingLine1 || "Smart Noakhali"}
+                  alt={banner.headingLine1 || "স্মার্ট নোয়াখালী"}
                   loading="eager"
                   decoding="sync"
                   draggable={false}
@@ -780,18 +784,10 @@ function Index() {
   );
 
   const announcementToneMap = {
-    amber: "border-amber-500/35 bg-amber-500/10 text-amber-950",
-    emerald: "border-emerald-500/35 bg-emerald-500/10 text-emerald-950",
-    blue: "border-blue-500/35 bg-blue-500/10 text-blue-950",
-    rose: "border-rose-500/35 bg-rose-500/10 text-rose-950",
-  };
-
-  const shortcutToneMap: Record<string, string> = {
-    primary: "bg-primary/10 text-primary",
-    blue: "bg-blue-500/10 text-blue-600",
-    emerald: "bg-emerald-500/10 text-emerald-600",
-    amber: "bg-amber-500/10 text-amber-600",
-    rose: "bg-rose-500/10 text-rose-600",
+    amber: "border-[#E6E1D6] bg-white text-[#1C1C1C]",
+    emerald: "border-[#0F4D3A]/30 bg-white text-[#1C1C1C]",
+    blue: "border-[#E6E1D6] bg-white text-[#1C1C1C]",
+    rose: "border-[#C62828]/30 bg-white text-[#1C1C1C]",
   };
 
   const effectiveTransitionStyle: "slide" | "fade" | "none" = prefersReducedMotion
@@ -819,31 +815,31 @@ function Index() {
   } as React.CSSProperties;
 
   return (
-    <div className="w-full overflow-x-hidden px-3.5 pb-28 pt-3 sm:px-6 sm:pt-5 lg:px-8 xl:px-10 2xl:px-12">
+    <div className="mx-auto w-full max-w-7xl overflow-x-hidden px-4 pb-6 pt-4 sm:px-6 sm:pt-5 lg:px-8">
       {/* Optional Top Super Admin Announcement Strip */}
       {homepageConfig.announcement?.visible && homepageConfig.announcement.text.trim() && (
         <HeroActionLink
           href={homepageConfig.announcement.link || "/notifications"}
-          className={`mb-3 flex items-start gap-2.5 rounded-2xl border px-3.5 py-2.5 text-xs shadow-xs transition hover:opacity-95 ${
+          className={`mb-4 flex items-start gap-2.5 rounded-[12px] border px-4 py-3 text-xs transition hover:border-[#0F4D3A] ${
             announcementToneMap[homepageConfig.announcement.tone || "amber"]
           }`}
         >
-          <Megaphone className="mt-0.5 h-4 w-4 shrink-0" />
+          <Megaphone className="mt-0.5 h-4 w-4 shrink-0 text-[#0F4D3A]" strokeWidth={1.5} />
           <div className="min-w-0 flex-1">
             {homepageConfig.announcement.title && (
-              <p className="font-bold">{homepageConfig.announcement.title}</p>
+              <p className="font-semibold text-[#1C1C1C]">{homepageConfig.announcement.title}</p>
             )}
-            <p className="text-[11px] opacity-90">{homepageConfig.announcement.text}</p>
+            <p className="mt-0.5 text-xs text-[#5F5F5A]">{homepageConfig.announcement.text}</p>
           </div>
         </HeroActionLink>
       )}
 
-      {/* Dynamic Multi-Banner Hero Section / Sequential Slider */}
+      {/* Calm Civic Hero Section */}
       {homepageConfig.showHero !== false &&
         (heroLoading ? (
           <div
             aria-label="হিরো ব্যানার লোড হচ্ছে"
-            className="hero-stage-dynamic w-full animate-pulse rounded-[26px] border border-border/60 bg-muted/40 shadow-[0_18px_40px_-14px_rgba(7,54,34,0.18)]"
+            className="hero-stage-dynamic w-full animate-pulse rounded-[12px] border border-[#E6E1D6] bg-white"
           />
         ) : (
           currentHeroBanner && (
@@ -875,15 +871,7 @@ function Index() {
                   else goToPrevSlide();
                 }
               }}
-              className={`relative overflow-hidden border border-emerald-300/20 shadow-[0_18px_40px_-14px_rgba(7,54,34,0.35)] ${
-                currentHeroBanner.borderRadius || "rounded-[26px]"
-              }`}
-              style={{
-                background:
-                  currentHeroBanner.backgroundMode === "solid"
-                    ? currentHeroBanner.solidColor
-                    : `linear-gradient(135deg, ${currentHeroBanner.gradientFrom} 0%, ${currentHeroBanner.gradientVia} 50%, ${currentHeroBanner.gradientTo} 100%)`,
-              }}
+              className="relative overflow-hidden rounded-[12px] border border-[#E6E1D6] bg-[#0F4D3A]"
             >
               <div
                 style={heroStageStyle}
@@ -901,7 +889,7 @@ function Index() {
                 </AnimatePresence>
               </div>
 
-              {/* Sequential Carousel Controls (stationary outside slide transition) */}
+              {/* Sequential Carousel Controls */}
               {hasHeroControls && (
                 <div className="pointer-events-none absolute inset-x-4 bottom-3 z-20 flex items-center justify-between gap-2 sm:inset-0 sm:block">
                   {carousel.showArrows && (
@@ -909,9 +897,9 @@ function Index() {
                       type="button"
                       aria-label="পূর্ববর্তী ব্যানার"
                       onClick={goToPrevSlide}
-                      className="pointer-events-auto order-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/25 bg-black/25 text-white backdrop-blur-sm transition hover:bg-black/45 active:scale-95 sm:absolute sm:right-12 sm:top-4"
+                      className="pointer-events-auto order-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-white/30 bg-black/30 text-white transition hover:bg-black/45 sm:absolute sm:right-12 sm:top-4"
                     >
-                      <ChevronLeft className="h-4 w-4" />
+                      <ChevronLeft className="h-4 w-4" strokeWidth={1.5} />
                     </button>
                   )}
 
@@ -924,8 +912,8 @@ function Index() {
                           aria-label={`ব্যানার ${i + 1}`}
                           aria-current={i === heroSlideIdx ? "true" : undefined}
                           onClick={() => goToSpecificSlide(i)}
-                          className={`h-2 rounded-full transition-all duration-300 ${
-                            i === heroSlideIdx ? "w-6 bg-white" : "w-2 bg-white/40 hover:bg-white/65"
+                          className={`h-1.5 rounded-full transition-all duration-300 ${
+                            i === heroSlideIdx ? "w-5 bg-white" : "w-1.5 bg-white/45 hover:bg-white/70"
                           }`}
                         />
                       ))}
@@ -937,9 +925,9 @@ function Index() {
                       type="button"
                       aria-label="পরবর্তী ব্যানার"
                       onClick={() => goToNextSlide(true)}
-                      className="pointer-events-auto order-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/25 bg-black/25 text-white backdrop-blur-sm transition hover:bg-black/45 active:scale-95 sm:absolute sm:right-3 sm:top-4"
+                      className="pointer-events-auto order-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-white/30 bg-black/30 text-white transition hover:bg-black/45 sm:absolute sm:right-3 sm:top-4"
                     >
-                      <ChevronRight className="h-4 w-4" />
+                      <ChevronRight className="h-4 w-4" strokeWidth={1.5} />
                     </button>
                   )}
                 </div>
@@ -950,7 +938,13 @@ function Index() {
 
       {/* Quick-Action Buttons */}
       {homepageConfig.showQuickActions !== false && visibleQuickActions.length > 0 && (
-        <div className="mt-4 grid grid-cols-3 gap-2 sm:gap-2.5 md:grid-flow-col md:auto-cols-fr">
+        <div
+          className={`mt-4 grid gap-3 ${
+            visibleQuickActions.length <= 2
+              ? "grid-cols-2"
+              : "grid-cols-2 sm:grid-cols-3 md:grid-flow-col md:auto-cols-fr"
+          }`}
+        >
           {visibleQuickActions.map((qa) => {
             const IconComp = HOMEPAGE_ICONS[qa.iconName] || Sparkles;
             return (
@@ -959,7 +953,7 @@ function Index() {
                 to={qa.to}
                 label={qa.label}
                 tone={qa.tone || "emerald"}
-                icon={<IconComp className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />}
+                icon={<IconComp className="h-4 w-4 shrink-0" strokeWidth={1.5} />}
               />
             );
           })}
@@ -968,26 +962,23 @@ function Index() {
 
       {/* Featured District Service Shortcuts */}
       {homepageConfig.showFeaturedShortcuts !== false && visibleFeaturedShortcuts.length > 0 && (
-        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:gap-3">
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
           {visibleFeaturedShortcuts.map((fs) => {
             const IconComp = HOMEPAGE_ICONS[fs.iconName] || MapPin;
-            const toneClass = shortcutToneMap[fs.tone || "primary"] || shortcutToneMap.primary;
             return (
               <HeroActionLink
                 key={fs.id}
                 href={fs.to}
-                className="group flex min-w-0 items-center gap-2.5 rounded-2xl border border-border/80 bg-card p-2.5 shadow-card transition hover:border-primary/40 hover:bg-muted/40 active:scale-95"
+                className="group flex min-w-0 items-center gap-3 rounded-[12px] border border-[#E6E1D6] bg-white p-3 transition-colors hover:border-[#0F4D3A]"
               >
-                <div
-                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${toneClass}`}
-                >
-                  <IconComp className="h-4 w-4" />
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] text-[#0F4D3A]">
+                  <IconComp className="h-5 w-5" strokeWidth={1.5} />
                 </div>
                 <div className="min-w-0">
-                  <p className="truncate font-display text-xs font-bold text-foreground">
+                  <p className="truncate font-display text-[13px] font-semibold text-[#1C1C1C]">
                     {fs.title}
                   </p>
-                  <p className="truncate text-[10px] text-muted-foreground">{fs.subtitle}</p>
+                  <p className="truncate text-[11px] text-[#5F5F5A]">{fs.subtitle}</p>
                 </div>
               </HeroActionLink>
             );
@@ -998,22 +989,22 @@ function Index() {
       {/* Live Emergency Alert Banner */}
       {homepageConfig.showEmergencyBanner !== false && <EmergencyBanner />}
 
-      {/* Optional Public Notices (managed by Super Admin) */}
+      {/* Optional Public Notices */}
       {activeNotices.length > 0 && (
-        <div className="mt-4 space-y-2">
+        <div className="mt-4 space-y-2.5">
           {activeNotices.map((notice) => (
             <div
               key={notice.id}
-              className="rounded-2xl border border-primary/20 bg-primary/5 px-3.5 py-2.5 text-xs shadow-2xs"
+              className="rounded-[12px] border border-[#E6E1D6] bg-white px-4 py-3 text-xs"
             >
               <div className="flex items-center justify-between gap-2">
-                <p className="font-bold text-primary-deep">{notice.title}</p>
+                <p className="font-display text-sm font-semibold text-[#0F4D3A]">{notice.title}</p>
                 {notice.date && (
-                  <span className="text-[10px] text-muted-foreground">{notice.date}</span>
+                  <span className="text-[11px] text-[#5F5F5A]">{notice.date}</span>
                 )}
               </div>
               {notice.body && (
-                <p className="mt-1 text-[11px] text-muted-foreground leading-relaxed">
+                <p className="mt-1 text-xs leading-relaxed text-[#5F5F5A]">
                   {notice.body}
                 </p>
               )}
@@ -1022,7 +1013,7 @@ function Index() {
         </div>
       )}
 
-      {/* ALL MAIN SECTIONS — Vertically Stacked, Each with 2-Row Horizontal Scroll */}
+      {/* ALL MAIN SECTIONS — Vertically Stacked, Each with 2-Row Horizontal Scroll on Mobile */}
       {homepageConfig.showDivisions !== false && (
         <div className="mt-6 space-y-6">
           {divisionSections.map(({ division, items }) => (
@@ -1035,17 +1026,15 @@ function Index() {
         </div>
       )}
 
-      {/* App Download & Custom Footer Callout */}
+      {/* Offline Download & Civic Footer */}
       {homepageConfig.showFooterAppCallout !== false && (
-        <footer className="mt-9 flex flex-col items-center gap-2.5 border-t border-border/60 pt-6 text-center">
+        <footer className="mt-8 flex flex-col items-center gap-3 border-t border-[#E6E1D6] pt-6 text-center">
           <Link
             to="/app-download"
-            className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold text-primary transition hover:text-primary-deep hover:underline"
+            className="inline-flex min-h-[44px] items-center gap-2 rounded-[10px] border border-[#E6E1D6] bg-white px-4 py-2 text-xs font-semibold text-[#0F4D3A] transition hover:border-[#0F4D3A]"
           >
-            <Smartphone className="h-3.5 w-3.5 shrink-0" />
-            <span>
-              {contentConfig.footerTagline || "Android / iOS অ্যাপ ও PWA ডাউনলোড করুন"}
-            </span>
+            <Smartphone className="h-4 w-4 shrink-0" strokeWidth={1.5} />
+            <span>অফলাইন ডাউনলোড ও অ্যাপ</span>
           </Link>
 
           {contentConfig.socialLinks &&
@@ -1058,9 +1047,9 @@ function Index() {
                     href={contentConfig.socialLinks.facebook}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-0.5 font-semibold text-foreground hover:border-primary/40"
+                    className="inline-flex items-center gap-1 rounded-[8px] border border-[#E6E1D6] bg-white px-3 py-1 font-medium text-[#1C1C1C] hover:border-[#0F4D3A]"
                   >
-                    Facebook <ExternalLink className="h-2.5 w-2.5" />
+                    Facebook <ExternalLink className="h-3 w-3" strokeWidth={1.5} />
                   </a>
                 )}
                 {contentConfig.socialLinks.youtube && (
@@ -1068,9 +1057,9 @@ function Index() {
                     href={contentConfig.socialLinks.youtube}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-0.5 font-semibold text-foreground hover:border-primary/40"
+                    className="inline-flex items-center gap-1 rounded-[8px] border border-[#E6E1D6] bg-white px-3 py-1 font-medium text-[#1C1C1C] hover:border-[#0F4D3A]"
                   >
-                    YouTube <ExternalLink className="h-2.5 w-2.5" />
+                    YouTube <ExternalLink className="h-3 w-3" strokeWidth={1.5} />
                   </a>
                 )}
                 {contentConfig.socialLinks.whatsapp && (
@@ -1078,15 +1067,15 @@ function Index() {
                     href={contentConfig.socialLinks.whatsapp}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-0.5 font-semibold text-foreground hover:border-primary/40"
+                    className="inline-flex items-center gap-1 rounded-[8px] border border-[#E6E1D6] bg-white px-3 py-1 font-medium text-[#1C1C1C] hover:border-[#0F4D3A]"
                   >
-                    WhatsApp <ExternalLink className="h-2.5 w-2.5" />
+                    WhatsApp <ExternalLink className="h-3 w-3" strokeWidth={1.5} />
                   </a>
                 )}
               </div>
             )}
 
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-[11px] text-[#5F5F5A]">
             {contentConfig.footerCopyright ||
               "© স্মার্ট নোয়াখালী • নোয়াখালীর ডিজিটাল সিটিজেন সেবা ডিরেক্টরি"}
           </p>
@@ -1117,27 +1106,27 @@ function DivisionHorizontalSection({
   return (
     <section
       aria-labelledby={`division-heading-${division.id}`}
-      className="border-b border-border/50 pb-5 last:border-b-0 last:pb-0"
+      className="border-b border-[#E6E1D6] pb-5 last:border-b-0 last:pb-0"
     >
       {/* Clear Bengali Section Heading */}
-      <div className="mb-2.5 flex items-center justify-between gap-2 px-0.5">
+      <div className="mb-3 flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2.5">
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-50 via-emerald-100 to-emerald-200/85 text-emerald-700 ring-1 ring-emerald-300/70 shadow-[inset_0_1px_1px_rgba(255,255,255,0.9),0_3px_8px_-3px_rgba(4,120,87,0.2)]">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-[#E6E1D6] bg-white text-[#0F4D3A]">
             {division.customIconUrl ? (
               <img
                 src={division.customIconUrl}
                 alt={division.bn}
                 loading="lazy"
-                className="h-full w-full rounded-xl object-cover"
+                className="h-full w-full rounded-[10px] object-cover"
               />
             ) : (
-              <DivIcon className="h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
+              <DivIcon className="h-4 w-4 shrink-0" strokeWidth={1.5} />
             )}
           </div>
           <div className="min-w-0">
             <h2
               id={`division-heading-${division.id}`}
-              className="truncate font-bangla text-[15px] font-bold leading-snug text-primary-deep sm:text-base"
+              className="truncate font-display text-[17px] font-semibold leading-snug text-[#1C1C1C] sm:text-[18px]"
             >
               {division.bn}
             </h2>
@@ -1145,22 +1134,22 @@ function DivisionHorizontalSection({
         </div>
 
         {/* Tablet/Desktop Horizontal Scroll Helpers (hidden on lg+ where grid expands) */}
-        <div className="hidden shrink-0 items-center gap-1 sm:flex lg:hidden">
+        <div className="hidden shrink-0 items-center gap-1.5 sm:flex lg:hidden">
           <button
             type="button"
             onClick={() => scrollByAmount("left")}
             aria-label={`${division.bn} বামে স্ক্রল করুন`}
-            className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-95"
+            className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#E6E1D6] bg-white text-[#5F5F5A] transition hover:border-[#0F4D3A] hover:text-[#0F4D3A]"
           >
-            <ChevronLeft className="h-3.5 w-3.5" />
+            <ChevronLeft className="h-4 w-4" strokeWidth={1.5} />
           </button>
           <button
             type="button"
             onClick={() => scrollByAmount("right")}
             aria-label={`${division.bn} ডানে স্ক্রল করুন`}
-            className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-95"
+            className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#E6E1D6] bg-white text-[#5F5F5A] transition hover:border-[#0F4D3A] hover:text-[#0F4D3A]"
           >
-            <ChevronRight className="h-3.5 w-3.5" />
+            <ChevronRight className="h-4 w-4" strokeWidth={1.5} />
           </button>
         </div>
       </div>
@@ -1170,7 +1159,7 @@ function DivisionHorizontalSection({
         ref={scrollRef}
         className={`grid grid-flow-col ${
           items.length === 1 ? "grid-rows-1" : "grid-rows-2"
-        } auto-cols-[80px] min-[360px]:auto-cols-[86px] sm:auto-cols-[106px] md:auto-cols-[114px] gap-2 sm:gap-2.5 lg:grid-flow-row lg:grid-rows-none lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 lg:auto-cols-auto lg:gap-3.5 overflow-x-auto lg:overflow-visible overscroll-x-contain touch-pan-x touch-pan-y scroll-smooth pb-1 scrollbar-none`}
+        } auto-cols-[84px] min-[360px]:auto-cols-[90px] sm:auto-cols-[108px] md:auto-cols-[116px] gap-2.5 sm:gap-3 lg:grid-flow-row lg:grid-rows-none lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 lg:auto-cols-auto lg:gap-3.5 overflow-x-auto lg:overflow-visible overscroll-x-contain touch-pan-x touch-pan-y scroll-smooth pb-1 scrollbar-none`}
       >
         {items.map((cat) => (
           <ServiceCategoryCard key={cat.slug} category={cat} />
@@ -1191,19 +1180,15 @@ function QuickLink({
   tone: HomepageQuickAction["tone"];
   icon: React.ReactNode;
 }) {
-  const tones = {
-    red: "border-red-200/80 bg-gradient-to-br from-red-50 via-rose-50 to-red-100/70 text-red-700 hover:border-red-300",
-    rose: "border-rose-200/80 bg-gradient-to-br from-rose-50 via-pink-50 to-rose-100/70 text-rose-700 hover:border-rose-300",
-    emerald:
-      "border-emerald-200/80 bg-gradient-to-br from-emerald-50 via-teal-50 to-emerald-100/70 text-emerald-800 hover:border-emerald-300",
-    blue: "border-blue-200/80 bg-gradient-to-br from-blue-50 via-sky-50 to-blue-100/70 text-blue-800 hover:border-blue-300",
-    amber:
-      "border-amber-200/80 bg-gradient-to-br from-amber-50 via-yellow-50 to-amber-100/70 text-amber-800 hover:border-amber-300",
-  };
+  const isEmergency = tone === "red";
   return (
     <HeroActionLink
       href={to}
-      className={`flex min-w-0 items-center justify-center gap-1 rounded-full border px-2 py-2.5 text-center text-[11px] font-bold shadow-card transition active:scale-95 min-[360px]:gap-1.5 min-[360px]:text-xs sm:py-3 ${tones[tone] || tones.emerald}`}
+      className={`flex min-h-[48px] min-w-0 items-center justify-center gap-2 rounded-[12px] border px-3 py-2.5 text-center font-bangla text-[13.5px] font-semibold transition sm:text-sm ${
+        isEmergency
+          ? "border-[#C62828] bg-[#C62828] text-white hover:opacity-95"
+          : "border-[#0F4D3A] bg-[#FFFFFF] text-[#0F4D3A] hover:bg-[#FAF7F2]"
+      }`}
     >
       {icon}
       <span className="truncate">{label}</span>

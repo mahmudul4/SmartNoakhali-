@@ -114,7 +114,7 @@ export function useNotifications() {
       }
       toast.success("নোটিফিকেশন সফলভাবে চালু হয়েছে!");
       sendBrowserNotification("স্মার্ট নোয়াখালী", {
-        body: "আপনার ডিভাইসে জরুরী নোটিফিকেশন সিস্টেম সক্রিয় হয়েছে।",
+        body: "আপনার ডিভাইসে জরুরি নোটিফিকেশন সিস্টেম সক্রিয় হয়েছে।",
       });
     } else if (res === "denied") {
       toast.error("ব্রাউজার সেটিংসে নোটিফিকেশন ব্লক করা আছে। অনুমতি দিন।");
@@ -128,7 +128,7 @@ export function useNotifications() {
       return;
     }
     sendBrowserNotification("স্মার্ট নোয়াখালী", {
-      body: "জরুরী রক্তদান, সেবা ও বিশেষ বার্তা আপনার ডিভাইসে এভাবে পৌঁছাবে।",
+      body: "জরুরি রক্তদান, সেবা ও বিশেষ বার্তা আপনার ডিভাইসে এভাবে পৌঁছাবে।",
     });
     toast.success("টেস্ট নোটিফিকেশন পাঠানো হয়েছে!");
   }, [permission, enableNotifications]);
@@ -307,52 +307,49 @@ export function NotificationBell() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-emerald-950/15 bg-emerald-950/[0.04] text-[#064e3b] transition-all duration-200 hover:bg-emerald-950/[0.09] active:scale-95"
+        className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] text-[#0F4D3A] transition-colors hover:border-[#0F4D3A]"
         title="বিজ্ঞপ্তি"
         aria-label={genuineUnreadCount > 0 ? `বিজ্ঞপ্তি (${genuineUnreadCount} টি অপঠিত)` : "বিজ্ঞপ্তি"}
       >
-        <Bell className="h-4 w-4 text-[#064e3b]" />
+        <Bell className="h-[18px] w-[18px] text-[#0F4D3A]" strokeWidth={1.5} />
         {genuineUnreadCount > 0 && (
-          <>
-            <span className="pointer-events-none absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-rose-500 animate-ping opacity-75" />
-            <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[9px] font-black text-white shadow-sm ring-1 ring-white">
-              {genuineUnreadCount > 99 ? "99+" : genuineUnreadCount}
-            </span>
-          </>
+          <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#C62828] px-1 text-[9px] font-bold text-white ring-1 ring-white">
+            {genuineUnreadCount > 99 ? "99+" : genuineUnreadCount}
+          </span>
         )}
       </button>
 
       {open && (
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-black/55 p-3 pt-16 backdrop-blur-xs sm:p-4 sm:pt-20"
+          className="fixed inset-0 z-50 flex items-start justify-center bg-black/45 p-3 pt-16 sm:p-4 sm:pt-20"
           onClick={() => setOpen(false)}
           role="dialog"
           aria-modal="true"
           aria-label="বিজ্ঞপ্তি"
         >
           <div
-            className="w-full max-w-md overflow-hidden rounded-3xl border border-border/80 bg-card shadow-elevated"
+            className="w-full max-w-md overflow-hidden rounded-[12px] border border-[#E6E1D6] bg-white"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between gap-2 border-b border-border/70 bg-gradient-to-r from-emerald-950/[0.04] to-transparent px-5 py-4">
+            <div className="flex items-center justify-between gap-2 border-b border-[#E6E1D6] bg-[#FAF7F2] px-5 py-4">
               <div className="flex items-center gap-2.5 min-w-0">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                  <BellRing className="h-4.5 w-4.5" />
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-[#E6E1D6] bg-white text-[#0F4D3A]">
+                  <BellRing className="h-4.5 w-4.5" strokeWidth={1.5} />
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <h3 className="font-bangla text-base font-extrabold text-foreground">
+                    <h3 className="font-display text-base font-bold text-[#1C1C1C]">
                       বিজ্ঞপ্তি
                     </h3>
                     {genuineUnreadCount > 0 && (
-                      <span className="inline-flex items-center rounded-full bg-rose-500/15 px-2 py-0.5 text-[10.5px] font-bold text-rose-700">
+                      <span className="inline-flex items-center rounded-[6px] border border-[#C62828]/25 bg-[#C62828]/10 px-2 py-0.5 text-[10.5px] font-semibold text-[#C62828]">
                         {genuineUnreadCount} টি অপঠিত
                       </span>
                     )}
                   </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    গুরুত্বপূর্ণ আপডেট ও জরুরী বার্তা
+                  <p className="text-[11px] text-[#5F5F5A]">
+                    গুরুত্বপূর্ণ আপডেট ও জরুরি বার্তা
                   </p>
                 </div>
               </div>
@@ -363,12 +360,12 @@ export function NotificationBell() {
                     type="button"
                     disabled={markingAll}
                     onClick={() => void handleMarkAllRead()}
-                    className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 text-[10.5px] font-bold text-primary transition hover:bg-primary/15 disabled:opacity-60"
+                    className="inline-flex min-h-[34px] items-center gap-1 rounded-[8px] border border-[#E6E1D6] bg-white px-2.5 py-1 text-[10.5px] font-semibold text-[#0F4D3A] transition hover:border-[#0F4D3A] disabled:opacity-60"
                   >
                     {markingAll ? (
                       <Loader2 className="h-3 w-3 animate-spin" />
                     ) : (
-                      <CheckCheck className="h-3 w-3" />
+                      <CheckCheck className="h-3 w-3" strokeWidth={1.5} />
                     )}
                     <span>সকল পঠিত করুন</span>
                   </button>
@@ -377,9 +374,9 @@ export function NotificationBell() {
                   type="button"
                   onClick={() => setOpen(false)}
                   aria-label="বিজ্ঞপ্তি বন্ধ করুন"
-                  className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground transition hover:bg-muted/80 hover:text-foreground"
+                  className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#E6E1D6] bg-white text-[#5F5F5A] transition hover:text-[#1C1C1C]"
                 >
-                  <X className="h-4 w-4" />
+                  <X className="h-4 w-4" strokeWidth={1.5} />
                 </button>
               </div>
             </div>
@@ -387,27 +384,27 @@ export function NotificationBell() {
             {/* Body */}
             <div className="max-h-[62vh] space-y-2.5 overflow-y-auto px-4 py-3.5">
               {error && (
-                <div className="flex items-center gap-2 rounded-2xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-800">
-                  <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600" />
+                <div className="flex items-center gap-2 rounded-[10px] border border-[#C62828]/30 bg-[#C62828]/10 p-3 text-xs text-[#C62828]">
+                  <AlertTriangle className="h-4 w-4 shrink-0" strokeWidth={1.5} />
                   <span>{error}</span>
                 </div>
               )}
 
               {loading && !hasAnyItems ? (
-                <div className="flex flex-col items-center justify-center py-10 text-xs text-muted-foreground">
-                  <Loader2 className="mb-2 h-6 w-6 animate-spin text-primary" />
+                <div className="flex flex-col items-center justify-center py-10 text-xs text-[#5F5F5A]">
+                  <Loader2 className="mb-2 h-6 w-6 animate-spin text-[#0F4D3A]" />
                   <span>বিজ্ঞপ্তি লোড হচ্ছে...</span>
                 </div>
               ) : !hasAnyItems ? (
                 <div className="py-10 text-center">
-                  <div className="mx-auto mb-2.5 flex h-12 w-12 items-center justify-center rounded-full bg-muted/70 text-muted-foreground">
-                    <Bell className="h-5 w-5 opacity-60" />
+                  <div className="mx-auto mb-2.5 flex h-12 w-12 items-center justify-center rounded-full border border-[#E6E1D6] bg-[#FAF7F2] text-[#5F5F5A]">
+                    <Bell className="h-5 w-5" strokeWidth={1.5} />
                   </div>
-                  <p className="font-bangla text-sm font-bold text-foreground">
+                  <p className="font-display text-sm font-bold text-[#1C1C1C]">
                     কোনো নতুন বিজ্ঞপ্তি নেই
                   </p>
-                  <p className="mt-0.5 text-[11px] text-muted-foreground">
-                    বর্তমানে কোনো অপঠিত বার্তা বা জরুরী সতর্কতা নেই।
+                  <p className="mt-0.5 text-[11px] text-[#5F5F5A]">
+                    বর্তমানে কোনো অপঠিত বার্তা বা জরুরি সতর্কতা নেই।
                   </p>
                 </div>
               ) : (
@@ -578,27 +575,27 @@ export function NotificationBell() {
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center justify-between gap-2">
-                              <p className="font-bold text-foreground">জরুরী রক্ত প্রয়োজন</p>
+                              <p className="font-bold text-[#1C1C1C]">জরুরি রক্ত প্রয়োজন</p>
                               <div className="flex items-center gap-1.5">
-                                <span className="text-[10px] text-muted-foreground">
+                                <span className="text-[10px] text-[#5F5F5A]">
                                   {formatBanglaTimestamp(r.created_at)}
                                 </span>
                                 {!isAck && (
-                                  <span className="h-2 w-2 shrink-0 rounded-full bg-rose-600" />
+                                  <span className="h-2 w-2 shrink-0 rounded-full bg-[#C62828]" />
                                 )}
                               </div>
                             </div>
-                            <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-                              রোগী: <strong className="text-foreground">{r.patient_name}</strong> •{" "}
+                            <p className="mt-0.5 text-[11.5px] text-[#5F5F5A]">
+                              রোগী: <strong className="text-[#1C1C1C]">{r.patient_name}</strong> •{" "}
                               {r.hospital || "হাসপাতাল"}
                             </p>
                             {r.phone && (
                               <a
                                 href={`tel:${r.phone}`}
                                 onClick={(e) => e.stopPropagation()}
-                                className="mt-2 inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-[11px] font-bold text-rose-700 shadow-xs hover:underline"
+                                className="mt-2 inline-flex items-center gap-1 rounded-[8px] border border-[#E6E1D6] bg-white px-2.5 py-1 text-[11px] font-bold text-[#C62828] hover:underline"
                               >
-                                <Phone className="h-3 w-3" /> কল করুন: {r.phone}
+                                <Phone className="h-3 w-3" strokeWidth={1.5} /> কল করুন: {r.phone}
                               </a>
                             )}
                           </div>
@@ -611,19 +608,19 @@ export function NotificationBell() {
             </div>
 
             {/* Footer */}
-            <div className="flex items-center gap-2 border-t border-border/60 bg-muted/20 px-4 py-3">
+            <div className="flex items-center gap-2 border-t border-[#E6E1D6] bg-[#FAF7F2] px-4 py-3">
               <Link
                 to="/notifications"
                 onClick={() => setOpen(false)}
-                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-primary px-3 py-2 text-xs font-extrabold text-primary-foreground shadow-xs transition hover:brightness-105"
+                className="inline-flex min-h-[40px] flex-1 items-center justify-center gap-1.5 rounded-[10px] bg-[#0F4D3A] px-3 py-2 text-xs font-semibold text-white transition hover:opacity-95"
               >
                 <span>সব বিজ্ঞপ্তি ও সেটিংস</span>
-                <ArrowUpRight className="h-3.5 w-3.5" />
+                <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={1.5} />
               </Link>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="rounded-2xl bg-muted px-4 py-2 text-xs font-bold text-foreground/80 transition hover:bg-muted/80"
+                className="min-h-[40px] rounded-[10px] border border-[#E6E1D6] bg-white px-4 py-2 text-xs font-semibold text-[#1C1C1C] transition hover:bg-[#FAF7F2]"
               >
                 বন্ধ করুন
               </button>

@@ -300,6 +300,7 @@ export interface ChatThreadRow {
   user_id: string;
   user_name?: string | null;
   user_email?: string | null;
+  user_phone?: string | null;
   last_message_at: string;
   last_message_preview: string | null;
   user_unread: number;
@@ -872,8 +873,8 @@ async function syncSingleDocToNativeFirestore(
     if (collectionName === "emergency_banners") {
       const payload = {
         author_id: authorId,
-        title: sanitizeString(item.title || "জরুরী রক্তের প্রয়োজন", 150, "জরুরী রক্তের প্রয়োজন"),
-        message: sanitizeString(item.message || "জরুরী রক্তের প্রয়োজন", 1000, "জরুরী রক্তের প্রয়োজন"),
+        title: sanitizeString(item.title || "জরুরি রক্তের প্রয়োজন", 150, "জরুরি রক্তের প্রয়োজন"),
+        message: sanitizeString(item.message || "জরুরি রক্তের প্রয়োজন", 1000, "জরুরি রক্তের প্রয়োজন"),
         blood_group: sanitizeString(item.blood_group ?? "", 10, ""),
         hospital: sanitizeString(item.hospital ?? "", 200, ""),
         phone: sanitizeString(item.phone ?? "", 30, ""),
@@ -2267,7 +2268,7 @@ export function useEmergencyBanners() {
       const row: BannerRow = {
         id,
         author_id: actor.uid,
-        title: sanitizeString(b.title || "জরুরী রক্তের প্রয়োজন", 150, "জরুরী রক্তের প্রয়োজন"),
+        title: sanitizeString(b.title || "জরুরি রক্তের প্রয়োজন", 150, "জরুরি রক্তের প্রয়োজন"),
         message: sanitizeString(b.message, 1000, ""),
         blood_group: sanitizeString(b.blood_group ?? "", 10, ""),
         hospital: sanitizeString(b.hospital ?? "", 200, ""),
@@ -2279,16 +2280,16 @@ export function useEmergencyBanners() {
       };
       const syncRes = await syncSingleDocToNativeFirestore("emergency_banners", id, row);
       if (!syncRes.ok) {
-        return { ok: false, error: syncRes.error || "Firebase-এ জরুরী ব্যানার সংরক্ষণ ব্যর্থ হয়েছে" };
+        return { ok: false, error: syncRes.error || "Firebase-এ জরুরি ব্যানার সংরক্ষণ ব্যর্থ হয়েছে" };
       }
       upsertCloudMirrorDoc("emergency_banners", id, row);
       void recordStaffActivity({
         action_type: "create",
-        action_label: "নতুন জরুরী ব্যানার যোগ করেছে",
+        action_label: "নতুন জরুরি ব্যানার যোগ করেছে",
         module: "banners",
-        module_label: "জরুরী ব্যানার",
+        module_label: "জরুরি ব্যানার",
         target_id: id,
-        target_title: b.title || "জরুরী রক্তের প্রয়োজন",
+        target_title: b.title || "জরুরি রক্তের প্রয়োজন",
         target_detail: `${b.message} • গ্রুপ: ${b.blood_group || "—"} • ফোন: ${b.phone || "—"}`,
       });
       return { ok: true };
@@ -2302,7 +2303,7 @@ export function useEmergencyBanners() {
     try {
       const nowIso = new Date().toISOString();
       const sanitizedPatch: Record<string, unknown> = { updatedAt: serverTimestamp() };
-      if (patch.title !== undefined) sanitizedPatch.title = sanitizeString(patch.title, 150, "জরুরী রক্তের প্রয়োজন");
+      if (patch.title !== undefined) sanitizedPatch.title = sanitizeString(patch.title, 150, "জরুরি রক্তের প্রয়োজন");
       if (patch.message !== undefined) sanitizedPatch.message = sanitizeString(patch.message, 1000, "");
       if (patch.blood_group !== undefined) sanitizedPatch.blood_group = sanitizeString(patch.blood_group ?? "", 10, "");
       if (patch.hospital !== undefined) sanitizedPatch.hospital = sanitizeString(patch.hospital ?? "", 200, "");
@@ -2322,19 +2323,19 @@ export function useEmergencyBanners() {
         action_label:
           patch.visible !== undefined && Object.keys(patch).length === 1
             ? patch.visible
-              ? "জরুরী ব্যানার দৃশ্যমান করেছে"
-              : "জরুরী ব্যানার লুকিয়েছে"
-            : "জরুরী ব্যানার এডিট করেছে",
+              ? "জরুরি ব্যানার দৃশ্যমান করেছে"
+              : "জরুরি ব্যানার লুকিয়েছে"
+            : "জরুরি ব্যানার এডিট করেছে",
         module: "banners",
-        module_label: "জরুরী ব্যানার",
+        module_label: "জরুরি ব্যানার",
         target_id: id,
-        target_title: patch.title || existing?.title || "জরুরী ব্যানার",
+        target_title: patch.title || existing?.title || "জরুরি ব্যানার",
         target_detail: patch.message || existing?.message || "",
       });
       return { error: null };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      return { error: { message: msg || "Firebase-এ জরুরী ব্যানার আপডেট ব্যর্থ হয়েছে" } };
+      return { error: { message: msg || "Firebase-এ জরুরি ব্যানার আপডেট ব্যর্থ হয়েছে" } };
     }
   };
 
@@ -2345,11 +2346,11 @@ export function useEmergencyBanners() {
       removeCloudMirrorDoc("emergency_banners", id);
       void recordStaffActivity({
         action_type: "delete",
-        action_label: "জরুরী ব্যানার ডিলিট করেছে",
+        action_label: "জরুরি ব্যানার ডিলিট করেছে",
         module: "banners",
-        module_label: "জরুরী ব্যানার",
+        module_label: "জরুরি ব্যানার",
         target_id: id,
-        target_title: existing?.title || "জরুরী ব্যানার",
+        target_title: existing?.title || "জরুরি ব্যানার",
         target_detail: existing
           ? `বার্তা: ${existing.message} • গ্রুপ: ${existing.blood_group || "—"} • হাসপাতাল: ${existing.hospital || "—"} • ফোন: ${existing.phone || "—"}`
           : "ব্যানার মুছে ফেলা হয়েছে",
@@ -2359,7 +2360,7 @@ export function useEmergencyBanners() {
       return { error: null };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      return { error: { message: msg || "Firebase থেকে জরুরী ব্যানার ডিলিট ব্যর্থ হয়েছে" } };
+      return { error: { message: msg || "Firebase থেকে জরুরি ব্যানার ডিলিট ব্যর্থ হয়েছে" } };
     }
   };
 
@@ -2472,10 +2473,10 @@ export function useEmergencyRequests() {
         action_type: status === "approved" ? "approve" : "reject",
         action_label:
           status === "approved"
-            ? "জরুরী রক্তের অনুরোধ অনুমোদন করেছে"
-            : "জরুরী রক্তের অনুরোধ বাতিল করেছে",
+            ? "জরুরি রক্তের অনুরোধ অনুমোদন করেছে"
+            : "জরুরি রক্তের অনুরোধ বাতিল করেছে",
         module: "emergency",
-        module_label: "জরুরী রক্ত অনুরোধ",
+        module_label: "জরুরি রক্ত অনুরোধ",
         target_id: id,
         target_title: existing ? `${existing.patient_name} (${existing.blood_group})` : id,
         target_detail: existing
@@ -2510,9 +2511,9 @@ export function useEmergencyRequests() {
       upsertCloudMirrorDoc("emergency_blood_requests", id, updated);
       void recordStaffActivity({
         action_type: "edit",
-        action_label: "জরুরী রক্তের অনুরোধ এডিট করেছে",
+        action_label: "জরুরি রক্তের অনুরোধ এডিট করেছে",
         module: "emergency",
-        module_label: "জরুরী রক্ত অনুরোধ",
+        module_label: "জরুরি রক্ত অনুরোধ",
         target_id: id,
         target_title: `${patch.patient_name || existing?.patient_name || id} (${patch.blood_group || existing?.blood_group || ""})`,
         target_detail: `ফোন: ${patch.phone ?? existing?.phone ?? "—"} • হাসপাতাল: ${patch.hospital ?? existing?.hospital ?? "—"}`,
@@ -2531,14 +2532,14 @@ export function useEmergencyRequests() {
       removeCloudMirrorDoc("emergency_blood_requests", id);
       void recordStaffActivity({
         action_type: "delete",
-        action_label: "জরুরী রক্তের অনুরোধ ডিলিট করেছে",
+        action_label: "জরুরি রক্তের অনুরোধ ডিলিট করেছে",
         module: "emergency",
-        module_label: "জরুরী রক্ত অনুরোধ",
+        module_label: "জরুরি রক্ত অনুরোধ",
         target_id: id,
         target_title: existing ? `${existing.patient_name} (${existing.blood_group})` : id,
         target_detail: existing
           ? `ফোন: ${existing.phone} • রক্তের গ্রুপ: ${existing.blood_group} • হাসপাতাল: ${existing.hospital || "—"} • বার্তা: ${existing.message || "—"}`
-          : "জরুরী রক্তের অনুরোধ মুছে ফেলা হয়েছে",
+          : "জরুরি রক্তের অনুরোধ মুছে ফেলা হয়েছে",
         deleted_snapshot: existing ? ({ ...existing } as unknown as Record<string, unknown>) : null,
         collection_name: "emergency_blood_requests",
       });
@@ -3471,6 +3472,7 @@ export function useChatThreads() {
         setFsError(null);
       };
 
+      let fallbackAttached = false;
       const subscribeSource = (sourceKey: string, q: Query<DocumentData> | null) => {
         if (!q) return;
         const u = onSnapshot(
@@ -3485,6 +3487,12 @@ export function useChatThreads() {
             console.warn(`[Chat] Firestore chat_threads (${sourceKey}) notice:`, err);
             if (!active) return;
             if (err?.code === "permission-denied") {
+              if (sourceKey === "all_ops" && currentUid && !fallbackAttached) {
+                fallbackAttached = true;
+                subscribeSource("staff", query(threadsCol, where("staff_uids", "array-contains", currentUid)));
+                subscribeSource("assigned", query(threadsCol, where("assigned_to_uid", "==", currentUid)));
+                return;
+              }
               setFsError("চ্যাট থ্রেড দেখার অনুমতি পাওয়া যায়নি (Permission denied)");
             }
             setFsLoading(false);
@@ -3493,16 +3501,11 @@ export function useChatThreads() {
         unsubs.push(u);
       };
 
-      if (isFullSuper) {
-        subscribeSource("super", query(threadsCol));
+      if (isFullSuper || (canAccessOperatorInbox && canViewAllChats)) {
+        subscribeSource(isFullSuper ? "super" : "all_ops", query(threadsCol));
       } else if (canAccessOperatorInbox && currentUid) {
-        if (canViewAllChats) {
-          subscribeSource("staff", query(threadsCol, where("staff_uids", "array-contains", currentUid)));
-          subscribeSource("assigned", query(threadsCol, where("assigned_to_uid", "==", currentUid)));
-        } else {
-          // Assigned-only operator (e.g. Moderator without chat_view_all)
-          subscribeSource("assigned", query(threadsCol, where("assigned_to_uid", "==", currentUid)));
-        }
+        // Assigned-only operator (e.g. Moderator without chat_view_all)
+        subscribeSource("assigned", query(threadsCol, where("assigned_to_uid", "==", currentUid)));
       } else if (currentUid) {
         subscribeSource("cust_uid", query(threadsCol, where("customer_uid", "==", currentUid)));
         subscribeSource("user_id", query(threadsCol, where("user_id", "==", currentUid)));
@@ -3553,6 +3556,7 @@ export function useChatThreads() {
                 user_id: String(t.user_id || t.id),
                 user_name: t.user_name ?? null,
                 user_email: t.user_email ?? null,
+                user_phone: t.user_phone ?? null,
                 last_message_at: String(t.last_message_at || new Date().toISOString()),
                 last_message_preview: t.last_message_preview ?? null,
                 user_unread: Number(t.user_unread ?? 0),
@@ -3822,8 +3826,9 @@ export async function sendChatMessageDirect(params: {
       await setDoc(threadRef, {
         user_id: threadId,
         customer_uid: sender_role === "user" ? activeUid : threadId,
-        user_name: meta?.user_name || (sender_role === "user" ? "গ্রাহক" : "গ্রাহক"),
+        user_name: meta?.user_name || "গ্রাহক",
         user_email: meta?.user_email || "",
+        user_phone: sanitizeString(meta?.user_phone || "", 30, ""),
         last_message_at: nowIso,
         last_message_preview: preview,
         user_unread: sender_role === "staff" ? 1 : 0,
@@ -3880,6 +3885,7 @@ export async function sendChatMessageDirect(params: {
         last_message_preview: preview,
         user_name: meta?.user_name || tData.user_name || "গ্রাহক",
         user_email: meta?.user_email || tData.user_email || "",
+        user_phone: sanitizeString(meta?.user_phone || tData.user_phone || "", 30, ""),
         user_unread:
           sender_role === "staff"
             ? Math.min((Number(tData.user_unread) || 0) + 1, 10000)
@@ -4118,6 +4124,7 @@ export function useThreadMessages(threadId: string | null) {
         setError(null);
       };
 
+      let fallbackAttached = false;
       const subscribeSource = (sourceKey: string, q: Query<DocumentData>) => {
         const u = onSnapshot(
           q,
@@ -4131,6 +4138,12 @@ export function useThreadMessages(threadId: string | null) {
             console.warn(`[Chat] Firestore messages (${sourceKey}) notice:`, err);
             if (!active) return;
             if (err?.code === "permission-denied") {
+              if (sourceKey === "all_ops" && currentUid && !fallbackAttached) {
+                fallbackAttached = true;
+                subscribeSource("staff", query(msgsRef, where("staff_uids", "array-contains", currentUid)));
+                subscribeSource("assigned", query(msgsRef, where("assigned_to_uid", "==", currentUid)));
+                return;
+              }
               setError("এই চ্যাটের মেসেজ দেখার অনুমতি পাওয়া যায়নি।");
             }
             setLoading(false);
@@ -4139,15 +4152,10 @@ export function useThreadMessages(threadId: string | null) {
         unsubs.push(u);
       };
 
-      if (isFullSuper) {
-        subscribeSource("super", query(msgsRef));
+      if (isFullSuper || (canOperatorListMessages && canViewAllChats)) {
+        subscribeSource(isFullSuper ? "super" : "all_ops", query(msgsRef));
       } else if (canOperatorListMessages && currentUid) {
-        if (canViewAllChats) {
-          subscribeSource("staff", query(msgsRef, where("staff_uids", "array-contains", currentUid)));
-          subscribeSource("assigned", query(msgsRef, where("assigned_to_uid", "==", currentUid)));
-        } else {
-          subscribeSource("assigned", query(msgsRef, where("assigned_to_uid", "==", currentUid)));
-        }
+        subscribeSource("assigned", query(msgsRef, where("assigned_to_uid", "==", currentUid)));
       } else if (currentUid) {
         subscribeSource("cust_uid", query(msgsRef, where("customer_uid", "==", currentUid)));
         if (threadId === currentUid) {
@@ -4504,7 +4512,7 @@ export async function handoffAiToLiveChat(params: {
       sender_name: userName || "গ্রাহক",
       sender_role_label: "গ্রাহক",
       status: "new",
-      priority: "high",
+      priority: "urgent",
       source: "ai_handoff",
       handoff_summary: cleanSummary,
     },

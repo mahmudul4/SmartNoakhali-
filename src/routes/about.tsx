@@ -64,18 +64,18 @@ function About() {
       </Link>
 
       {/* Hero Banner */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-hero p-6 text-primary-foreground shadow-elevated">
+      <div className="relative overflow-hidden rounded-[12px] border border-[#0B3C2D] bg-[#0F4D3A] p-6 text-white">
         <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center">
-          <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-white/10 p-2 backdrop-blur-xs">
+          <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-white p-1.5">
             <img
               src={logo}
               alt="Smart Noakhali Logo"
-              className="h-full w-full object-contain"
+              className="h-full w-full rounded-full object-contain"
             />
           </div>
           <div>
-            <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-0.5 text-xs font-semibold backdrop-blur-xs">
-              <Sparkles className="h-3.5 w-3.5" />
+            <div className="mb-1 inline-flex items-center gap-1.5 rounded-[8px] bg-white/15 px-3 py-0.5 text-xs font-semibold">
+              <Sparkles className="h-3.5 w-3.5" strokeWidth={1.5} />
               <span>ডিজিটাল সেবা পরিচিতি</span>
             </div>
             <h1 className="font-display text-2xl font-bold sm:text-3xl">
@@ -91,7 +91,7 @@ function About() {
 
       {/* Contact info rows */}
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        <InfoRow icon={Phone} label="জরুরী হটলাইন ও যোগাযোগ" value={phone} href={`tel:${phone}`} />
+        <InfoRow icon={Phone} label="জরুরি হটলাইন ও যোগাযোগ" value={phone} href={`tel:${phone}`} />
         <InfoRow icon={Mail} label="অফিসিয়াল ইমেইল" value={email} href={`mailto:${email}`} />
         <InfoRow icon={MapPin} label="কার্যালয়ের ঠিকানা" value={address} />
       </div>
@@ -100,14 +100,14 @@ function About() {
       <div className="mt-6">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h2 className="font-display text-lg font-bold text-primary-deep sm:text-xl">
+            <h2 className="font-display text-lg font-bold text-[#1C1C1C] sm:text-xl">
               আমাদের সেবাসমূহ
             </h2>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-[#5F5F5A]">
               নোয়াখালীর সাধারণ নাগরিকদের জন্য সার্বক্ষণিক প্রদত্ত সেবা
             </p>
           </div>
-          <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
+          <span className="rounded-[8px] border border-[#E6E1D6] bg-white px-3 py-1 text-xs font-bold text-[#0F4D3A]">
             সক্রিয় সেবাসমূহ
           </span>
         </div>
@@ -213,10 +213,10 @@ function ServiceCard({ service, index }: { service: ServiceItem; index: number }
   const IconComponent = service.iconName ? CATEGORY_ICONS[service.iconName] || Layers : Layers;
 
   return (
-    <div className="group relative flex flex-col justify-between rounded-2xl border border-border/70 bg-card p-4 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-elevated">
+    <div className="group relative flex flex-col justify-between rounded-[12px] border border-[#E6E1D6] bg-white p-4 transition-colors hover:border-[#0F4D3A]/40">
       <div>
         <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-primary/15 to-primary/5 text-primary shadow-xs">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] text-[#0F4D3A]">
             {service.imageUrl ? (
               <img
                 src={service.imageUrl}
@@ -224,20 +224,20 @@ function ServiceCard({ service, index }: { service: ServiceItem; index: number }
                 className="h-full w-full object-cover"
               />
             ) : (
-              <IconComponent className="h-5 w-5" />
+              <IconComponent className="h-5 w-5" strokeWidth={1.5} />
             )}
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-bold text-primary/70">
+              <span className="text-[11px] font-bold text-[#0F4D3A]">
                 #{String(index + 1).padStart(2, "0")}
               </span>
-              <h4 className="font-display text-sm font-bold text-foreground sm:text-base leading-snug">
+              <h4 className="font-display text-sm font-bold text-[#1C1C1C] sm:text-base leading-snug">
                 {service.title}
               </h4>
             </div>
             {service.description && (
-              <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed sm:text-[13px]">
+              <p className="mt-1.5 text-xs text-[#5F5F5A] leading-relaxed sm:text-[13px]">
                 {service.description}
               </p>
             )}
@@ -260,13 +260,13 @@ function InfoRow({
   href?: string;
 }) {
   const content = (
-    <div className="flex h-full items-center gap-3 rounded-2xl border border-border/60 bg-gradient-card p-3.5 shadow-card transition hover:border-primary/30">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-        <Icon className="h-5 w-5" />
+    <div className="flex h-full items-center gap-3 rounded-[12px] border border-[#E6E1D6] bg-white p-3.5 transition hover:border-[#0F4D3A]/40">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#0F4D3A]/10 text-[#0F4D3A]">
+        <Icon className="h-5 w-5" strokeWidth={1.5} />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="text-[11px] text-muted-foreground">{label}</p>
-        <p className="truncate text-xs font-semibold sm:text-sm">{value}</p>
+        <p className="text-[11px] text-[#5F5F5A]">{label}</p>
+        <p className="truncate text-xs font-semibold text-[#1C1C1C] sm:text-sm">{value}</p>
       </div>
     </div>
   );

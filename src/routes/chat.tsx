@@ -101,12 +101,12 @@ function getOrCreateGuestId(): string {
 }
 
 const QUICK_PROMPTS = [
-  "🚑 জরুরী অ্যাম্বুলেন্স ও হাসপাতাল",
-  "🩸 রক্তদাতা খুঁজুন (O+ / B+ / A+)",
-  "🚒 ফায়ার সার্ভিস ও পুলিশ স্টেশন",
-  "🏥 নোয়াখালী জেনারেল হাসপাতাল",
-  "📞 জরুরি হটলাইন ৯৯৯ ও ৩৩৩",
-  "🤝 অনুদান ও বিকাশ নাম্বার",
+  "জরুরি অ্যাম্বুলেন্স ও হাসপাতাল",
+  "রক্তদাতা খুঁজুন (O+ / B+ / A+)",
+  "ফায়ার সার্ভিস ও পুলিশ স্টেশন",
+  "নোয়াখালী জেনারেল হাসপাতাল",
+  "জরুরি হটলাইন ৯৯৯ ও ৩৩৩",
+  "অনুদান ও বিকাশ নাম্বার",
 ];
 
 function ChatPage() {
@@ -332,7 +332,7 @@ function ChatPage() {
         data.fallbackText ||
         data.text ||
         data.reply ||
-        `স্মার্ট নোয়াখালী এআই সহকারী: আপনার অনুসন্ধানের জন্য নিচের জরুরি যোগাযোগ:\n• জাতীয় জরুরি সেবা: 📞 [999](tel:999)\n• নোয়াখালী জেনারেল হাসপাতাল: 📞 [01730-324794](tel:01730324794)\n• নোয়াখালী ফায়ার সার্ভিস: 📞 [01730-002444](tel:01730002444)\n• সুধারাম মডেল থানা: 📞 [01320-116035](tel:01320116035)\n\nসরাসরি সাপোর্টের সাথে কথা বলতে উপরের 'হিউম্যান সাপোর্ট' বাটনে ট্যাপ করুন।`;
+        `স্মার্ট নোয়াখালী এআই সহকারী: আপনার অনুসন্ধানের জন্য নিচের জরুরি যোগাযোগ:\n• জাতীয় জরুরি সেবা: 📞 [৯৯৯](tel:999)\n• নোয়াখালী জেনারেল হাসপাতাল: 📞 [01730-324794](tel:01730324794)\n• নোয়াখালী ফায়ার সার্ভিস: 📞 [01730-002444](tel:01730002444)\n• সুধারাম মডেল থানা: 📞 [01320-116035](tel:01320116035)\n\nসরাসরি সাপোর্টের সাথে কথা বলতে উপরের 'হিউম্যান সাপোর্ট' বাটনে ট্যাপ করুন।`;
 
       const statusBanner = !resp.ok
         ? resp.status === 429
@@ -358,7 +358,7 @@ function ChatPage() {
         {
           id: `fallback_${Date.now()}`,
           role: "assistant",
-          text: `স্মার্ট নোয়াখালী এআই সহকারী: জরুরি যোগাযোগের জন্য:\n• জরুরি হটলাইন: 📞 [999](tel:999)\n• নোয়াখালী জেনারেল হাসপাতাল: 📞 [01730-324794](tel:01730324794)\n• নোয়াখালী ফায়ার সার্ভিস: 📞 [01730-002444](tel:01730002444)\n\nঅথবা 'সরাসরি হিউম্যান সাপোর্ট' বাটনে ক্লিক করে সাপোর্ট টিমের সাথে কথা বলুন।`,
+          text: `স্মার্ট নোয়াখালী এআই সহকারী: জরুরি যোগাযোগের জন্য:\n• জরুরি হটলাইন: 📞 [৯৯৯](tel:999)\n• নোয়াখালী জেনারেল হাসপাতাল: 📞 [01730-324794](tel:01730324794)\n• নোয়াখালী ফায়ার সার্ভিস: 📞 [01730-002444](tel:01730002444)\n\nঅথবা 'সরাসরি হিউম্যান সাপোর্ট' বাটনে ক্লিক করে সাপোর্ট টিমের সাথে কথা বলুন।`,
           created_at: new Date().toISOString(),
           suggestHandoff: true,
         },
@@ -468,42 +468,38 @@ function ChatPage() {
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100dvh-64px)] min-h-[420px] w-full max-w-[1480px] flex-col px-1.5 py-1.5 sm:px-4 sm:py-3 lg:h-[85vh] lg:w-[88%] xl:w-[85%]">
-      <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-2xl border border-border/80 bg-card shadow-elevated sm:rounded-3xl">
+    <div className="mx-auto flex h-[calc(100dvh-64px)] min-h-[420px] w-full max-w-[1440px] flex-col px-2 py-2 sm:px-4 sm:py-3 lg:h-[85vh]">
+      <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-[12px] border border-[#E6E1D6] bg-white">
         {/* Compact Workspace Top Bar */}
-        <div
-          className={`shrink-0 border-b border-border/70 px-3 py-2 sm:px-4 sm:py-2.5 ${
-            mode === "ai" ? "bg-gradient-to-r from-indigo-50 via-card to-teal-50/40" : "bg-gradient-card"
-          }`}
-        >
+        <div className="shrink-0 border-b border-[#E6E1D6] bg-white px-3 py-2.5 sm:px-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2 sm:gap-2.5">
               <Link
                 to="/"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground transition hover:text-foreground"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] text-[#1C1C1C] transition hover:border-[#0F4D3A] hover:text-[#0F4D3A]"
                 title="হোমে ফিরুন"
                 aria-label="হোমে ফিরুন"
               >
-                <ArrowLeft className="h-4 w-4" />
+                <ArrowLeft className="h-4 w-4" strokeWidth={1.5} />
               </Link>
-              <div
-                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white shadow-sm ${
-                  mode === "ai" ? "bg-gradient-to-br from-indigo-600 to-teal-600" : "bg-gradient-hero"
-                }`}
-              >
-                {mode === "ai" ? <Sparkles className="h-4 w-4 text-amber-200" /> : <Headphones className="h-4 w-4" />}
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[#0F4D3A] text-white">
+                {mode === "ai" ? (
+                  <Sparkles className="h-4 w-4" strokeWidth={1.5} />
+                ) : (
+                  <Headphones className="h-4 w-4" strokeWidth={1.5} />
+                )}
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <p className="truncate font-display text-sm font-bold text-primary-deep sm:text-base">
+                  <p className="truncate font-display text-sm font-bold text-[#1C1C1C] sm:text-base">
                     {mode === "ai" ? aiConfig.botName || "স্মার্ট এআই সহকারী" : "সরাসরি লাইভ চ্যাট"}
                   </p>
-                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-700 ring-1 ring-emerald-500/30">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-[8px] border border-[#E6E1D6] bg-[#FAF7F2] px-2 py-0.5 text-[10px] font-bold text-[#0F4D3A]">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" />
                     সক্রিয়
                   </span>
                 </div>
-                <p className="hidden truncate text-[11px] text-muted-foreground sm:block">
+                <p className="hidden truncate text-[11px] text-[#5F5F5A] sm:block">
                   {mode === "ai"
                     ? "তাৎক্ষণিক পাবলিক ডিরেক্টরি ও সেবা সহায়তা"
                     : isStaff
@@ -514,28 +510,28 @@ function ChatPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-              <div className="flex items-center gap-1 rounded-xl bg-muted/80 p-1">
+              <div className="flex items-center gap-1 rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] p-0.5">
                 <button
                   type="button"
                   onClick={() => setMode("ai")}
-                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold transition ${
+                  className={`flex items-center gap-1 rounded-[8px] px-2.5 py-1 text-xs font-bold transition ${
                     mode === "ai"
-                      ? "bg-indigo-600 text-white shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
+                      ? "bg-[#0F4D3A] text-white"
+                      : "text-[#5F5F5A] hover:text-[#1C1C1C]"
                   }`}
                 >
-                  <Bot className="h-3.5 w-3.5" /> এআই
+                  <Bot className="h-3.5 w-3.5" strokeWidth={1.5} /> এআই
                 </button>
                 <button
                   type="button"
                   onClick={() => setMode("live")}
-                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold transition ${
+                  className={`flex items-center gap-1 rounded-[8px] px-2.5 py-1 text-xs font-bold transition ${
                     mode === "live"
-                      ? "bg-gradient-hero text-white shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
+                      ? "bg-[#0F4D3A] text-white"
+                      : "text-[#5F5F5A] hover:text-[#1C1C1C]"
                   }`}
                 >
-                  <MessageCircle className="h-3.5 w-3.5" /> লাইভ চ্যাট
+                  <MessageCircle className="h-3.5 w-3.5" strokeWidth={1.5} /> লাইভ চ্যাট
                 </button>
               </div>
 
@@ -621,27 +617,27 @@ function ChatPage() {
         {mode === "ai" ? (
           <div className="flex flex-1 min-h-0 flex-col">
             {/* Compact Quick Prompts Bar */}
-            <div className="shrink-0 border-b border-indigo-100/80 bg-indigo-50/30 px-3 py-2 sm:px-4">
+            <div className="shrink-0 border-b border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 sm:px-4">
               <div className="mb-1.5 flex items-center justify-between gap-2">
-                <span className="flex items-center gap-1 text-[11px] font-bold text-indigo-900/75">
-                  <Sparkles className="h-3 w-3 text-indigo-600" /> দ্রুত সেবা প্রশ্ন
+                <span className="flex items-center gap-1 text-[11px] font-bold text-[#0F4D3A]">
+                  <Sparkles className="h-3 w-3" strokeWidth={1.5} /> দ্রুত সেবা প্রশ্ন
                 </span>
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
                     disabled={handoffBusy}
                     onClick={() => void handleHandoffToLiveChat()}
-                    className="flex items-center gap-1 rounded-lg bg-emerald-600/15 px-2.5 py-1 text-[11px] font-bold text-emerald-800 hover:bg-emerald-600/25 transition"
+                    className="flex items-center gap-1 rounded-[10px] border border-[#0F4D3A] bg-white px-2.5 py-1 text-[11px] font-bold text-[#0F4D3A] hover:bg-[#0F4D3A] hover:text-white transition"
                   >
-                    <Headphones className="h-3 w-3" /> হিউম্যান সাপোর্ট
+                    <Headphones className="h-3 w-3" strokeWidth={1.5} /> হিউম্যান সাপোর্ট
                   </button>
                   <button
                     type="button"
                     onClick={resetAiChat}
-                    className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-muted hover:text-primary transition"
+                    className="flex items-center gap-1 rounded-[8px] border border-[#E6E1D6] bg-white px-2 py-1 text-[11px] font-semibold text-[#5F5F5A] hover:text-[#0F4D3A] transition"
                     title="নতুন এআই চ্যাট শুরু করুন"
                   >
-                    <RotateCcw className="h-3 w-3" /> নতুন চ্যাট
+                    <RotateCcw className="h-3 w-3" strokeWidth={1.5} /> নতুন চ্যাট
                   </button>
                 </div>
               </div>
@@ -651,7 +647,7 @@ function ChatPage() {
                     key={qp}
                     type="button"
                     onClick={() => void askAi(qp)}
-                    className="shrink-0 rounded-full border border-indigo-200 bg-white px-3 py-1 text-[11px] font-semibold text-indigo-900 transition hover:bg-indigo-50 active:scale-95 whitespace-nowrap"
+                    className="shrink-0 rounded-[10px] border border-[#E6E1D6] bg-white px-3 py-1 text-[11.5px] font-semibold text-[#1C1C1C] transition hover:border-[#0F4D3A] hover:text-[#0F4D3A] whitespace-nowrap"
                   >
                     {qp}
                   </button>
@@ -660,23 +656,23 @@ function ChatPage() {
             </div>
 
             {/* AI Messages View */}
-            <div className="flex-1 min-h-0 space-y-3 overflow-y-auto bg-indigo-50/20 p-3 sm:p-5">
+            <div className="flex-1 min-h-0 space-y-3 overflow-y-auto bg-[#FAF7F2] p-3 sm:p-5">
             {aiMessages.map((m) => {
               const isUser = m.role === "user";
               return (
                 <div key={m.id} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
                   <div
-                    className={`group relative max-w-[88%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
+                    className={`group relative max-w-[88%] rounded-[12px] px-4 py-3 text-sm ${
                       isUser
-                        ? "bg-gradient-to-r from-indigo-600 to-teal-700 text-white"
-                        : "border border-indigo-100 bg-card text-foreground"
+                        ? "bg-[#0F4D3A] text-white"
+                        : "border border-[#E6E1D6] bg-white text-[#1C1C1C]"
                     }`}
                   >
                     <div className="mb-1 flex items-center justify-between gap-3">
                       <div className="flex items-center gap-1.5">
-                        {!isUser && <Bot className="h-3.5 w-3.5 text-indigo-600" />}
-                        <span className={`text-[10px] font-bold ${isUser ? "text-amber-200" : "text-indigo-700"}`}>
-                          {isUser ? "আপনি" : aiConfig.botName || "স্মার্ট এআই সহকারী"}
+                        {!isUser && <Bot className="h-3.5 w-3.5 text-[#0F4D3A]" strokeWidth={1.5} />}
+                        <span className={`text-[11px] font-bold ${isUser ? "text-white/90" : "text-[#0F4D3A]"}`}>
+                          {isUser ? "আপনি" : `${aiConfig.botName || "স্মার্ট এআই"} (AI সহকারী)`}
                         </span>
                       </div>
                       <button
@@ -1008,18 +1004,21 @@ function ChatPage() {
                         />
                       )}
                       <div
-                        className={`group relative max-w-[85%] sm:max-w-[76%] rounded-2xl px-3.5 py-2.5 text-[13.5px] sm:text-sm shadow-sm ${
+                        className={`group relative max-w-[85%] sm:max-w-[76%] rounded-[12px] px-3.5 py-2.5 text-[14px] ${
                           mine
-                            ? "bg-gradient-hero text-primary-foreground"
-                            : "border border-border bg-card text-foreground"
+                            ? "bg-[#0F4D3A] text-white"
+                            : "border border-[#E6E1D6] bg-white text-[#1C1C1C]"
                         }`}
                       >
                         <div className="mb-0.5 flex items-center justify-between gap-3">
                           <div className="flex items-center gap-1.5">
-                            <span className={`text-[10.5px] font-bold ${mine ? "text-gold" : "text-primary-deep"}`}>
-                              {mine ? "আপনি" : staffName}
+                            <span className={`text-[11px] font-bold ${mine ? "text-white/90" : "text-[#0F4D3A]"}`}>
+                              {mine
+                                ? "আপনি"
+                                : isStaff
+                                  ? staffName
+                                  : `Human Admin (${staffName} • ${staffRole})`}
                             </span>
-                            {!mine && <span className="text-[10px] text-muted-foreground">· {staffRole}</span>}
                           </div>
                           {m.body && (
                             <button

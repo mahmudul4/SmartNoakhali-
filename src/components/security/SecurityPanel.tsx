@@ -323,10 +323,10 @@ function BackupCodesBox() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="flex items-center gap-2 font-display text-sm font-bold text-primary-deep">
-            <AlertTriangle className="h-4 w-4 text-amber-600" /> জরুরী রিকভারি ব্যাকআপ কোড
+            <AlertTriangle className="h-4 w-4 text-amber-600" /> জরুরি রিকভারি ব্যাকআপ কোড
           </p>
           <p className="text-xs text-muted-foreground">
-            পিন ভুলে গেলে বা জরুরী মুহূর্তে একাউন্ট পুনরুদ্ধারের জন্য কোডগুলো সংরক্ষণ করে রাখুন
+            পিন ভুলে গেলে বা জরুরি মুহূর্তে একাউন্ট পুনরুদ্ধারের জন্য কোডগুলো সংরক্ষণ করে রাখুন
           </p>
         </div>
         <div className="flex gap-1.5">

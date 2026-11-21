@@ -959,13 +959,13 @@ function Dashboard({
   return (
     <div className="w-full px-3.5 pb-28 pt-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
       {/* Top Personal Profile & Control Header */}
-      <div className="mb-4 rounded-3xl bg-gradient-hero p-4 text-primary-foreground shadow-elevated sm:p-5">
+      <div className="mb-4 rounded-[12px] border border-[#0B3C2D] bg-[#0F4D3A] p-4 text-white sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={() => setTab("profile")}
-              className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-full bg-white p-0.5 ring-2 ring-gold shadow-gold"
+              className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-full border border-white/30 bg-white p-0.5"
               title="প্রোফাইল ফটো পরিবর্তন করুন"
             >
               <img
@@ -981,20 +981,20 @@ function Dashboard({
             <div>
               <div className="flex flex-wrap items-center gap-1.5">
                 <p className="font-display text-base font-bold">{myDisplayName}</p>
-                <span className="inline-flex items-center gap-1 rounded-full bg-gold/25 px-2.5 py-0.5 text-[10px] font-bold text-gold ring-1 ring-gold/50">
-                  <ShieldCheck className="h-3 w-3" /> {myRoleLabel}
+                <span className="inline-flex items-center gap-1 rounded-[8px] border border-white/25 bg-white/15 px-2.5 py-0.5 text-[10px] font-bold text-white">
+                  <ShieldCheck className="h-3 w-3" strokeWidth={1.5} /> {myRoleLabel}
                 </span>
               </div>
-              <p className="text-xs opacity-90">
+              <p className="text-xs text-white/90">
                 {user?.email || (isMainAdmin ? SUPER_ADMIN_EMAIL : "সুপার অ্যাডমিন")} •{" "}
                 {totalPending > 0 ? `${totalPending} টি অপেক্ষমাণ অনুমোদন` : "সব আপডেট ও সিঙ্কড"}
               </p>
               <button
                 type="button"
                 onClick={() => setTab("profile")}
-                className="mt-1 inline-flex items-center gap-1 rounded-full bg-white/15 px-2.5 py-0.5 text-[10px] font-semibold text-white hover:bg-white/25"
+                className="mt-1.5 inline-flex items-center gap-1 rounded-[8px] bg-white/15 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-white/25"
               >
-                <UserCircle2 className="h-3 w-3" /> আমার প্রোফাইল ও ফটো আপলোড
+                <UserCircle2 className="h-3 w-3" strokeWidth={1.5} /> আমার প্রোফাইল ও ফটো আপলোড
               </button>
             </div>
           </div>
@@ -1005,25 +1005,25 @@ function Dashboard({
                 type="button"
                 onClick={onLockScreen}
                 title="প্যানেল লক করুন"
-                className="flex items-center gap-1 rounded-full bg-amber-400/20 px-2.5 py-1.5 text-xs font-bold text-gold ring-1 ring-gold/40 transition hover:bg-amber-400/30"
+                className="flex min-h-[38px] items-center gap-1 rounded-[8px] border border-white/25 bg-white/10 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-white/20"
               >
-                <Lock className="h-3.5 w-3.5" /> লক
+                <Lock className="h-3.5 w-3.5" strokeWidth={1.5} /> লক
               </button>
             )}
             <button
               type="button"
               onClick={() => void handleDashboardRefresh()}
               title="সকল ডাটা লাইভ সিঙ্ক করুন"
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-white/15 transition hover:bg-white/25"
+              className="flex h-9 w-9 items-center justify-center rounded-[8px] border border-white/25 bg-white/10 text-white transition hover:bg-white/20"
             >
-              <RefreshCcw className={`h-3.5 w-3.5 ${refreshingDashboard ? "animate-spin" : ""}`} />
+              <RefreshCcw className={`h-3.5 w-3.5 ${refreshingDashboard ? "animate-spin" : ""}`} strokeWidth={1.5} />
             </button>
             <button
               type="button"
               onClick={() => void onLogout()}
-              className="flex items-center gap-1 rounded-full bg-white/15 px-3 py-1.5 text-xs font-semibold transition hover:bg-white/25 active:scale-95"
+              className="flex min-h-[38px] items-center gap-1 rounded-[8px] border border-white/25 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/20 active:scale-95"
             >
-              <LogOut className="h-3.5 w-3.5" /> লগআউট
+              <LogOut className="h-3.5 w-3.5" strokeWidth={1.5} /> লগআউট
             </button>
           </div>
         </div>
@@ -1054,7 +1054,7 @@ function Dashboard({
         )}
         <Stat label="অনুমোদিত দাতা" value={String(approvedDonors)} />
         <Stat
-          label="জরুরী রিকোয়েস্ট"
+          label="জরুরি রিকোয়েস্ট"
           value={String(pendingEmerg.length)}
           accent={pendingEmerg.length > 0}
         />
@@ -1073,7 +1073,7 @@ function Dashboard({
         <div
           role="tablist"
           aria-label="অ্যাডমিন নেভিগেশন"
-          className="flex flex-nowrap items-center gap-1.5 overflow-x-auto scrollbar-none rounded-2xl border border-border/70 bg-card/95 p-1.5 shadow-card"
+          className="flex flex-nowrap items-center gap-1.5 overflow-x-auto scrollbar-none rounded-[12px] border border-[#E6E1D6] bg-white p-1.5"
         >
           {flatNavItems.map((item) => {
             const Icon = item.icon;
@@ -1085,20 +1085,20 @@ function Dashboard({
                 role="tab"
                 aria-selected={isActive}
                 onClick={() => setTab(item.key)}
-                className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-semibold transition ${
+                className={`inline-flex min-h-[38px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[8px] px-3 py-2 text-xs font-semibold transition ${
                   isActive
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "text-foreground/75 hover:bg-muted hover:text-primary-deep"
+                    ? "bg-[#0F4D3A] text-white"
+                    : "text-[#5F5F5A] hover:bg-[#FAF7F2] hover:text-[#1C1C1C]"
                 }`}
               >
-                <Icon className="h-3.5 w-3.5 shrink-0" />
+                <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} />
                 <span>{item.label}</span>
                 {item.badge !== undefined && item.badge > 0 && (
                   <span
-                    className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold tabular-nums leading-none ${
+                    className={`rounded-[6px] px-1.5 py-0.5 text-[10px] font-bold tabular-nums leading-none ${
                       isActive
-                        ? "bg-white/25 text-white"
-                        : "bg-rose-600 text-white"
+                        ? "bg-white/20 text-white"
+                        : "bg-[#C62828] text-white"
                     }`}
                   >
                     {item.badge}
@@ -1115,12 +1115,12 @@ function Dashboard({
         {/* Desktop Grouped Sidebar */}
         <aside
           aria-label="অ্যাডমিন সাইডবার"
-          className="hidden lg:block lg:sticky lg:top-20 max-h-[calc(100vh-6rem)] overflow-y-auto rounded-3xl border border-border/80 bg-card p-3 shadow-card"
+          className="hidden lg:block lg:sticky lg:top-20 max-h-[calc(100vh-6rem)] overflow-y-auto rounded-[12px] border border-[#E6E1D6] bg-white p-3"
         >
           <div className="space-y-3">
             {navGroups.map((group) => (
               <div key={group.id}>
-                <p className="px-2.5 pb-1 text-[10.5px] font-bold tracking-wide text-muted-foreground">
+                <p className="px-2.5 pb-1 text-[10.5px] font-bold tracking-wide text-[#5F5F5A]">
                   {group.title}
                 </p>
                 <div className="space-y-0.5">
@@ -1132,26 +1132,27 @@ function Dashboard({
                         key={item.key}
                         type="button"
                         onClick={() => setTab(item.key)}
-                        className={`flex w-full items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-semibold transition ${
+                        className={`flex w-full items-center justify-between gap-2 rounded-[8px] px-2.5 py-2 text-left text-xs font-semibold transition ${
                           isActive
-                            ? "bg-primary text-primary-foreground shadow-sm"
-                            : "text-foreground/80 hover:bg-muted hover:text-primary-deep"
+                            ? "bg-[#0F4D3A] text-white"
+                            : "text-[#1C1C1C]/80 hover:bg-[#FAF7F2] hover:text-[#0F4D3A]"
                         }`}
                       >
                         <span className="flex min-w-0 items-center gap-2">
                           <Icon
+                            strokeWidth={1.5}
                             className={`h-4 w-4 shrink-0 ${
-                              isActive ? "text-primary-foreground" : "text-primary/80"
+                              isActive ? "text-white" : "text-[#0F4D3A]"
                             }`}
                           />
                           <span className="truncate">{item.label}</span>
                         </span>
                         {item.badge !== undefined && item.badge > 0 && (
                           <span
-                            className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold tabular-nums leading-none ${
+                            className={`shrink-0 rounded-[6px] px-1.5 py-0.5 text-[10px] font-bold tabular-nums leading-none ${
                               isActive
-                                ? "bg-white/25 text-white"
-                                : "bg-rose-500/15 text-rose-700"
+                                ? "bg-white/20 text-white"
+                                : "bg-[#C62828]/10 text-[#C62828]"
                             }`}
                           >
                             {item.badge}
@@ -3479,7 +3480,7 @@ function ServicesAdminPanel() {
                 <input
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
-                  placeholder="যেমন: জরুরী যোগাযোগ ডিরেক্টরি"
+                  placeholder="যেমন: জরুরি যোগাযোগ ডিরেক্টরি"
                   required
                   className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold"
                 />
@@ -5591,9 +5592,9 @@ function DonorsAdminPanel({
 
   return (
     <div className="space-y-3">
-      <div className="space-y-2.5 rounded-2xl bg-card p-4 shadow-card">
+      <div className="space-y-3 rounded-[12px] border border-[#E6E1D6] bg-white p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="font-display text-sm font-bold text-primary-deep">
+          <p className="font-display text-sm font-bold text-[#1C1C1C]">
             রক্তদাতা পরিচালনা ({filtered.length} জন)
           </p>
           <div className="flex flex-wrap items-center gap-2">
@@ -5601,9 +5602,9 @@ function DonorsAdminPanel({
               <button
                 type="button"
                 onClick={() => setImportModalOpen(true)}
-                className="flex items-center gap-1.5 rounded-full bg-rose-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-rose-700"
+                className="flex min-h-[38px] items-center gap-1.5 rounded-[10px] bg-[#C62828] px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-[#B71C1C]"
               >
-                <Upload className="h-3.5 w-3.5" />
+                <Upload className="h-3.5 w-3.5" strokeWidth={1.5} />
                 বাল্ক ইম্পোর্ট (Pasted text)
               </button>
             )}
@@ -5612,12 +5613,12 @@ function DonorsAdminPanel({
                 type="button"
                 disabled={approvingAll}
                 onClick={() => void handleApproveAllPending()}
-                className="flex items-center gap-1 rounded-full bg-emerald-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
+                className="flex min-h-[38px] items-center gap-1 rounded-[10px] bg-[#0F4D3A] px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-[#0B3C2D] disabled:opacity-60"
               >
                 {approvingAll ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={1.5} />
                 )}
                 সব অপেক্ষমাণ অনুমোদন ({pendingItems.length})
               </button>
@@ -5628,7 +5629,7 @@ function DonorsAdminPanel({
           <select
             value={bloodFilter}
             onChange={(e) => setBloodFilter(e.target.value)}
-            className="rounded-xl border border-border bg-background px-3 py-2 text-xs font-bold text-rose-600"
+            className="min-h-[42px] rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-xs font-bold text-[#C62828] outline-none focus:border-[#0F4D3A]"
           >
             <option value="all">সব রক্তের গ্রুপ</option>
             {["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"].map((g) => (
@@ -5640,7 +5641,7 @@ function DonorsAdminPanel({
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as any)}
-            className="rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
+            className="min-h-[42px] rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-xs font-semibold text-[#1C1C1C] outline-none focus:border-[#0F4D3A]"
           >
             <option value="all">সব অবস্থা ({donors.items.length})</option>
             <option value="pending">অপেক্ষমাণ ({pendingItems.length})</option>
@@ -5655,16 +5656,16 @@ function DonorsAdminPanel({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="রক্তদাতার নাম, ফোন বা ঠিকানা খুঁজুন..."
-            className="rounded-xl border border-border bg-background px-3 py-2 text-xs"
+            className="min-h-[42px] rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-xs text-[#1C1C1C] outline-none focus:border-[#0F4D3A]"
           />
         </div>
       </div>
 
       <List empty="কোনো দাতা নেই" items={filtered}>
         {(d) => (
-          <div key={d.id} className="rounded-2xl bg-card p-4 shadow-card">
+          <div key={d.id} className="rounded-[12px] border border-[#E6E1D6] bg-white p-4">
             <div className="flex items-start gap-3">
-              <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border border-rose-500/20 bg-rose-500/10 text-rose-600 shadow-sm">
+              <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#C62828]/20 bg-[#C62828]/10 text-[#C62828]">
                 {d.photo_url ? (
                   <img
                     src={d.photo_url}
@@ -5678,24 +5679,24 @@ function DonorsAdminPanel({
                   />
                 ) : null}
                 <div className={`admin-donor-fallback flex h-full w-full items-center justify-center ${d.photo_url ? "hidden" : ""}`}>
-                  <Droplet className="h-6 w-6 text-rose-600" />
+                  <Droplet className="h-5 w-5 text-[#C62828]" strokeWidth={1.5} />
                 </div>
               </div>
               <div className="min-w-0 flex-1">
-                <p className="font-semibold">
+                <p className="font-semibold text-[#1C1C1C]">
                   {d.full_name}{" "}
-                  <span className="ml-1 rounded bg-rose-500/10 px-1.5 py-0.5 text-[11px] font-bold text-rose-600">
+                  <span className="ml-1 rounded-[6px] bg-[#C62828]/10 px-1.5 py-0.5 text-[11px] font-bold text-[#C62828]">
                     {d.blood_group}
                   </span>
                 </p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-[#5F5F5A]">
                   {d.phone} • বয়স: {d.age ?? "—"} • মোট দান: {d.total_donations} • শেষ দান: {d.last_donation_date || "—"}
                 </p>
-                {d.address && <p className="text-xs text-muted-foreground">{d.address}</p>}
+                {d.address && <p className="text-xs text-[#5F5F5A]">{d.address}</p>}
               </div>
               <Status status={d.status} />
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[#E6E1D6]/70 pt-2.5">
               <Actions
                 onApprove={() => donors.setStatus(d.id, "approved")}
                 onReject={() => donors.setStatus(d.id, "rejected")}
@@ -5706,9 +5707,9 @@ function DonorsAdminPanel({
               <button
                 type="button"
                 onClick={() => setEditing({ ...d })}
-                className="flex items-center gap-1 rounded-full bg-blue-500/15 px-3 py-1.5 text-xs font-semibold text-blue-800"
+                className="flex min-h-[34px] items-center gap-1 rounded-[8px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-1.5 text-xs font-semibold text-[#1C1C1C] transition hover:border-[#0F4D3A]"
               >
-                <Edit3 className="h-3 w-3" /> সম্পাদনা
+                <Edit3 className="h-3 w-3" strokeWidth={1.5} /> সম্পাদনা
               </button>
             </div>
           </div>
@@ -6064,7 +6065,7 @@ function EmergencyEditor() {
       for (const e of pendingItems) {
         await setStatus(e.id, "approved");
       }
-      toast.success(`${pendingItems.length} টি অপেক্ষমাণ জরুরী রক্তের আবেদন অনুমোদিত হয়েছে!`);
+      toast.success(`${pendingItems.length} টি অপেক্ষমাণ জরুরি রক্তের আবেদন অনুমোদিত হয়েছে!`);
     } catch (e) {
       toast.error((e as Error).message || "ত্রুটি");
     } finally {
@@ -6079,8 +6080,8 @@ function EmergencyEditor() {
     const res = await add(form);
     setBusy(false);
     if (!res.ok) return toast.error(res.error || "ত্রুটি");
-    toast.success("জরুরী রক্তের আবেদন যুক্ত হয়েছে");
-    sendBrowserNotification(`🩸 জরুরী রক্ত প্রয়োজন (${form.blood_group})`, {
+    toast.success("জরুরি রক্তের আবেদন যুক্ত হয়েছে");
+    sendBrowserNotification(`জরুরি রক্ত প্রয়োজন (${form.blood_group})`, {
       body: `রোগী: ${form.patient_name} • ${form.hospital || "হাসপাতাল"} • ফোন: ${form.phone}`,
     });
     setForm({ patient_name: "", phone: "", blood_group: "", hospital: "", message: "" });
@@ -6099,29 +6100,29 @@ function EmergencyEditor() {
     });
     setBusy(false);
     if (error) return toast.error(error.message);
-    toast.success("জরুরী রক্তের আবেদন আপডেট হয়েছে");
+    toast.success("জরুরি রক্তের আবেদন আপডেট হয়েছে");
     setEditing(null);
   }
 
   return (
     <div className="space-y-3">
       {canManage && (
-        <div className="space-y-2 rounded-2xl bg-card p-4 shadow-card">
+        <div className="space-y-2 rounded-[12px] border border-[#E6E1D6] bg-white p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="flex items-center gap-2 font-display font-bold text-primary-deep">
-              <AlertCircle className="h-4 w-4" /> নতুন জরুরী রক্ত অনুরোধ
+            <p className="flex items-center gap-2 font-display font-bold text-[#1C1C1C]">
+              <AlertCircle className="h-4 w-4 text-[#C62828]" strokeWidth={1.5} /> নতুন জরুরি রক্ত অনুরোধ
             </p>
             {pendingItems.length > 0 && (
               <button
                 type="button"
                 disabled={approvingAll}
                 onClick={() => void handleApproveAllPending()}
-                className="flex items-center gap-1 rounded-full bg-emerald-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
+                className="flex min-h-[38px] items-center gap-1 rounded-[10px] bg-[#0F4D3A] px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-[#0B3C2D] disabled:opacity-60"
               >
                 {approvingAll ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={1.5} />
                 )}
                 সব অপেক্ষমাণ অনুমোদন ({pendingItems.length})
               </button>
@@ -6132,18 +6133,18 @@ function EmergencyEditor() {
               value={form.patient_name}
               onChange={(e) => setForm({ ...form, patient_name: e.target.value })}
               placeholder="রোগীর নাম *"
-              className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              className="rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-sm"
             />
             <input
               value={form.phone}
               onChange={(e) => setForm({ ...form, phone: e.target.value })}
               placeholder="ফোন *"
-              className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              className="rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-sm"
             />
             <select
               value={form.blood_group}
               onChange={(e) => setForm({ ...form, blood_group: e.target.value })}
-              className="rounded-xl border border-border bg-background px-3 py-2 text-sm font-bold text-rose-600"
+              className="rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-sm font-bold text-[#C62828]"
             >
               <option value="">গ্রুপ *</option>
               {["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"].map((g) => (
@@ -6156,7 +6157,7 @@ function EmergencyEditor() {
               value={form.hospital}
               onChange={(e) => setForm({ ...form, hospital: e.target.value })}
               placeholder="হাসপাতাল"
-              className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              className="rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-sm"
             />
           </div>
           <textarea
@@ -6164,37 +6165,37 @@ function EmergencyEditor() {
             onChange={(e) => setForm({ ...form, message: e.target.value })}
             rows={2}
             placeholder="বার্তা (ঐচ্ছিক)"
-            className="w-full rounded-xl border border-border bg-background p-3 text-sm"
+            className="w-full rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] p-3 text-sm"
           />
           <button
             disabled={busy}
             onClick={submit}
-            className="flex items-center gap-1 rounded-full bg-gradient-hero px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+            className="flex min-h-[40px] items-center gap-1 rounded-[10px] bg-[#0F4D3A] px-4 py-2 text-sm font-semibold text-white hover:bg-[#0B3C2D] disabled:opacity-60"
           >
-            <Plus className="h-3.5 w-3.5" /> যোগ করুন
+            <Plus className="h-3.5 w-3.5" strokeWidth={1.5} /> যোগ করুন
           </button>
         </div>
       )}
-      <List empty="কোনো জরুরী অনুরোধ নেই" items={items}>
+      <List empty="কোনো জরুরি অনুরোধ নেই" items={items}>
         {(e) => (
-          <div key={e.id} className="rounded-2xl bg-card p-4 shadow-card">
+          <div key={e.id} className="rounded-[12px] border border-[#E6E1D6] bg-white p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <p className="font-semibold">
+                <p className="font-semibold text-[#1C1C1C]">
                   {e.patient_name}{" "}
-                  <span className="ml-1 rounded bg-rose-500/10 px-1.5 py-0.5 text-[11px] font-bold text-rose-600">
+                  <span className="ml-1 rounded-[6px] bg-[#C62828]/10 px-1.5 py-0.5 text-[11px] font-bold text-[#C62828]">
                     {e.blood_group}
                   </span>
                 </p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-[#5F5F5A]">
                   {e.phone}
                   {e.hospital ? ` • ${e.hospital}` : ""}
                 </p>
-                {e.message && <p className="mt-1 text-xs">{e.message}</p>}
+                {e.message && <p className="mt-1 text-xs text-[#1C1C1C]">{e.message}</p>}
               </div>
               <Status status={e.status} />
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[#E6E1D6]/70 pt-2.5">
               <Actions
                 onApprove={() => setStatus(e.id, "approved")}
                 onReject={() => setStatus(e.id, "rejected")}
@@ -6205,9 +6206,9 @@ function EmergencyEditor() {
               <button
                 type="button"
                 onClick={() => setEditing({ ...e })}
-                className="flex items-center gap-1 rounded-full bg-blue-500/15 px-3 py-1.5 text-xs font-semibold text-blue-800"
+                className="flex min-h-[34px] items-center gap-1 rounded-[8px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-1.5 text-xs font-semibold text-[#1C1C1C] transition hover:border-[#0F4D3A]"
               >
-                <Edit3 className="h-3 w-3" /> সম্পাদনা
+                <Edit3 className="h-3 w-3" strokeWidth={1.5} /> সম্পাদনা
               </button>
             </div>
           </div>
@@ -6220,11 +6221,11 @@ function EmergencyEditor() {
           onClick={() => setEditing(null)}
         >
           <div
-            className="w-full max-w-sm space-y-2.5 rounded-2xl bg-card p-4 shadow-elevated"
+            className="w-full max-w-sm space-y-2.5 rounded-[12px] border border-[#E6E1D6] bg-white p-4"
             onClick={(ev) => ev.stopPropagation()}
           >
-            <p className="font-display text-sm font-bold text-primary-deep">
-              জরুরী রক্তের আবেদন সম্পাদনা
+            <p className="font-display text-sm font-bold text-[#1C1C1C]">
+              জরুরি রক্তের আবেদন সম্পাদনা
             </p>
             <input
               value={editing.patient_name}
@@ -8868,12 +8869,12 @@ function Actions({
         <button
           disabled={!!busy}
           onClick={() => run("a", onApprove, "অনুমোদিত হয়েছে")}
-          className="flex items-center gap-1 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground disabled:opacity-60"
+          className="flex min-h-[34px] items-center gap-1 rounded-[8px] bg-[#0F4D3A] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#0B3C2D] disabled:opacity-60"
         >
           {busy === "a" ? (
             <Loader2 className="h-3 w-3 animate-spin" />
           ) : (
-            <Check className="h-3 w-3" />
+            <Check className="h-3 w-3" strokeWidth={1.5} />
           )}{" "}
           অনুমোদন
         </button>
@@ -8882,12 +8883,12 @@ function Actions({
         <button
           disabled={!!busy}
           onClick={() => run("r", onReject, "বাতিল করা হয়েছে")}
-          className="flex items-center gap-1 rounded-full bg-muted px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
+          className="flex min-h-[34px] items-center gap-1 rounded-[8px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-1.5 text-xs font-semibold text-[#1C1C1C] transition hover:border-[#C62828]/40 disabled:opacity-60"
         >
           {busy === "r" ? (
             <Loader2 className="h-3 w-3 animate-spin" />
           ) : (
-            <X className="h-3 w-3" />
+            <X className="h-3 w-3" strokeWidth={1.5} />
           )}{" "}
           বাতিল
         </button>
@@ -8898,12 +8899,12 @@ function Actions({
           onClick={() => {
             void run("d", onDelete, "মুছে ফেলা হয়েছে");
           }}
-          className="flex items-center gap-1 rounded-full bg-destructive/10 px-3 py-1.5 text-xs font-semibold text-destructive disabled:opacity-60"
+          className="flex min-h-[34px] items-center gap-1 rounded-[8px] bg-[#C62828]/10 px-3 py-1.5 text-xs font-semibold text-[#C62828] transition hover:bg-[#C62828]/15 disabled:opacity-60"
         >
           {busy === "d" ? (
             <Loader2 className="h-3 w-3 animate-spin" />
           ) : (
-            <Trash2 className="h-3 w-3" />
+            <Trash2 className="h-3 w-3" strokeWidth={1.5} />
           )}{" "}
           মুছুন
         </button>
@@ -8914,9 +8915,9 @@ function Actions({
 
 function Status({ status }: { status: string }) {
   const map: Record<string, string> = {
-    pending: "bg-amber-500/15 text-amber-700",
-    approved: "bg-emerald-500/15 text-emerald-700",
-    rejected: "bg-rose-500/15 text-rose-700",
+    pending: "border border-[#E6E1D6] bg-[#FAF7F2] text-[#5F5F5A]",
+    approved: "bg-[#0F4D3A]/10 text-[#0F4D3A]",
+    rejected: "bg-[#C62828]/10 text-[#C62828]",
   };
   const label: Record<string, string> = {
     pending: "অপেক্ষমাণ",
@@ -8924,8 +8925,8 @@ function Status({ status }: { status: string }) {
     rejected: "বাতিল",
   };
   return (
-    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${map[status]}`}>
-      {label[status]}
+    <span className={`shrink-0 rounded-[8px] px-2 py-0.5 text-[10px] font-bold ${map[status] || ""}`}>
+      {label[status] || status}
     </span>
   );
 }
@@ -8944,15 +8945,15 @@ function TabBtn({
   return (
     <button
       onClick={onClick}
-      className={`relative shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+      className={`relative shrink-0 rounded-[8px] px-3 py-1.5 text-xs font-semibold transition ${
         active
-          ? "bg-card text-primary-deep shadow-card"
-          : "text-muted-foreground hover:text-primary-deep"
+          ? "bg-white text-[#0F4D3A] border border-[#E6E1D6]"
+          : "text-[#5F5F5A] hover:text-[#1C1C1C]"
       }`}
     >
       {children}
       {badge !== undefined && badge > 0 && (
-        <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[9px] font-bold text-white shadow-sm">
+        <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#C62828] px-1 text-[9px] font-bold text-white">
           {badge}
         </span>
       )}
@@ -8963,16 +8964,16 @@ function TabBtn({
 function Stat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
     <div
-      className={`rounded-2xl p-3 shadow-card transition ${
+      className={`rounded-[12px] border p-3 transition ${
         accent
-          ? "bg-gradient-to-br from-rose-50 to-amber-50 ring-1 ring-rose-200/60"
-          : "bg-gradient-card"
+          ? "border-[#C62828]/30 bg-white"
+          : "border-[#E6E1D6] bg-white"
       }`}
     >
-      <p className="text-[11px] text-muted-foreground">{label}</p>
+      <p className="text-[11px] text-[#5F5F5A]">{label}</p>
       <p
         className={`mt-0.5 font-display text-lg font-bold ${
-          accent ? "text-rose-700" : "text-primary-deep"
+          accent ? "text-[#C62828]" : "text-[#1C1C1C]"
         }`}
       >
         {value}
@@ -9061,7 +9062,7 @@ function OverviewPanel({
     },
     {
       key: "emergency",
-      label: "অপেক্ষমাণ জরুরী",
+      label: "অপেক্ষমাণ জরুরি",
       count: pendingEmerg,
       tone: "bg-red-500/15 text-red-700",
     },
@@ -9327,7 +9328,7 @@ function OverviewPanel({
               </button>
             ))}
             <div className="flex items-center justify-between rounded-xl border border-dashed border-border bg-background px-3 py-1.5">
-              <span className="text-xs">সক্রিয় জরুরী ব্যানার</span>
+              <span className="text-xs">সক্রিয় জরুরি ব্যানার</span>
               <span
                 className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
                   activeBanners > 0
@@ -9449,7 +9450,7 @@ function QuickAction({
 function BannersEditor() {
   const { items, add, update, remove } = useEmergencyBanners();
   const [form, setForm] = useState({
-    title: "জরুরী রক্তের প্রয়োজন",
+    title: "জরুরি রক্তের প্রয়োজন",
     message: "",
     blood_group: "",
     hospital: "",
@@ -9466,12 +9467,12 @@ function BannersEditor() {
     const res = await add(form);
     setBusy(false);
     if (!res.ok) return toast.error(res.error || "ত্রুটি");
-    toast.success("জরুরী ব্যানার ও নোটিফিকেশন ব্রডকাস্ট সফল হয়েছে");
-    sendBrowserNotification(`📢 ${form.title}`, {
+    toast.success("জরুরি ব্যানার ও নোটিফিকেশন ব্রডকাস্ট সফল হয়েছে");
+    sendBrowserNotification(form.title, {
       body: `${form.message}${form.phone ? ` • কল: ${form.phone}` : ""}`,
     });
     setForm({
-      title: "জরুরী রক্তের প্রয়োজন",
+      title: "জরুরি রক্তের প্রয়োজন",
       message: "",
       blood_group: "",
       hospital: "",
@@ -9483,9 +9484,9 @@ function BannersEditor() {
   return (
     <div className="space-y-3">
       {canManageBanners && (
-        <div className="space-y-2 rounded-2xl bg-card p-4 shadow-card">
-          <p className="flex items-center gap-2 font-display font-bold text-primary-deep">
-            <Bell className="h-4 w-4" /> নতুন জরুরী ব্যানার
+        <div className="space-y-2 rounded-[12px] border border-[#E6E1D6] bg-white p-4">
+          <p className="flex items-center gap-2 font-display font-bold text-[#1C1C1C]">
+            <Bell className="h-4 w-4 text-[#0F4D3A]" strokeWidth={1.5} /> নতুন জরুরি ব্যানার
           </p>
           <input
             value={form.title}
@@ -9724,7 +9725,7 @@ const QUICK_STAFF_REPLIES = [
   "ধন্যবাদ, আমরা আপনার মেসেজটি পেয়েছি এবং বিষয়টি দেখছি।",
   "অনুগ্রহ করে আপনার পূর্ণ নাম ও মোবাইল নাম্বারটি দিন।",
   "আপনার তথ্যটি সফলভাবে নোট করা হয়েছে। ধন্যবাদ!",
-  "জরুরী রক্ত বা অ্যাম্বুলেন্সের জন্য আমাদের জরুরী সেকশন দেখুন অথবা ৯৯৯-এ কল করুন।",
+  "জরুরি রক্ত বা অ্যাম্বুলেন্সের জন্য আমাদের জরুরি সেকশন দেখুন অথবা ৯৯৯-এ কল করুন।",
 ];
 
 const CHAT_STATUS_LABELS: Record<ChatThreadStatus, { label: string; badge: string }> = {
@@ -10101,7 +10102,7 @@ function ChatThreadsAdmin() {
   return (
     <div className="space-y-3">
       {/* Responder Identity Banner */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/25 bg-gradient-card p-3.5 shadow-card">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-[12px] border border-[#E6E1D6] bg-white p-3.5">
         <div className="flex items-center gap-3">
           <img
             src={myPhoto}
@@ -10189,9 +10190,8 @@ function ChatThreadsAdmin() {
         </div>
       )}
 
-      {/* Inbox Filter Pills + Split-Pane Desktop Workspace */}
+      {/* Inbox Filter Tabs + Split-Pane Desktop Workspace */}
       <div className={resolvedActive ? "hidden lg:block space-y-3" : "space-y-3"}>
-        {/* Inbox Workflow Filter Pills & Search */}
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap gap-1.5">
             {[
@@ -10204,29 +10204,29 @@ function ChatThreadsAdmin() {
               { key: "waiting_customer", label: "গ্রাহকের অপেক্ষায়" },
               { key: "resolved", label: `সমাধান (${resolvedTotal})` },
               { key: "closed", label: `বন্ধ (${closedTotal})` },
-            ].map((pill) => (
+            ].map((tab) => (
               <button
-                key={pill.key}
+                key={tab.key}
                 type="button"
-                onClick={() => setFilterMode(pill.key as typeof filterMode)}
-                className={`rounded-full px-3 py-1 text-[11px] font-bold transition ${
-                  filterMode === pill.key
-                    ? "bg-gradient-hero text-white shadow-card"
-                    : "border border-border bg-card text-muted-foreground hover:text-foreground"
+                onClick={() => setFilterMode(tab.key as typeof filterMode)}
+                className={`rounded-[10px] border px-3 py-1.5 text-[11.5px] font-semibold transition ${
+                  filterMode === tab.key
+                    ? "border-[#0F4D3A] bg-[#0F4D3A] text-white"
+                    : "border-[#E6E1D6] bg-white text-[#5F5F5A] hover:border-[#0F4D3A] hover:text-[#0F4D3A]"
                 }`}
               >
-                {pill.label}
+                {tab.label}
               </button>
             ))}
           </div>
 
           <div className="relative w-full lg:max-w-sm">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#5F5F5A]" strokeWidth={1.5} />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="গ্রাহকের নাম, ফোন, অপারেটর বা সারাংশ খুঁজুন..."
-              className="w-full rounded-full border border-border bg-card py-1.5 pl-8 pr-3 text-xs shadow-sm outline-none focus:border-primary"
+              className="w-full rounded-[10px] border border-[#E6E1D6] bg-white py-2 pl-8 pr-3 text-xs outline-none focus:border-[#0F4D3A]"
             />
           </div>
         </div>
@@ -10265,14 +10265,14 @@ function ChatThreadsAdmin() {
                 return (
                   <div
                     key={t.id}
-                    className={`rounded-2xl border p-3 shadow-card transition ${
-                      isSelectedDesktop ? "ring-2 ring-primary/70 " : ""
-                    }${
-                      isUrgent
-                        ? "border-amber-400 bg-gradient-to-br from-amber-50/70 to-card"
-                        : isUnread
-                          ? "border-rose-300 bg-gradient-to-br from-rose-50/60 to-card"
-                          : "border-border bg-card"
+                    className={`rounded-[12px] border p-3 transition ${
+                      isSelectedDesktop
+                        ? "border-[#0F4D3A] bg-white ring-1 ring-[#0F4D3A]"
+                        : isUrgent
+                          ? "border-amber-400 bg-amber-50/40"
+                          : isUnread
+                            ? "border-[#C62828]/40 bg-rose-50/30"
+                            : "border-[#E6E1D6] bg-white"
                     }`}
                   >
                     {/* Customer Info & Open Chat / Delete Buttons */}
@@ -10335,22 +10335,45 @@ function ChatThreadsAdmin() {
                       </div>
 
                       <div className="flex flex-wrap items-center gap-1.5">
+                        {!t.assigned_to_uid && canReply && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const res = await updateChatThreadMeta(t.id, {
+                                assigned_to_uid: me,
+                                assigned_to_name: myName,
+                                assigned_role: myRoleLabel,
+                                status: t.status === "new" || !t.status ? "assigned" : t.status,
+                              });
+                              if (res.ok) {
+                                toast.success("চ্যাটটি আপনার নামে নেওয়া হয়েছে");
+                                liveThreads.refresh();
+                                void refresh();
+                              } else {
+                                toast.error(res.error || "অ্যাসাইন ব্যর্থ");
+                              }
+                            }}
+                            className="inline-flex items-center gap-1 rounded-[8px] border border-[#0F4D3A] bg-white px-2.5 py-1 text-[11px] font-bold text-[#0F4D3A] transition hover:bg-[#0F4D3A] hover:text-white"
+                          >
+                            নিজেকে অ্যাসাইন করুন
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => setActive(t)}
-                          className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary-deep transition hover:bg-primary hover:text-white"
+                          className="inline-flex items-center gap-1 rounded-[8px] bg-[#0F4D3A] px-2.5 py-1 text-[11px] font-bold text-white transition hover:bg-[#0c3f30]"
                         >
-                          <MessageCircle className="h-3 w-3" />{" "}
+                          <MessageCircle className="h-3 w-3" strokeWidth={1.5} />{" "}
                           {isUnread ? "উত্তর দিন" : "খুলুন"}
                         </button>
                         {isMainAdmin && (
                           <button
                             type="button"
                             onClick={() => setConfirmDeleteThread(t)}
-                            className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2 py-1 text-[11px] font-bold text-destructive transition hover:bg-destructive hover:text-white"
+                            className="inline-flex items-center gap-1 rounded-[8px] border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-bold text-[#C62828] transition hover:bg-[#C62828] hover:text-white"
                             title="এই লাইভ চ্যাট ডিলিট করুন"
                           >
-                            <Trash2 className="h-3 w-3" /> ডিলিট
+                            <Trash2 className="h-3 w-3" strokeWidth={1.5} /> ডিলিট
                           </button>
                         )}
                       </div>
@@ -10732,7 +10755,7 @@ function AdminChatPanel({
   }
 
   return (
-    <div className="flex h-[82dvh] max-h-[calc(100dvh-5.5rem)] min-h-[420px] flex-col overflow-hidden rounded-2xl border border-border/80 bg-card shadow-card sm:rounded-3xl lg:h-full lg:max-h-none">
+    <div className="flex h-[82dvh] max-h-[calc(100dvh-5.5rem)] min-h-[420px] flex-col overflow-hidden rounded-[12px] border border-[#E6E1D6] bg-white lg:h-full lg:max-h-none">
       <div className="shrink-0 space-y-2 border-b border-border/70 bg-muted/25 px-3 py-2.5 sm:px-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
@@ -10872,8 +10895,8 @@ function AdminChatPanel({
           const displaySenderName = !isStaffMsg
             ? m.sender_name || thread.profile?.full_name || thread.user_name || "গ্রাহক"
             : isMyMsg
-              ? `${myName} (আপনি)`
-              : `${m.sender_name || staffSender?.full_name || resolvedMsgRole || "সাপোর্ট অ্যাডমিন"} (${
+              ? `Human Admin (${myName} • ${myRoleLabel} • আপনি)`
+              : `Human Admin (${m.sender_name || staffSender?.full_name || "সাপোর্ট টিম"} • ${
                   resolvedMsgRole || "সাপোর্ট অ্যাডমিন"
                 })`;
 
@@ -10891,16 +10914,16 @@ function AdminChatPanel({
               }`}
             >
               <div
-                className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm shadow-sm ${
+                className={`max-w-[80%] rounded-[12px] px-3.5 py-2.5 text-sm ${
                   isStaffMsg
-                    ? "bg-gradient-hero text-primary-foreground"
-                    : "border border-border bg-card"
+                    ? "bg-[#0F4D3A] text-white"
+                    : "border border-[#E6E1D6] bg-white text-[#1C1C1C]"
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
                   <p
-                    className={`text-[10px] font-bold ${
-                      isStaffMsg ? "text-gold" : "text-primary"
+                    className={`text-[10.5px] font-bold ${
+                      isStaffMsg ? "text-white/90" : "text-[#0F4D3A]"
                     }`}
                   >
                     {displaySenderName}
@@ -11479,8 +11502,8 @@ function StaffActivityAuditPanel({
                 <option value="info">তথ্য ডিরেক্টরি</option>
                 <option value="donors">রক্তদাতা</option>
                 <option value="events">রক্তদান লগ</option>
-                <option value="emergency">জরুরী রক্ত অনুরোধ</option>
-                <option value="banners">জরুরী ব্যানার</option>
+                <option value="emergency">জরুরি রক্ত অনুরোধ</option>
+                <option value="banners">জরুরি ব্যানার</option>
                 <option value="chat">লাইভ চ্যাট</option>
                 <option value="donation">অনুদান</option>
                 <option value="users">ইউজার ম্যানেজমেন্ট</option>

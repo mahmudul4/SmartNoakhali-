@@ -2705,7 +2705,7 @@ export function HeroBannerManager() {
               type="text"
               value={draft.primaryButtonText}
               onChange={(e) => setDraft({ ...draft, primaryButtonText: e.target.value })}
-              placeholder="জরুরী 999"
+              placeholder="জরুরি ৯৯৯"
               className="w-full rounded-xl border border-border bg-background px-3 py-1.5 text-xs font-bold"
             />
             <input

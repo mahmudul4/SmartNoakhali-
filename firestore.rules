@@ -66,17 +66,26 @@ service cloud.firestore {
       );
     }
 
-    // Staff / Editor / Custom-Role Operator Check (NOTE: uses get/exists, so NEVER call inside allow list)
+    // Staff / Admin / Moderator / Editor / Custom-Role Operator Check
     function isEditor() {
       return isMainAdmin() ||
         isBootstrappedOrdinaryAdmin() || (
           isSignedIn() &&
+          request.auth.token.firebase.sign_in_provider != 'anonymous' &&
           (
             request.auth.token.email_verified == true ||
             request.auth.token.firebase.sign_in_provider == 'password'
-          ) &&
-          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-          isNonSuspendedStaffDoc(get(/databases/$(database)/documents/users/$(request.auth.uid)).data)
+          ) && (
+            (
+              exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+              isNonSuspendedStaffDoc(get(/databases/$(database)/documents/users/$(request.auth.uid)).data)
+            ) || (
+              exists(/databases/$(database)/documents/admins/$(request.auth.uid)) && (
+                !exists(/databases/$(database)/documents/users/$(request.auth.uid)) ||
+                get(/databases/$(database)/documents/users/$(request.auth.uid)).data.suspended != true
+              )
+            )
+          )
         );
     }
 
@@ -387,7 +396,7 @@ service cloud.firestore {
     // =========================================================
     match /submissions/{submissionId} {
       allow get: if isValidId(submissionId) && (resource == null || existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isEditor());
-      allow list: if existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isMainAdmin() || isBootstrappedOrdinaryAdmin();
+      allow list: if existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isMainAdmin() || isBootstrappedOrdinaryAdmin() || isEditor();
       allow create: if isValidId(submissionId) && isSignedIn() && (
         isEditor() ||
         (incoming().author_id == request.auth.uid && incoming().status == 'pending')
@@ -409,7 +418,7 @@ service cloud.firestore {
     // =========================================================
     match /blood_donors/{donorId} {
       allow get: if isValidId(donorId) && (resource == null || existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isEditor());
-      allow list: if existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isMainAdmin() || isBootstrappedOrdinaryAdmin();
+      allow list: if existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isMainAdmin() || isBootstrappedOrdinaryAdmin() || isEditor();
       allow create: if isValidId(donorId) && isSignedIn() && (
         isMainAdmin() || (
           !donorId.matches('^imp_bd_.*') &&
@@ -439,7 +448,7 @@ service cloud.firestore {
 
     match /donation_events/{eventId} {
       allow get: if isValidId(eventId) && (resource == null || existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isEditor());
-      allow list: if existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isMainAdmin() || isBootstrappedOrdinaryAdmin();
+      allow list: if existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isMainAdmin() || isBootstrappedOrdinaryAdmin() || isEditor();
       allow create: if isValidId(eventId) && isSignedIn() && (
         isEditor() || (
           incoming().author_id == request.auth.uid &&
@@ -464,14 +473,14 @@ service cloud.firestore {
     // =========================================================
     match /emergency_banners/{bannerId} {
       allow get: if isValidId(bannerId) && (resource == null || existing().visible == true || isEditor());
-      allow list: if existing().visible == true || isMainAdmin() || isBootstrappedOrdinaryAdmin();
+      allow list: if existing().visible == true || isMainAdmin() || isBootstrappedOrdinaryAdmin() || isEditor();
       allow create, update: if isValidId(bannerId) && isEditor();
       allow delete: if isValidId(bannerId) && isMainAdmin();
     }
 
     match /emergency_blood_requests/{requestId} {
       allow get: if isValidId(requestId) && (resource == null || existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isEditor());
-      allow list: if existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isMainAdmin() || isBootstrappedOrdinaryAdmin();
+      allow list: if existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isMainAdmin() || isBootstrappedOrdinaryAdmin() || isEditor();
       allow create: if isValidId(requestId) && isSignedIn() && (
         isEditor() ||
         (incoming().author_id == request.auth.uid && incoming().status == 'pending')
@@ -510,7 +519,7 @@ service cloud.firestore {
     // =========================================================
     match /institutions/{institutionId} {
       allow get: if isValidId(institutionId) && (resource == null || existing().status == 'approved' || (isSignedIn() && existing().submitted_by_uid == request.auth.uid) || isEditor());
-      allow list: if existing().status == 'approved' || (isSignedIn() && existing().submitted_by_uid == request.auth.uid) || isMainAdmin() || isBootstrappedOrdinaryAdmin();
+      allow list: if existing().status == 'approved' || (isSignedIn() && existing().submitted_by_uid == request.auth.uid) || isMainAdmin() || isBootstrappedOrdinaryAdmin() || isEditor();
       allow create: if isValidId(institutionId) && isSignedIn() && (isEditor() || incoming().status == 'pending');
       allow update: if isValidId(institutionId) && isEditor();
       allow delete: if isValidId(institutionId) && isMainAdmin();
@@ -518,7 +527,7 @@ service cloud.firestore {
 
     match /job_circulars/{circularId} {
       allow get: if isValidId(circularId) && (resource == null || existing().status == 'approved' || isEditor());
-      allow list: if existing().status == 'approved' || isMainAdmin() || isBootstrappedOrdinaryAdmin();
+      allow list: if existing().status == 'approved' || isMainAdmin() || isBootstrappedOrdinaryAdmin() || isEditor();
       allow create: if isValidId(circularId) && isSignedIn() && (isEditor() || incoming().status == 'pending');
       allow update: if isValidId(circularId) && isEditor();
       allow delete: if isValidId(circularId) && isMainAdmin();
@@ -526,7 +535,7 @@ service cloud.firestore {
 
     match /complaint_tracking/{complaintId} {
       allow get: if isValidId(complaintId);
-      allow list: if (isSignedIn() && existing().user_id == request.auth.uid) || isMainAdmin() || isBootstrappedOrdinaryAdmin();
+      allow list: if (isSignedIn() && existing().user_id == request.auth.uid) || isMainAdmin() || isBootstrappedOrdinaryAdmin() || isEditor();
       allow create: if isValidId(complaintId) && isSignedIn() && incoming().status == 'submitted';
       allow update: if isValidId(complaintId) && isEditor();
       allow delete: if isValidId(complaintId) && isMainAdmin();
@@ -566,7 +575,7 @@ service cloud.firestore {
     // =========================================================
     match /tasks/{taskId} {
       allow get: if isValidId(taskId) && ((resource == null && isSignedIn()) || (isSignedIn() && existing().createdByUid == request.auth.uid) || isEditor());
-      allow list: if (isSignedIn() && existing().createdByUid == request.auth.uid) || isMainAdmin() || isBootstrappedOrdinaryAdmin();
+      allow list: if (isSignedIn() && existing().createdByUid == request.auth.uid) || isMainAdmin() || isBootstrappedOrdinaryAdmin() || isEditor();
       allow create: if isValidId(taskId) && isSignedIn() && incoming().createdByUid == request.auth.uid;
       allow update: if isValidId(taskId) && ((isSignedIn() && existing().createdByUid == request.auth.uid) || isEditor());
       allow delete: if isValidId(taskId) && ((isSignedIn() && existing().createdByUid == request.auth.uid) || isMainAdmin());
@@ -594,8 +603,20 @@ service cloud.firestore {
         (!('customer_uid' in data) || (data.customer_uid is string && data.customer_uid.size() <= 128)) &&
         (!('user_name' in data) || (data.user_name is string && data.user_name.size() <= 150)) &&
         (!('user_email' in data) || (data.user_email is string && data.user_email.size() <= 254)) &&
+        (!('user_phone' in data) || (data.user_phone is string && data.user_phone.size() <= 40)) &&
         (!('last_message_at' in data) || (data.last_message_at is string && data.last_message_at.size() <= 64)) &&
         (!('last_message_preview' in data) || (data.last_message_preview is string && data.last_message_preview.size() <= 300)) &&
+        (!('status' in data) || (data.status is string && (
+          data.status == 'new' ||
+          data.status == 'assigned' ||
+          data.status == 'in_progress' ||
+          data.status == 'waiting_customer' ||
+          data.status == 'resolved' ||
+          data.status == 'closed'
+        ))) &&
+        (!('priority' in data) || (data.priority is string && (data.priority == 'normal' || data.priority == 'urgent'))) &&
+        (!('source' in data) || (data.source is string && (data.source == 'direct' || data.source == 'ai_handoff'))) &&
+        (!('reopened_at' in data) || (data.reopened_at is string && data.reopened_at.size() <= 64)) &&
         (!('assigned_to_uid' in data) || (data.assigned_to_uid is string && data.assigned_to_uid.size() <= 128)) &&
         (!('assigned_to_name' in data) || (data.assigned_to_name is string && data.assigned_to_name.size() <= 150)) &&
         (!('assigned_role' in data) || (data.assigned_role is string && data.assigned_role.size() <= 120)) &&
@@ -628,6 +649,7 @@ service cloud.firestore {
       );
       allow list: if isMainAdmin() ||
         isBootstrappedOrdinaryAdmin() ||
+        isEditor() ||
         (isSignedIn() && existing().user_id == request.auth.uid) ||
         (isSignedIn() && 'customer_uid' in existing() && existing().customer_uid == request.auth.uid) ||
         (isSignedIn() && 'assigned_to_uid' in existing() && existing().assigned_to_uid == request.auth.uid) ||
@@ -654,21 +676,26 @@ service cloud.firestore {
 
       match /messages/{messageId} {
         allow get: if isValidId(threadId) && isValidId(messageId) && (
-          isChatThreadCustomer(get(/databases/$(database)/documents/chat_threads/$(threadId)).data) ||
-          isChatThreadListedStaff(get(/databases/$(database)/documents/chat_threads/$(threadId)).data) ||
-          isEditor()
+          isEditor() ||
+          (exists(/databases/$(database)/documents/chat_threads/$(threadId)) && (
+            isChatThreadCustomer(get(/databases/$(database)/documents/chat_threads/$(threadId)).data) ||
+            isChatThreadListedStaff(get(/databases/$(database)/documents/chat_threads/$(threadId)).data)
+          ))
         );
         allow list: if isMainAdmin() ||
           isBootstrappedOrdinaryAdmin() ||
+          isEditor() ||
           (isSignedIn() && existing().thread_id == request.auth.uid) ||
           (isSignedIn() && 'customer_uid' in existing() && existing().customer_uid == request.auth.uid) ||
           (isSignedIn() && 'assigned_to_uid' in existing() && existing().assigned_to_uid == request.auth.uid) ||
           (isSignedIn() && 'staff_uids' in existing() && existing().staff_uids is list && request.auth.uid in existing().staff_uids);
         allow create: if isValidId(threadId) && isValidId(messageId) && isSignedIn() &&
           isValidChatMessageCreate(threadId, incoming()) && (
-            isChatThreadCustomer(get(/databases/$(database)/documents/chat_threads/$(threadId)).data) ||
-            isChatThreadListedStaff(get(/databases/$(database)/documents/chat_threads/$(threadId)).data) ||
-            isEditor()
+            isEditor() ||
+            (exists(/databases/$(database)/documents/chat_threads/$(threadId)) && (
+              isChatThreadCustomer(get(/databases/$(database)/documents/chat_threads/$(threadId)).data) ||
+              isChatThreadListedStaff(get(/databases/$(database)/documents/chat_threads/$(threadId)).data)
+            ))
           );
         allow update: if isValidId(threadId) && isValidId(messageId) &&
           (isMainAdmin() || isEditor()) &&

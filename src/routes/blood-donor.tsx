@@ -57,22 +57,22 @@ function BloodPage() {
 
   return (
     <div className="w-full overflow-x-hidden px-3.5 pb-24 pt-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
-      <Link to="/" className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="h-4 w-4 shrink-0" /> হোম
+      <Link to="/" className="mb-3 inline-flex min-h-[44px] items-center gap-1.5 text-sm font-medium text-[#5F5F5A] hover:text-[#1C1C1C]">
+        <ArrowLeft className="h-4 w-4 shrink-0" strokeWidth={1.5} /> হোম
       </Link>
 
-      <div className="mb-4 flex w-full min-w-0 items-center gap-3 overflow-hidden rounded-2xl bg-gradient-card p-3.5 shadow-card sm:p-4">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-rose-500/15 text-rose-600 sm:h-12 sm:w-12">
-          <Droplet className="h-6 w-6" />
+      <div className="mb-4 flex w-full min-w-0 items-center gap-3 overflow-hidden rounded-[12px] border border-[#E6E1D6] bg-white p-3.5 sm:p-4">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[10px] bg-[#C62828]/10 text-[#C62828] sm:h-12 sm:w-12">
+          <Droplet className="h-6 w-6" strokeWidth={1.5} />
         </div>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate font-display text-lg font-bold text-primary-deep">রক্তদাতা</h1>
-          <p className="truncate text-xs text-muted-foreground">স্বেচ্ছা রক্তদাতা</p>
+          <h1 className="truncate font-display text-lg font-bold text-[#1C1C1C]">রক্তদাতা</h1>
+          <p className="truncate text-xs text-[#5F5F5A]">স্বেচ্ছা রক্তদাতা তালিকা ({approved.length} জন)</p>
         </div>
         <button
           type="button"
           onClick={() => setShowForm((s) => !s)}
-          className="shrink-0 rounded-full bg-rose-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm transition active:scale-95"
+          className="min-h-[44px] shrink-0 rounded-[10px] bg-[#C62828] px-4 py-2 text-xs font-bold text-white transition hover:bg-[#B71C1C] active:scale-95"
         >
           {showForm ? "বন্ধ" : "নিবন্ধন"}
         </button>
@@ -82,18 +82,18 @@ function BloodPage() {
 
       <div className="mb-3 flex w-full min-w-0 items-center gap-2">
         <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#5F5F5A]" strokeWidth={1.5} />
           <input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="নাম / ঠিকানা / ফোন..."
-            className="w-full min-w-0 rounded-xl border border-border bg-card py-2.5 pl-9 pr-3 text-sm shadow-card outline-none focus:border-primary"
+            className="min-h-[44px] w-full min-w-0 rounded-[10px] border border-[#E6E1D6] bg-white py-2.5 pl-9 pr-3 text-sm text-[#1C1C1C] outline-none focus:border-[#0F4D3A]"
           />
         </div>
         <select
           value={groupFilter}
           onChange={(e) => setGroupFilter(e.target.value)}
-          className="shrink-0 rounded-xl border border-border bg-card px-3 py-2.5 text-sm font-bold text-rose-600 shadow-card outline-none"
+          className="min-h-[44px] shrink-0 rounded-[10px] border border-[#E6E1D6] bg-white px-3 py-2.5 text-sm font-bold text-[#C62828] outline-none focus:border-[#0F4D3A]"
         >
           <option value="">সব গ্রুপ</option>
           {GROUPS.map((g) => (
@@ -264,8 +264,8 @@ function DonorForm({ onDone, addDonor }: { onDone: () => void; addDonor: ReturnT
   }
 
   return (
-    <form onSubmit={submit} className="mb-4 w-full min-w-0 space-y-3 overflow-hidden rounded-2xl bg-card p-4 shadow-card">
-      <p className="font-display text-sm font-bold text-primary-deep">রক্তদাতা নিবন্ধন</p>
+    <form onSubmit={submit} className="mb-4 w-full min-w-0 space-y-3 overflow-hidden rounded-[12px] border border-[#E6E1D6] bg-white p-4">
+      <p className="font-display text-sm font-bold text-[#1C1C1C]">রক্তদাতা নিবন্ধন</p>
       <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
         <input
           required
@@ -386,9 +386,9 @@ function DonorCard({
   const days = daysAgo(d.last_donation_date);
   const available = days === null || days >= 90;
   return (
-    <div className="w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-border/60 bg-gradient-card p-3.5 shadow-card sm:p-4">
+    <div className="w-full max-w-full min-w-0 overflow-hidden rounded-[12px] border border-[#E6E1D6] bg-white p-3.5 sm:p-4">
       <div className="flex w-full min-w-0 items-center justify-between gap-2.5 sm:gap-3">
-        <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-rose-500/10 text-rose-600 ring-2 ring-rose-500/20 sm:h-12 sm:w-12">
+        <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#C62828]/20 bg-[#C62828]/10 text-[#C62828] sm:h-12 sm:w-12">
           {d.photo_url ? (
             <img
               src={d.photo_url}
@@ -402,24 +402,24 @@ function DonorCard({
             />
           ) : null}
           <div className={`fallback-droplet flex h-full w-full items-center justify-center ${d.photo_url ? "hidden" : ""}`}>
-            <Droplet className="h-5 w-5 sm:h-6 sm:w-6 text-rose-600" />
+            <Droplet className="h-5 w-5 sm:h-6 sm:w-6 text-[#C62828]" strokeWidth={1.5} />
           </div>
         </div>
 
         <div className="min-w-0 flex-1 overflow-hidden">
           <div className="flex min-w-0 items-center gap-1.5">
-            <p className="min-w-0 truncate text-sm font-bold text-foreground sm:text-base">{d.full_name}</p>
-            <span className="shrink-0 rounded-md bg-rose-500/15 px-1.5 py-0.5 text-[11px] font-extrabold text-rose-600">
+            <p className="min-w-0 truncate text-sm font-bold text-[#1C1C1C] sm:text-base">{d.full_name}</p>
+            <span className="shrink-0 rounded-[6px] bg-[#C62828]/10 px-1.5 py-0.5 text-[11px] font-bold text-[#C62828]">
               {d.blood_group}
             </span>
           </div>
           {d.address && (
-            <p className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-              <MapPin className="h-3 w-3 shrink-0 text-rose-500" />
+            <p className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-[#5F5F5A]">
+              <MapPin className="h-3 w-3 shrink-0 text-[#C62828]" strokeWidth={1.5} />
               <span className="truncate">{d.address}</span>
             </p>
           )}
-          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+          <p className="mt-0.5 truncate text-[11px] text-[#5F5F5A]">
             শেষ দান: {days !== null ? `${days} দিন আগে` : "—"} • মোট: {d.total_donations} বার
           </p>
         </div>
@@ -427,22 +427,22 @@ function DonorCard({
         <a
           href={`tel:${d.phone}`}
           aria-label={`কল করুন ${d.full_name}`}
-          className="flex shrink-0 items-center gap-1.5 rounded-full bg-gradient-gold px-3.5 py-2 text-xs font-extrabold text-primary-deep shadow-gold transition hover:brightness-105 active:scale-95"
+          className="flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-[10px] bg-[#0F4D3A] px-3.5 py-2 text-xs font-bold text-white transition hover:bg-[#0B3C2D] active:scale-95"
         >
-          <Phone className="h-3.5 w-3.5 shrink-0" />
+          <Phone className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} />
           <span>কল</span>
         </a>
       </div>
 
-      <div className="mt-3 flex w-full min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl bg-muted/60 px-3 py-2">
+      <div className="mt-3 flex w-full min-w-0 flex-wrap items-center justify-between gap-2 rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2">
         {available ? (
-          <span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-primary">
-            <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-[#0F4D3A]">
+            <CheckCircle2 className="h-4 w-4 shrink-0" strokeWidth={1.5} />
             <span className="truncate">রক্তদানের জন্য উপলব্ধ</span>
           </span>
         ) : (
-          <span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-destructive">
-            <XCircle className="h-4 w-4 shrink-0" />
+          <span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-[#C62828]">
+            <XCircle className="h-4 w-4 shrink-0" strokeWidth={1.5} />
             <span className="truncate">{90 - (days ?? 0)} দিন বাকি</span>
           </span>
         )}
@@ -452,25 +452,25 @@ function DonorCard({
               <button
                 type="button"
                 onClick={onEdit}
-                className="inline-flex items-center gap-1 rounded-full bg-blue-500/15 px-2.5 py-1 text-[11px] font-semibold text-blue-800"
+                className="inline-flex min-h-[34px] items-center gap-1 rounded-[8px] border border-[#E6E1D6] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#1C1C1C]"
               >
-                <Edit3 className="h-3 w-3" /> এডিট
+                <Edit3 className="h-3 w-3" strokeWidth={1.5} /> এডিট
               </button>
               <button
                 type="button"
                 onClick={onDelete}
-                className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2.5 py-1 text-[11px] font-semibold text-destructive"
+                className="inline-flex min-h-[34px] items-center gap-1 rounded-[8px] bg-[#C62828]/10 px-2.5 py-1 text-[11px] font-semibold text-[#C62828]"
               >
-                <Trash2 className="h-3 w-3" /> ডিলিট
+                <Trash2 className="h-3 w-3" strokeWidth={1.5} /> ডিলিট
               </button>
             </>
           )}
           <button
             type="button"
             onClick={onDonate}
-            className="flex shrink-0 items-center gap-1 rounded-full bg-rose-600 px-3 py-1 text-[11px] font-semibold text-white shadow-sm transition active:scale-95"
+            className="flex min-h-[34px] shrink-0 items-center gap-1 rounded-[8px] bg-[#C62828] px-3 py-1 text-[11px] font-semibold text-white transition hover:bg-[#B71C1C] active:scale-95"
           >
-            <HeartPulse className="h-3 w-3 shrink-0" /> রক্তদান আপডেট
+            <HeartPulse className="h-3 w-3 shrink-0" strokeWidth={1.5} /> রক্তদান আপডেট
           </button>
         </div>
       </div>
@@ -520,7 +520,7 @@ function DonatedModal({
       <form
         onSubmit={submit}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md overflow-hidden rounded-3xl bg-card p-5 shadow-elevated"
+        className="w-full max-w-md overflow-hidden rounded-[12px] border border-[#E6E1D6] bg-white p-5"
       >
         <div className="mb-3 flex items-start justify-between gap-2">
           <div className="min-w-0">

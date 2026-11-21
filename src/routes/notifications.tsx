@@ -166,7 +166,7 @@ function NotificationsPage() {
   return (
     <div className="w-full space-y-5 px-3.5 py-5 pb-24 sm:px-6 sm:py-7 lg:px-8 xl:px-10 2xl:px-12">
       {/* Header Banner */}
-      <div className="rounded-3xl border border-border/80 bg-gradient-card p-5 shadow-card">
+      <div className="rounded-[12px] border border-[#E6E1D6] bg-white p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <Link
@@ -227,7 +227,7 @@ function NotificationsPage() {
 
       {/* Preferences Panel */}
       {showPrefs && (
-        <div className="rounded-3xl border border-primary/25 bg-card p-5 shadow-card space-y-4">
+        <div className="rounded-[12px] border border-[#E6E1D6] bg-white p-5 space-y-4">
           <div className="flex items-center justify-between border-b border-border/60 pb-3">
             <div className="flex items-center gap-2">
               <BellRing className="h-4 w-4 text-primary" />
@@ -430,12 +430,12 @@ function NotificationsPage() {
 
       {/* Notifications List */}
       {loading && userNotifications.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-3xl border border-border bg-card py-14 text-xs text-muted-foreground">
-          <Loader2 className="mb-2 h-7 w-7 animate-spin text-primary" />
+        <div className="flex flex-col items-center justify-center rounded-[12px] border border-[#E6E1D6] bg-white py-14 text-xs text-[#5F5F5A]">
+          <Loader2 className="mb-2 h-7 w-7 animate-spin text-[#0F4D3A]" />
           <span>বিজ্ঞপ্তি লোড হচ্ছে...</span>
         </div>
       ) : paginated.length === 0 ? (
-        <div className="rounded-3xl border border-dashed border-border bg-card py-14 text-center">
+        <div className="rounded-[12px] border border-dashed border-[#E6E1D6] bg-white py-14 text-center">
           <Bell className="mx-auto mb-2.5 h-8 w-8 text-muted-foreground/50" />
           <p className="font-display text-sm font-bold text-foreground">
             এই ফিল্টারে কোনো বিজ্ঞপ্তি নেই

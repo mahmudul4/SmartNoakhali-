@@ -79,10 +79,10 @@ export interface AiChatMessage {
 }
 
 const QUICK_AI_PROMPTS = [
-  "🚑 জরুরী অ্যাম্বুলেন্স নাম্বার",
-  "🩸 রক্তদাতা (O+ / B+) খুঁজুন",
-  "🏥 হাসপাতাল ও ডাক্তার তালিকা",
-  "🚒 ফায়ার সার্ভিস ও পুলিশ",
+  "জরুরি অ্যাম্বুলেন্স নাম্বার",
+  "রক্তদাতা (O+ / B+) খুঁজুন",
+  "হাসপাতাল ও ডাক্তার তালিকা",
+  "ফায়ার সার্ভিস ও পুলিশ",
 ];
 
 export function FloatingLiveChat() {
@@ -269,6 +269,21 @@ export function FloatingLiveChat() {
     ? threadsHook.items.reduce((sum, t) => sum + (Number(t.staff_unread) || 0), 0)
     : threadsHook.items.reduce((sum, t) => sum + (Number(t.user_unread) || 0), 0);
 
+  const prevUnreadRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (prevUnreadRef.current === null) {
+      prevUnreadRef.current = unreadCount;
+      return;
+    }
+    if (unreadCount > prevUnreadRef.current && isStaff && !open) {
+      playChatChime("receive");
+      toast.info(`লাইভ চ্যাটে নতুন বার্তা এসেছে (${unreadCount}টি অপঠিত)`, {
+        id: "sn-live-chat-incoming",
+      });
+    }
+    prevUnreadRef.current = unreadCount;
+  }, [unreadCount, isStaff, open]);
+
   function handleCopy(textToCopy: string, id: string) {
     void navigator.clipboard.writeText(textToCopy);
     setCopiedId(id);
@@ -364,7 +379,7 @@ export function FloatingLiveChat() {
         data.fallbackText ||
         data.text ||
         data.reply ||
-        `স্মার্ট নোয়াখালী এআই সহকারী: আপনার অনুসন্ধানের জন্য সরাসরি যোগাযোগ:\n• জাতীয় জরুরি সেবা: 📞 [999](tel:999)\n• নোয়াখালী জেনারেল হাসপাতাল: 📞 [01730-324794](tel:01730324794)\n• নোয়াখালী ফায়ার সার্ভিস: 📞 [01730-002444](tel:01730002444)\n• সুধারাম মডেল থানা: 📞 [01320-116035](tel:01320116035)\n\nঅথবা নিচের 'হিউম্যান সাপোর্ট' বাটনে ট্যাপ করে সরাসরি অপারেটরদের সাথে কথা বলুন।`;
+        `স্মার্ট নোয়াখালী এআই সহকারী: আপনার অনুসন্ধানের জন্য সরাসরি যোগাযোগ:\n• জাতীয় জরুরি সেবা: 📞 [৯৯৯](tel:999)\n• নোয়াখালী জেনারেল হাসপাতাল: 📞 [01730-324794](tel:01730324794)\n• নোয়াখালী ফায়ার সার্ভিস: 📞 [01730-002444](tel:01730002444)\n• সুধারাম মডেল থানা: 📞 [01320-116035](tel:01320116035)\n\nঅথবা নিচের 'হিউম্যান সাপোর্ট' বাটনে ট্যাপ করে সরাসরি অপারেটরদের সাথে কথা বলুন।`;
 
       const statusBanner = !resp.ok
         ? resp.status === 429
@@ -388,7 +403,7 @@ export function FloatingLiveChat() {
         {
           id: `fallback_${Date.now()}`,
           role: "assistant",
-          text: `স্মার্ট নোয়াখালী এআই সহকারী: তাৎক্ষণিক যোগাযোগের জন্য জরুরি সেবা:\n• জরুরি হটলাইন: 📞 [999](tel:999)\n• নোয়াখালী সদর হাসপাতাল: 📞 [01730-324794](tel:01730324794)\n• ফায়ার সার্ভিস: 📞 [01730-002444](tel:01730002444)\n\nসরাসরি সাপোর্ট টিমের সাথে কথা বলতে নিচের 'হিউম্যান সাপোর্টে যুক্ত হোন' বাটনে চাপ দিন।`,
+          text: `স্মার্ট নোয়াখালী এআই সহকারী: তাৎক্ষণিক যোগাযোগের জন্য জরুরি সেবা:\n• জরুরি হটলাইন: 📞 [৯৯৯](tel:999)\n• নোয়াখালী সদর হাসপাতাল: 📞 [01730-324794](tel:01730324794)\n• ফায়ার সার্ভিস: 📞 [01730-002444](tel:01730002444)\n\nসরাসরি সাপোর্ট টিমের সাথে কথা বলতে নিচের 'হিউম্যান সাপোর্টে যুক্ত হোন' বাটনে চাপ দিন।`,
           created_at: new Date().toISOString(),
           suggestHandoff: true,
         },
@@ -496,35 +511,29 @@ export function FloatingLiveChat() {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="flex h-[85dvh] max-h-[calc(100dvh-0.75rem)] min-h-[380px] w-full flex-col overflow-hidden rounded-2xl border border-primary/25 bg-card shadow-2xl sm:rounded-3xl md:h-[84vh] md:max-h-[880px] md:w-[88vw] lg:w-[86vw] xl:w-[84vw] max-w-[1380px]"
+            className="flex h-[82dvh] max-h-[calc(100dvh-1rem)] min-h-[380px] w-full flex-col overflow-hidden rounded-[12px] border border-[#E6E1D6] bg-white md:h-[84vh] md:max-h-[860px] md:w-[88vw] lg:w-[86vw] xl:w-[84vw] max-w-[1380px]"
           >
-            {/* Compact Header (Distinct AI vs Live Chat theming) */}
-            <div
-              className={`shrink-0 px-3.5 py-2.5 text-white sm:px-5 sm:py-3 ${
-                chatMode === "ai"
-                  ? "bg-gradient-to-r from-indigo-700 via-teal-700 to-emerald-700"
-                  : "bg-gradient-hero"
-              }`}
-            >
+            {/* Compact Header (Calm Civic Theme) */}
+            <div className="shrink-0 bg-[#0F4D3A] px-3.5 py-2.5 text-white sm:px-5 sm:py-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2.5">
                   <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/15">
                     {chatMode === "ai" ? (
-                      <Bot className="h-5 w-5 text-gold" />
+                      <Bot className="h-5 w-5 text-white" strokeWidth={1.5} />
                     ) : (
-                      <Headphones className="h-5 w-5 text-gold" />
+                      <Headphones className="h-5 w-5 text-white" strokeWidth={1.5} />
                     )}
-                    <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-primary-deep" />
+                    <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-[#0F4D3A]" />
                   </div>
                   <div className="min-w-0">
                     <p className="truncate font-display text-sm font-bold leading-tight sm:text-base">
-                      {chatMode === "ai" ? aiConfig.botName || "Smart Noakhali AI" : "সরাসরি লাইভ সাপোর্ট"}
+                      {chatMode === "ai" ? aiConfig.botName || "স্মার্ট নোয়াখালী AI" : "সরাসরি লাইভ সাপোর্ট"}
                     </p>
-                    <p className="truncate text-[10.5px] opacity-85">
+                    <p className="truncate text-[11px] text-white/85">
                       {chatMode === "ai"
                         ? "এআই সহকারী • তাৎক্ষণিক তথ্য সহায়তা"
                         : isStaff
-                          ? `${senderRoleLabel} • সাপোর্ট চ্যাট ওয়ার্কস্পেস`
+                          ? `${senderRoleLabel} • অপারেটর ইনবক্স`
                           : "হিউম্যান অপারেটর • সরাসরি বার্তা"}
                     </p>
                   </div>
@@ -532,30 +541,30 @@ export function FloatingLiveChat() {
 
                 <div className="flex items-center gap-1.5 sm:gap-2">
                   {/* Compact Inline Mode Switcher */}
-                  <div className="flex items-center gap-1 rounded-xl bg-black/25 p-0.5">
+                  <div className="flex items-center gap-1 rounded-[10px] bg-black/20 p-0.5">
                     <button
                       type="button"
                       onClick={() => setChatMode("ai")}
-                      className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${
+                      className={`flex items-center gap-1 rounded-[8px] px-2.5 py-1 text-[11px] font-bold transition ${
                         chatMode === "ai"
-                          ? "bg-white text-indigo-900 shadow-sm"
+                          ? "bg-white text-[#0F4D3A]"
                           : "text-white/85 hover:text-white"
                       }`}
                     >
-                      <Sparkles className="h-3 w-3" /> এআই
+                      <Sparkles className="h-3 w-3" strokeWidth={1.5} /> এআই
                     </button>
                     <button
                       type="button"
                       onClick={() => setChatMode("live")}
-                      className={`relative flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${
+                      className={`relative flex items-center gap-1 rounded-[8px] px-2.5 py-1 text-[11px] font-bold transition ${
                         chatMode === "live"
-                          ? "bg-white text-primary-deep shadow-sm"
+                          ? "bg-white text-[#0F4D3A]"
                           : "text-white/85 hover:text-white"
                       }`}
                     >
-                      <MessageCircle className="h-3 w-3" /> লাইভ
+                      <MessageCircle className="h-3 w-3" strokeWidth={1.5} /> লাইভ
                       {unreadCount > 0 && (
-                        <span className="ml-0.5 rounded-full bg-rose-600 px-1.5 py-0.2 text-[9px] font-extrabold text-white">
+                        <span className="ml-0.5 rounded-full bg-[#C62828] px-1.5 py-0.2 text-[9px] font-extrabold text-white">
                           {unreadCount}
                         </span>
                       )}
@@ -568,7 +577,7 @@ export function FloatingLiveChat() {
                     title="পূর্ণ পৃষ্ঠায় খুলুন"
                     className="rounded-full p-1.5 text-white/85 transition hover:bg-white/15 hover:text-white"
                   >
-                    <Maximize2 className="h-4 w-4" />
+                    <Maximize2 className="h-4 w-4" strokeWidth={1.5} />
                   </Link>
                   <button
                     type="button"
@@ -576,7 +585,7 @@ export function FloatingLiveChat() {
                     title="বন্ধ করুন"
                     className="rounded-full p-1.5 text-white/85 transition hover:bg-white/15 hover:text-white"
                   >
-                    <X className="h-4 w-4" />
+                    <X className="h-4 w-4" strokeWidth={1.5} />
                   </button>
                 </div>
               </div>
@@ -585,14 +594,14 @@ export function FloatingLiveChat() {
             {/* Body: AI Mode */}
             {chatMode === "ai" ? (
               <div className="flex flex-1 min-h-0 flex-col">
-                <div className="flex-1 min-h-0 space-y-3 overflow-y-auto bg-indigo-50/25 p-3.5 sm:p-5">
+                <div className="flex-1 min-h-0 space-y-3 overflow-y-auto bg-[#FAF7F2] p-3.5 sm:p-5">
                 {!aiConfig.enabled && (
-                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-center text-xs text-amber-900 space-y-2">
+                  <div className="rounded-[12px] border border-[#E6E1D6] bg-white p-3 text-center text-xs text-[#1C1C1C] space-y-2">
                     <p className="font-bold">এআই চ্যাট সাময়িকভাবে বন্ধ রয়েছে</p>
                     <button
                       type="button"
                       onClick={() => setChatMode("live")}
-                      className="rounded-full bg-primary px-3 py-1 text-[11px] font-bold text-white"
+                      className="rounded-[10px] bg-[#0F4D3A] px-3 py-1.5 text-[11px] font-bold text-white"
                     >
                       সরাসরি লাইভ সাপোর্টে যান
                     </button>
@@ -600,26 +609,26 @@ export function FloatingLiveChat() {
                 )}
                 {/* Quick AI Search Prompts with Reset Button */}
                 <div className="flex items-center justify-between gap-1 pb-1">
-                  <span className="text-[10px] font-bold text-indigo-900/75 flex items-center gap-1">
-                    <Sparkles className="h-3 w-3 text-indigo-600" /> দ্রুত সেবা প্রশ্ন
+                  <span className="text-[11px] font-bold text-[#0F4D3A] flex items-center gap-1">
+                    <Sparkles className="h-3.5 w-3.5" strokeWidth={1.5} /> দ্রুত সেবা প্রশ্ন
                   </span>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1.5">
                     <button
                       type="button"
                       disabled={handoffBusy}
                       onClick={() => void handleHandoffToLiveChat()}
-                      className="flex items-center gap-1 rounded-full bg-emerald-600/15 px-2 py-0.5 text-[10px] font-bold text-emerald-800 hover:bg-emerald-600/25 transition"
+                      className="flex items-center gap-1 rounded-[10px] border border-[#0F4D3A] bg-white px-2.5 py-1 text-[11px] font-bold text-[#0F4D3A] hover:bg-[#0F4D3A] hover:text-white transition"
                       title="সরাসরি অপারেটরের সাথে যুক্ত হোন"
                     >
-                      <Headphones className="h-3 w-3" /> হিউম্যান সাপোর্ট
+                      <Headphones className="h-3 w-3" strokeWidth={1.5} /> হিউম্যান সাপোর্ট
                     </button>
                     <button
                       type="button"
                       onClick={resetAiChat}
-                      className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground hover:bg-muted hover:text-primary transition"
+                      className="flex items-center gap-1 rounded-[8px] border border-[#E6E1D6] bg-white px-2 py-1 text-[11px] font-semibold text-[#5F5F5A] hover:text-[#0F4D3A] transition"
                       title="নতুন এআই চ্যাট শুরু করুন"
                     >
-                      <RotateCcw className="h-3 w-3" /> রিসেট
+                      <RotateCcw className="h-3 w-3" strokeWidth={1.5} /> রিসেট
                     </button>
                   </div>
                 </div>
@@ -629,7 +638,7 @@ export function FloatingLiveChat() {
                       key={qp}
                       type="button"
                       onClick={() => void askAi(qp)}
-                      className="rounded-lg border border-indigo-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-indigo-900 shadow-2xs transition hover:bg-indigo-50"
+                      className="rounded-[10px] border border-[#E6E1D6] bg-white px-2.5 py-1.5 text-[12px] font-medium text-[#1C1C1C] transition hover:border-[#0F4D3A] hover:text-[#0F4D3A]"
                     >
                       {qp}
                     </button>
@@ -644,21 +653,21 @@ export function FloatingLiveChat() {
                       className={`flex ${isUser ? "justify-end" : "justify-start"}`}
                     >
                       <div
-                        className={`group max-w-[88%] rounded-2xl px-3 py-2 text-xs shadow-sm ${
+                        className={`group max-w-[88%] rounded-[12px] px-3.5 py-2.5 text-sm ${
                           isUser
-                            ? "bg-gradient-to-r from-indigo-600 to-teal-700 text-white"
-                            : "border border-indigo-100 bg-card text-foreground"
+                            ? "bg-[#0F4D3A] text-white"
+                            : "border border-[#E6E1D6] bg-white text-[#1C1C1C]"
                         }`}
                       >
-                        <div className="mb-0.5 flex items-center justify-between gap-2">
+                        <div className="mb-1 flex items-center justify-between gap-2">
                           <div className="flex items-center gap-1.5">
-                            {!isUser && <Bot className="h-3.5 w-3.5 text-indigo-600" />}
+                            {!isUser && <Bot className="h-3.5 w-3.5 text-[#0F4D3A]" strokeWidth={1.5} />}
                             <span
-                              className={`text-[10px] font-bold ${
-                                isUser ? "text-amber-200" : "text-indigo-700"
+                              className={`text-[11px] font-bold ${
+                                isUser ? "text-white/90" : "text-[#0F4D3A]"
                               }`}
                             >
-                              {isUser ? "আপনি" : aiConfig.botName || "স্মার্ট এআই সহকারী"}
+                              {isUser ? "আপনি" : `${aiConfig.botName || "স্মার্ট এআই"} (AI সহকারী)`}
                             </span>
                           </div>
                           <button
@@ -1019,8 +1028,8 @@ export function FloatingLiveChat() {
                       </div>
                     )}
                     {!msgsLoading && items.length === 0 && (
-                      <div className="rounded-2xl border border-dashed border-border bg-card/80 p-5 text-center text-xs text-muted-foreground">
-                        আপনার যেকোনো প্রশ্ন বা জরুরী তথ্যের জন্য বার্তা লিখুন — এডমিন/মডারেটর উত্তর দিলে তার নাম ও ছবি এখানে দেখতে পাবেন।
+                      <div className="rounded-[12px] border border-dashed border-[#E6E1D6] bg-white p-5 text-center text-xs text-[#5F5F5A]">
+                        আপনার যেকোনো প্রশ্ন বা জরুরি তথ্যের জন্য বার্তা লিখুন — এডমিন/মডারেটর উত্তর দিলে তার নাম ও পদবি এখানে দেখতে পাবেন।
                       </div>
                     )}
                     {items.map((m) => {
@@ -1048,29 +1057,28 @@ export function FloatingLiveChat() {
                               onError={(e) => {
                                 (e.target as HTMLImageElement).src = logo;
                               }}
-                              className="h-8 w-8 shrink-0 rounded-full border border-primary/30 bg-white object-cover shadow-sm"
+                              className="h-8 w-8 shrink-0 rounded-full border border-[#E6E1D6] bg-white object-cover"
                             />
                           )}
                           <div
-                            className={`max-w-[85%] sm:max-w-[76%] rounded-2xl px-3.5 py-2.5 text-[13.5px] sm:text-sm shadow-sm ${
+                            className={`max-w-[85%] sm:max-w-[76%] rounded-[12px] px-3.5 py-2.5 text-[14px] ${
                               mine
-                                ? "bg-gradient-hero text-primary-foreground"
-                                : "border border-border bg-card"
+                                ? "bg-[#0F4D3A] text-white"
+                                : "border border-[#E6E1D6] bg-white text-[#1C1C1C]"
                             }`}
                           >
-                            <div className="mb-0.5 flex items-center gap-1.5">
+                            <div className="mb-1 flex flex-wrap items-center gap-1.5">
                               <span
-                                className={`text-[10.5px] font-bold ${
-                                  mine ? "text-gold" : "text-primary-deep"
+                                className={`text-[11px] font-bold ${
+                                  mine ? "text-white/90" : "text-[#0F4D3A]"
                                 }`}
                               >
-                                {mine ? "আপনি" : staffName}
+                                {mine
+                                  ? "আপনি"
+                                  : isStaff
+                                    ? `${staffName}`
+                                    : `Human Admin (${staffName} • ${staffRole})`}
                               </span>
-                              {!mine && (
-                                <span className="text-[10px] font-semibold text-muted-foreground">
-                                  · {staffRole}
-                                </span>
-                              )}
                             </div>
                             {m.body && (
                               <p className="whitespace-pre-wrap break-words leading-relaxed">
@@ -1163,15 +1171,15 @@ export function FloatingLiveChat() {
                       <button
                         type="submit"
                         disabled={busy || !text.trim()}
-                        className="flex h-10 shrink-0 items-center justify-center gap-1 rounded-full bg-gradient-hero px-3.5 text-xs font-bold text-primary-foreground shadow-card active:scale-95 disabled:opacity-60"
+                        className="flex h-10 shrink-0 items-center justify-center gap-1 rounded-[10px] bg-[#0F4D3A] px-3.5 text-xs font-bold text-white transition active:scale-95 disabled:opacity-60"
                       >
-                        <Send className="h-4 w-4" />
+                        <Send className="h-4 w-4" strokeWidth={1.5} />
                         <span className="hidden sm:inline">পাঠান</span>
                       </button>
                     </form>
                   ) : (
-                    <div className="shrink-0 border-t border-border bg-muted/30 px-4 py-2 text-center text-xs font-semibold text-muted-foreground">
-                      🔒 আপনার ভূমিকায় উত্তর দেওয়ার পারমিশন (chat_reply) নেই।
+                    <div className="shrink-0 border-t border-[#E6E1D6] bg-[#FAF7F2] px-4 py-2 text-center text-xs font-semibold text-[#5F5F5A]">
+                      আপনার ভূমিকায় উত্তর দেওয়ার পারমিশন (chat_reply) নেই।
                     </div>
                   )}
                 </div>
@@ -1181,29 +1189,25 @@ export function FloatingLiveChat() {
         </div>
       )}
 
-      {/* Floating Action Button (Bottom-Right) */}
-      <div className="fixed bottom-5 right-5 z-40">
+      {/* Floating Action Button (Bottom-Right, docked cleanly above mobile BottomNav) */}
+      <div className="fixed bottom-[76px] right-4 z-40 sm:bottom-6 sm:right-6">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          aria-label="লাইভ চ্যাট ও এআই"
-          className="group relative flex items-center gap-2 rounded-full bg-gradient-hero px-4 py-3 text-primary-foreground shadow-elevated ring-2 ring-gold/70 transition-all duration-200 hover:scale-105 active:scale-95"
+          aria-label="লাইভ চ্যাট ও AI সহায়তা"
+          title="লাইভ চ্যাট ও AI"
+          className="relative flex h-12 min-w-[48px] items-center justify-center gap-2 rounded-full border border-[#E6E1D6] bg-[#0F4D3A] px-3.5 text-white transition-transform duration-150 hover:bg-[#0c3f30] active:scale-95"
         >
-          <span className="relative flex h-5 w-5 items-center justify-center">
-            {open ? (
-              <X className="h-5 w-5 text-gold" />
-            ) : (
-              <>
-                <MessageCircle className="h-5 w-5 text-gold" />
-                <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-emerald-400 ring-1 ring-primary-deep" />
-              </>
-            )}
-          </span>
-          <span className="font-display text-xs font-bold tracking-wide text-white">
+          {open ? (
+            <X className="h-5 w-5" strokeWidth={1.5} />
+          ) : (
+            <MessageCircle className="h-5 w-5" strokeWidth={1.5} />
+          )}
+          <span className="hidden sm:inline font-display text-xs font-semibold">
             লাইভ চ্যাট ও AI
           </span>
           {unreadCount > 0 && !open && (
-            <span className="ml-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1.5 text-[10px] font-extrabold text-white shadow-sm">
+            <span className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#C62828] px-1 text-[10px] font-bold text-white">
               {unreadCount}
             </span>
           )}

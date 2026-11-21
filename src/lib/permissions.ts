@@ -192,7 +192,7 @@ export const ALL_PERMISSIONS: PermissionDefinition[] = [
     key: "moderate_submissions",
     labelBn: "সাবমিশন মডারেশন",
     labelEn: "Moderate User Submissions",
-    description: "নাগরিকদের পাঠানো নতুন তথ্য ও জরুরী রক্তের আবেদন যাচাই-বাছাই করা।",
+    description: "নাগরিকদের পাঠানো নতুন তথ্য ও জরুরি রক্তের আবেদন যাচাই-বাছাই করা।",
     category: "moderation",
     defaultRoles: ["admin", "editor", "moderator"],
   },
@@ -966,3 +966,58 @@ export function useRolePermissions() {
     allPermissionDefs: ALL_PERMISSIONS,
   };
 }
+
+export interface ChatPermissionSubject {
+  email?: string | null;
+  roles?: string[] | null;
+  isMainAdmin?: boolean;
+  customRoleId?: string | null;
+  customRoleName?: string | null;
+  payload?: RolePermissionsStoragePayload;
+}
+
+export function hasChatAccess(subject: ChatPermissionSubject): boolean {
+  if (subject.isMainAdmin || isSuperAdminEmail(subject.email)) return true;
+  const perms = getEffectivePermissions(subject);
+  return (
+    perms.includes("chat_view_all") ||
+    perms.includes("chat_view_assigned") ||
+    perms.includes("chat_reply") ||
+    perms.includes("chat_assign") ||
+    perms.includes("chat_close_reopen")
+  );
+}
+
+export function canViewAllChats(subject: ChatPermissionSubject): boolean {
+  if (subject.isMainAdmin || isSuperAdminEmail(subject.email)) return true;
+  return getEffectivePermissions(subject).includes("chat_view_all");
+}
+
+export function canReplyChat(subject: ChatPermissionSubject): boolean {
+  if (subject.isMainAdmin || isSuperAdminEmail(subject.email)) return true;
+  return getEffectivePermissions(subject).includes("chat_reply");
+}
+
+export function canAssignChat(subject: ChatPermissionSubject): boolean {
+  if (subject.isMainAdmin || isSuperAdminEmail(subject.email)) return true;
+  const perms = getEffectivePermissions(subject);
+  return perms.includes("chat_assign") || perms.includes("chat_transfer");
+}
+
+export function canManageChatStatus(subject: ChatPermissionSubject): boolean {
+  if (subject.isMainAdmin || isSuperAdminEmail(subject.email)) return true;
+  return getEffectivePermissions(subject).includes("chat_close_reopen");
+}
+
+export function getStaffDisplayRoleLabel(subject: ChatPermissionSubject & { designation?: string | null }): string {
+  return resolveUserRoleDisplay({
+    email: subject.email,
+    roles: subject.roles,
+    isMainAdmin: subject.isMainAdmin,
+    customRoleId: subject.customRoleId,
+    customRoleName: subject.customRoleName,
+    customRoles: subject.payload?.customRoles,
+    designation: subject.designation,
+  }).labelBn;
+}
+

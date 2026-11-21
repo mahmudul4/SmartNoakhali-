@@ -490,9 +490,13 @@ export const OfflineIndicator: React.FC = () => {
   if (isOnline) return null;
 
   return (
-    <div className="fixed bottom-4 left-4 z-50 flex items-center gap-2 rounded-full bg-amber-600 px-3.5 py-2 text-xs font-bold text-white shadow-elevated">
-      <WifiOff className="h-3.5 w-3.5 animate-pulse" />
-      <span>অফলাইন মোড — সংরক্ষিত ডাটা ব্যবহৃত হচ্ছে</span>
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex h-8 w-full items-center justify-center gap-2 border-b border-[#E6E1D6] bg-[#5F5F5A] px-3 text-xs font-medium text-white"
+    >
+      <WifiOff className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} />
+      <span>অফলাইন — সংরক্ষিত তথ্য দেখাচ্ছে</span>
     </div>
   );
 };

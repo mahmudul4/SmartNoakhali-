@@ -80,23 +80,23 @@ function AppDownloadPage() {
       </div>
 
       {/* Main Header Banner */}
-      <div className="mb-6 overflow-hidden rounded-3xl bg-gradient-hero p-5 text-primary-foreground shadow-elevated sm:p-6">
+      <div className="mb-5 overflow-hidden rounded-[12px] border border-[#0B3C2D] bg-[#0F4D3A] p-5 text-white sm:p-6">
         <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center">
-          <div className="flex h-16 w-16 shrink-0 items-center justify-center p-1">
+          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-white p-1.5">
             <img
               src={logo}
               alt="Smart Noakhali Logo"
-              className="h-full w-full object-contain"
+              className="h-full w-full rounded-full object-contain"
             />
           </div>
           <div className="flex-1">
-            <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2.5 py-0.5 text-[11px] font-semibold text-gold">
-              <Sparkles className="h-3 w-3" /> অফিসিয়াল প্রোগ্রেসিভ ওয়েব অ্যাপ (PWA)
+            <span className="inline-flex items-center gap-1 rounded-[8px] bg-white/15 px-2.5 py-0.5 text-[11px] font-semibold text-white">
+              <Sparkles className="h-3 w-3" strokeWidth={1.5} /> অফিসিয়াল প্রোগ্রেসিভ ওয়েব অ্যাপ (PWA)
             </span>
-            <h1 className="mt-1 font-display text-2xl font-black">
+            <h1 className="mt-1.5 font-display text-2xl font-bold">
               স্মার্ট নোয়াখালী ইনস্টল
             </h1>
-            <p className="mt-1 text-xs opacity-95 sm:text-sm">
+            <p className="mt-1 text-xs text-white/90 sm:text-sm">
               কোনো বাড়তি মেমোরি খরচ ছাড়া যে কোনো ডিভাইসে (Android, iOS, PC) ১-ক্লিকে ইনস্টল করুন এবং নোটিফিকেশন চালু রাখুন।
             </p>
           </div>
@@ -104,80 +104,80 @@ function AppDownloadPage() {
       </div>
 
       {/* 1-Click PWA Web App Install Card */}
-      <section className="mb-6 overflow-hidden rounded-3xl border-2 border-emerald-500/30 bg-gradient-to-br from-emerald-500/5 via-primary/5 to-gold/10 p-5 shadow-card sm:p-6">
+      <section className="mb-5 overflow-hidden rounded-[12px] border border-[#E6E1D6] bg-white p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-hero text-white shadow-md">
-              <Zap className="h-6 w-6 text-yellow-300" />
+            <div className="flex h-11 w-11 items-center justify-center rounded-[10px] bg-[#0F4D3A] text-white">
+              <Zap className="h-5 w-5" strokeWidth={1.5} />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-emerald-800">
-                  সুপার ফাস্ট PWA
+                <span className="rounded-[6px] bg-[#0F4D3A]/10 px-2 py-0.5 text-[10px] font-bold text-[#0F4D3A]">
+                  অফলাইন সাপোর্টেড PWA
                 </span>
-                <span className="flex items-center gap-1 text-[11px] font-semibold text-muted-foreground">
-                  <Globe className="h-3 w-3 text-primary" /> সব ডিভাইসে চলবে
+                <span className="flex items-center gap-1 text-[11px] font-semibold text-[#5F5F5A]">
+                  <Globe className="h-3 w-3 text-[#0F4D3A]" strokeWidth={1.5} /> সব ডিভাইসে চলবে
                 </span>
               </div>
-              <h2 className="font-display text-lg font-extrabold text-foreground sm:text-xl">
+              <h2 className="font-display text-lg font-bold text-[#1C1C1C] sm:text-xl">
                 ১-ক্লিকে অটো ওয়েব অ্যাপ ইনস্টল (PWA)
               </h2>
             </div>
           </div>
 
           {isInstalled && (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1 text-xs font-bold text-white shadow-sm">
-              <CheckCircle2 className="h-3.5 w-3.5" /> ইনস্টল সম্পন্ন
+            <span className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#0F4D3A] px-3 py-1 text-xs font-bold text-white">
+              <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={1.5} /> ইনস্টল সম্পন্ন
             </span>
           )}
         </div>
 
-        <p className="mt-3 text-xs leading-relaxed text-muted-foreground sm:text-sm">
+        <p className="mt-3 text-xs leading-relaxed text-[#5F5F5A] sm:text-sm">
           আপনার ফোনে কোনো ভারী ফাইল ডাউনলোড ছাড়াই হুবহু আসল মোবাইল অ্যাপের মতো হোম স্ক্রিনে যোগ হবে। দ্রুত লোড হয়, অফলাইনেও জরুরি নম্বর দেখা যায় এবং কোনো মেমোরি নষ্ট হয় না।
         </p>
 
         {/* Feature Badges */}
         <div className="mt-3.5 grid grid-cols-3 gap-2 text-center">
-          <div className="rounded-2xl border border-border/60 bg-background/80 p-2.5">
-            <Zap className="mx-auto h-4 w-4 text-amber-600" />
-            <p className="mt-1 text-[11px] font-bold text-foreground">শূন্য মেমোরি খরচ</p>
-            <p className="text-[10px] text-muted-foreground">তাত্ক্ষণিক চালু</p>
+          <div className="rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] p-2.5">
+            <Zap className="mx-auto h-4 w-4 text-[#0F4D3A]" strokeWidth={1.5} />
+            <p className="mt-1 text-[11px] font-bold text-[#1C1C1C]">শূন্য মেমোরি খরচ</p>
+            <p className="text-[10px] text-[#5F5F5A]">তাত্ক্ষণিক চালু</p>
           </div>
-          <div className="rounded-2xl border border-border/60 bg-background/80 p-2.5">
-            <Wifi className="mx-auto h-4 w-4 text-emerald-600" />
-            <p className="mt-1 text-[11px] font-bold text-foreground">অফলাইন সাপোর্ট</p>
-            <p className="text-[10px] text-muted-foreground">ইন্টারনেট ছাড়াও চলবে</p>
+          <div className="rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] p-2.5">
+            <Wifi className="mx-auto h-4 w-4 text-[#0F4D3A]" strokeWidth={1.5} />
+            <p className="mt-1 text-[11px] font-bold text-[#1C1C1C]">অফলাইন সাপোর্ট</p>
+            <p className="text-[10px] text-[#5F5F5A]">ইন্টারনেট ছাড়াও চলবে</p>
           </div>
-          <div className="rounded-2xl border border-border/60 bg-background/80 p-2.5">
-            <Smartphone className="mx-auto h-4 w-4 text-primary" />
-            <p className="mt-1 text-[11px] font-bold text-foreground">ফুলস্ক্রিন অ্যাপ</p>
-            <p className="text-[10px] text-muted-foreground">হোম স্ক্রিন আইকন</p>
+          <div className="rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] p-2.5">
+            <Smartphone className="mx-auto h-4 w-4 text-[#0F4D3A]" strokeWidth={1.5} />
+            <p className="mt-1 text-[11px] font-bold text-[#1C1C1C]">ফুলস্ক্রিন অ্যাপ</p>
+            <p className="text-[10px] text-[#5F5F5A]">হোম স্ক্রিন আইকন</p>
           </div>
         </div>
 
         {/* Action Button / iOS Guidance */}
         <div className="mt-5">
           {isInstalled ? (
-            <div className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-500/15 py-3.5 text-center text-sm font-bold text-emerald-800">
-              <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+            <div className="flex items-center justify-center gap-2 rounded-[10px] border border-[#0F4D3A]/20 bg-[#0F4D3A]/10 py-3.5 text-center text-sm font-bold text-[#0F4D3A]">
+              <CheckCircle2 className="h-5 w-5" strokeWidth={1.5} />
               স্মার্ট নোয়াখালী অ্যাপ আপনার ডিভাইসে সফলভাবে ইনস্টল করা আছে!
             </div>
           ) : isIOS ? (
-            <div className="space-y-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-950">
-              <p className="flex items-center gap-1.5 text-xs font-bold text-amber-900">
-                <Apple className="h-4 w-4 text-slate-800" /> iPhone / iPad (iOS) এ ইনস্টল করার সহজ ৩টি নিয়ম:
+            <div className="space-y-3 rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] p-4 text-[#1C1C1C]">
+              <p className="flex items-center gap-1.5 text-xs font-bold text-[#1C1C1C]">
+                <Apple className="h-4 w-4 text-[#1C1C1C]" strokeWidth={1.5} /> iPhone / iPad (iOS) এ ইনস্টল করার সহজ ৩টি নিয়ম:
               </p>
-              <ol className="space-y-1.5 text-xs leading-relaxed text-amber-900">
+              <ol className="space-y-1.5 text-xs leading-relaxed text-[#5F5F5A]">
                 <li className="flex items-center gap-2">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-400 font-bold text-amber-950">১</span>
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#0F4D3A] font-bold text-white">১</span>
                   <span>সাফারি ব্রাউজারের নিচের দিকে <strong>শেয়ার বোতাম</strong> (<Share className="inline h-3.5 w-3.5 mx-0.5" /> Share) চাপুন।</span>
                 </li>
                 <li className="flex items-center gap-2">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-400 font-bold text-amber-950">২</span>
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#0F4D3A] font-bold text-white">২</span>
                   <span>মেনু স্ক্রল করে <strong>'Add to Home Screen'</strong> (<PlusSquare className="inline h-3.5 w-3.5 mx-0.5" /> হোম স্ক্রিনে যোগ করুন) চাপুন।</span>
                 </li>
                 <li className="flex items-center gap-2">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-400 font-bold text-amber-950">৩</span>
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#0F4D3A] font-bold text-white">৩</span>
                   <span>উপরে ডানপাশে <strong>'Add'</strong> (যোগ করুন) চাপলেই অ্যাপ ইনস্টল সম্পন্ন হবে!</span>
                 </li>
               </ol>
@@ -187,9 +187,9 @@ function AppDownloadPage() {
               type="button"
               disabled={installingPWA}
               onClick={() => void handlePWAInstall()}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-hero py-4 text-sm font-extrabold text-white shadow-elevated transition hover:opacity-95 active:scale-[0.98] disabled:opacity-75 sm:text-base"
+              className="flex min-h-[48px] w-full items-center justify-center gap-2 rounded-[10px] bg-[#0F4D3A] py-3.5 text-sm font-bold text-white transition hover:bg-[#0B3C2D] active:scale-[0.98] disabled:opacity-75 sm:text-base"
             >
-              <Zap className="h-5 w-5 text-yellow-300" />
+              <Zap className="h-5 w-5" strokeWidth={1.5} />
               {installingPWA ? "ইনস্টল হচ্ছে..." : "১-ক্লিকে অটো ওয়েব অ্যাপ ইনস্টল করুন"}
             </button>
           )}
@@ -197,38 +197,38 @@ function AppDownloadPage() {
       </section>
 
       {/* NOTIFICATION SYSTEM CARD */}
-      <section className="overflow-hidden rounded-3xl border border-border bg-card p-5 shadow-card sm:p-6">
+      <section className="overflow-hidden rounded-[12px] border border-[#E6E1D6] bg-white p-5 sm:p-6">
         <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-600">
-            <BellRing className="h-6 w-6" />
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[10px] bg-[#0F4D3A]/10 text-[#0F4D3A]">
+            <BellRing className="h-6 w-6" strokeWidth={1.5} />
           </div>
           <div>
-            <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+            <span className="rounded-[6px] bg-[#0F4D3A]/10 px-2 py-0.5 text-[10px] font-bold text-[#0F4D3A]">
               রিয়েল-টাইম নোটিফিকেশন
             </span>
-            <h2 className="font-display text-base font-bold text-foreground sm:text-lg">
-              জরুরী নোটিফিকেশন সিস্টেম
+            <h2 className="font-display text-base font-bold text-[#1C1C1C] sm:text-lg">
+              জরুরি নোটিফিকেশন সিস্টেম
             </h2>
           </div>
         </div>
 
-        <p className="mt-3 text-xs leading-relaxed text-muted-foreground sm:text-sm">
-          নোয়াখালীতে কোনো জরুরী রক্তের প্রয়োজন হলে বা গুরুত্বপূর্ণ নাগরিক বিজ্ঞপ্তি প্রকাশিত হলে তাৎক্ষণিক আপনার ডিভাইসে নোটিফিকেশন পাঠানো হবে।
+        <p className="mt-3 text-xs leading-relaxed text-[#5F5F5A] sm:text-sm">
+          নোয়াখালীতে কোনো জরুরি রক্তের প্রয়োজন হলে বা গুরুত্বপূর্ণ নাগরিক বিজ্ঞপ্তি প্রকাশিত হলে তাৎক্ষণিক আপনার ডিভাইসে নোটিফিকেশন পাঠানো হবে।
         </p>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/80 bg-muted/40 p-4">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] p-4">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-foreground">নোটিফিকেশন স্ট্যাটাস:</span>
+            <span className="text-xs font-semibold text-[#1C1C1C]">নোটিফিকেশন স্ট্যাটাস:</span>
             {permission === "granted" ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">
-                <Check className="h-3 w-3" /> সক্রিয় (চালু আছে)
+              <span className="inline-flex items-center gap-1 rounded-[8px] bg-[#0F4D3A]/10 px-2.5 py-0.5 text-[11px] font-bold text-[#0F4D3A]">
+                <Check className="h-3 w-3" strokeWidth={1.5} /> সক্রিয় (চালু আছে)
               </span>
             ) : permission === "denied" ? (
-              <span className="rounded-full bg-destructive/15 px-2.5 py-0.5 text-[11px] font-bold text-destructive">
+              <span className="rounded-[8px] bg-[#C62828]/10 px-2.5 py-0.5 text-[11px] font-bold text-[#C62828]">
                 ব্লক করা (ব্রাউজার সেটিংসে অনুমতি দিন)
               </span>
             ) : (
-              <span className="rounded-full bg-amber-500/15 px-2.5 py-0.5 text-[11px] font-bold text-amber-700">
+              <span className="rounded-[8px] border border-[#E6E1D6] bg-white px-2.5 py-0.5 text-[11px] font-bold text-[#5F5F5A]">
                 অনুমতি প্রয়োজন
               </span>
             )}
@@ -239,17 +239,17 @@ function AppDownloadPage() {
               <button
                 type="button"
                 onClick={() => void enableNotifications()}
-                className="flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-bold text-primary-foreground shadow transition hover:opacity-95"
+                className="flex min-h-[44px] items-center gap-1.5 rounded-[10px] bg-[#0F4D3A] px-4 py-2 text-xs font-bold text-white transition hover:bg-[#0B3C2D]"
               >
-                <BellRing className="h-3.5 w-3.5 text-yellow-300" /> নোটিফিকেশন চালু করুন
+                <BellRing className="h-3.5 w-3.5" strokeWidth={1.5} /> নোটিফিকেশন চালু করুন
               </button>
             ) : (
               <button
                 type="button"
                 onClick={sendTestNotification}
-                className="flex items-center gap-1.5 rounded-full bg-muted px-4 py-2 text-xs font-bold text-foreground border border-border transition hover:bg-muted/80"
+                className="flex min-h-[44px] items-center gap-1.5 rounded-[10px] border border-[#E6E1D6] bg-white px-4 py-2 text-xs font-bold text-[#1C1C1C] transition hover:bg-[#FAF7F2]"
               >
-                <Volume2 className="h-3.5 w-3.5 text-primary" /> টেস্ট নোটিফিকেশন
+                <Volume2 className="h-3.5 w-3.5 text-[#0F4D3A]" strokeWidth={1.5} /> টেস্ট নোটিফিকেশন
               </button>
             )}
           </div>

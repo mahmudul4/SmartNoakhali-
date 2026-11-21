@@ -14,6 +14,7 @@ import {
   LogIn,
   LogOut,
   ChevronRight,
+  Bell,
 } from "lucide-react";
 import type { Category } from "@/data/categories";
 
@@ -378,14 +379,14 @@ export function NavigationDrawer({
     path === "/" ? pathname === "/" : pathname === path || pathname.startsWith(`${path}/`);
 
   const navLinkClass = (active: boolean) =>
-    `flex min-h-[44px] items-center justify-between gap-3 rounded-xl px-3.5 py-2.5 font-bangla text-[14.5px] leading-[1.35] transition-colors ${
+    `flex min-h-[46px] items-center justify-between gap-3 rounded-[10px] px-3.5 py-2.5 font-bangla text-[14.5px] leading-[1.35] transition-colors ${
       active
-        ? "bg-[#064e3b] font-semibold text-white shadow-xs"
-        : "font-medium text-slate-800 hover:bg-emerald-950/[0.06] hover:text-[#064e3b]"
+        ? "bg-[#0F4D3A] font-semibold text-white"
+        : "font-medium text-[#1C1C1C] hover:bg-[#FAF7F2] hover:text-[#0F4D3A]"
     }`;
 
   const iconClass = (active: boolean) =>
-    `h-[18px] w-[18px] shrink-0 ${active ? "text-amber-200" : "text-[#064e3b]"}`;
+    `h-[18px] w-[18px] shrink-0 ${active ? "text-white" : "text-[#0F4D3A]"}`;
 
   const resolveCategoryHref = (c: Category): { type: "internal"; to: string } | { type: "external"; href: string } | { type: "slug"; slug: string } => {
     if (c.customRoute) {
@@ -413,7 +414,7 @@ export function NavigationDrawer({
         ref={backdropRef}
         onClick={closeDrawer}
         aria-hidden="true"
-        className={`fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-[2px] transition-[opacity,visibility] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+        className={`fixed inset-0 z-50 bg-black/40 transition-[opacity,visibility] duration-200 ${
           open ? "visible opacity-100 pointer-events-auto" : "invisible opacity-0 pointer-events-none"
         }`}
       />
@@ -426,29 +427,30 @@ export function NavigationDrawer({
         aria-hidden={!open}
         aria-label="স্মার্ট নোয়াখালী নেভিগেশন মেনু"
         data-nav-drawer="true"
-        className={`fixed inset-y-0 left-0 z-50 flex w-[84vw] max-w-[320px] flex-col border-r border-emerald-950/10 bg-white text-slate-900 shadow-2xl transition-[transform,visibility] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-[84vw] max-w-[320px] flex-col border-r border-[#E6E1D6] bg-white text-[#1C1C1C] transition-[transform,visibility] duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${
           open ? "visible translate-x-0" : "invisible -translate-x-full pointer-events-none"
         }`}
       >
-        {/* Drawer Header: Official Logo + Brand Wordmark + Close Button */}
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-emerald-950/10 bg-emerald-950/[0.02] px-4 py-3.5">
+        {/* Drawer Header: Official Logo + Calm Title + Close Button */}
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[#E6E1D6] bg-[#FAF7F2] px-4 py-3.5">
           <Link
             to="/"
             onClick={closeDrawer}
-            className="flex min-w-0 items-center gap-3 focus-visible:rounded-xl"
+            className="flex min-w-0 items-center gap-3 focus-visible:rounded-[10px]"
           >
-            <img
-              src={logo}
-              alt="Smart Noakhali Logo"
-              className="h-11 w-11 shrink-0 object-contain"
-            />
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#E6E1D6] bg-white p-0.5">
+              <img
+                src={logo}
+                alt="স্মার্ট নোয়াখালী লোগো"
+                className="h-full w-full object-contain"
+              />
+            </div>
             <div className="min-w-0">
-              <p className="font-brand whitespace-nowrap text-[18px] font-bold tracking-[-0.015em] leading-none">
-                <span className="text-[#064e3b]">Smart</span>{" "}
-                <span className="text-[#b91c1c]">Noakhali</span>
-              </p>
-              <p className="mt-1 truncate font-bangla text-[11.5px] font-medium leading-[1.3] text-emerald-900/80">
+              <p className="font-display truncate text-[18px] font-bold leading-tight text-[#0F4D3A]">
                 স্মার্ট নোয়াখালী
+              </p>
+              <p className="mt-0.5 truncate font-bangla text-[11.5px] font-medium leading-[1.3] text-[#5F5F5A]">
+                Smart Noakhali • নাগরিক সেবা
               </p>
             </div>
           </Link>
@@ -458,9 +460,9 @@ export function NavigationDrawer({
             type="button"
             onClick={closeDrawer}
             aria-label="মেনু বন্ধ করুন"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-emerald-950/12 bg-white text-slate-700 transition-colors hover:bg-emerald-950/[0.06] hover:text-[#b91c1c] active:scale-95"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[10px] border border-[#E6E1D6] bg-white text-[#1C1C1C] transition-colors hover:border-[#0F4D3A] hover:text-[#0F4D3A]"
           >
-            <X className="h-5 w-5" />
+            <X className="h-5 w-5" strokeWidth={1.5} />
           </button>
         </div>
 
@@ -471,75 +473,82 @@ export function NavigationDrawer({
         >
           {/* Primary Section */}
           <div>
-            <p className="px-3.5 pb-1.5 font-bangla text-[11.5px] font-semibold tracking-wide text-emerald-900/65">
+            <p className="px-3.5 pb-1.5 font-bangla text-[11.5px] font-semibold tracking-wide text-[#5F5F5A]">
               মূল নেভিগেশন
             </p>
             <div className="space-y-1">
               <Link to="/" onClick={closeDrawer} className={navLinkClass(isRouteActive("/"))}>
                 <span className="flex items-center gap-3 min-w-0">
-                  <Home className={iconClass(isRouteActive("/"))} />
+                  <Home className={iconClass(isRouteActive("/"))} strokeWidth={1.5} />
                   <span className="truncate">হোম</span>
                 </span>
-                <ChevronRight className="h-4 w-4 shrink-0 opacity-40" />
+                <ChevronRight className="h-4 w-4 shrink-0 opacity-40" strokeWidth={1.5} />
               </Link>
               <Link to="/chat" onClick={closeDrawer} className={navLinkClass(isRouteActive("/chat"))}>
                 <span className="flex items-center gap-3 min-w-0">
-                  <MessageCircle className={iconClass(isRouteActive("/chat"))} />
-                  <span className="truncate">লাইভ চ্যাট ও AI সহায়তা</span>
+                  <MessageCircle className={iconClass(isRouteActive("/chat"))} strokeWidth={1.5} />
+                  <span className="truncate">লাইভ চ্যাট ও সহায়তা</span>
                 </span>
-                <ChevronRight className="h-4 w-4 shrink-0 opacity-40" />
+                <ChevronRight className="h-4 w-4 shrink-0 opacity-40" strokeWidth={1.5} />
+              </Link>
+              <Link to="/notifications" onClick={closeDrawer} className={navLinkClass(isRouteActive("/notifications"))}>
+                <span className="flex items-center gap-3 min-w-0">
+                  <Bell className={iconClass(isRouteActive("/notifications"))} strokeWidth={1.5} />
+                  <span className="truncate">বিজ্ঞপ্তি ও জরুরি বার্তা</span>
+                </span>
+                <ChevronRight className="h-4 w-4 shrink-0 opacity-40" strokeWidth={1.5} />
               </Link>
             </div>
           </div>
 
-          <div className="border-t border-emerald-950/8" />
+          <div className="border-t border-[#E6E1D6]" />
 
           {/* Civic & District Tools */}
           <div>
-            <p className="px-3.5 pb-1.5 font-bangla text-[11.5px] font-semibold tracking-wide text-emerald-900/65">
+            <p className="px-3.5 pb-1.5 font-bangla text-[11.5px] font-semibold tracking-wide text-[#5F5F5A]">
               নাগরিক ও জেলা সেবা
             </p>
             <div className="space-y-1">
               <Link to="/blood-donor" onClick={closeDrawer} className={navLinkClass(isRouteActive("/blood-donor"))}>
                 <span className="flex items-center gap-3 min-w-0">
-                  <Droplet className={isRouteActive("/blood-donor") ? "h-[18px] w-[18px] shrink-0 text-rose-200" : "h-[18px] w-[18px] shrink-0 text-[#b91c1c]"} />
+                  <Droplet className={isRouteActive("/blood-donor") ? "h-[18px] w-[18px] shrink-0 text-white" : "h-[18px] w-[18px] shrink-0 text-[#C62828]"} strokeWidth={1.5} />
                   <span className="truncate">রক্তদাতা ডিরেক্টরি</span>
                 </span>
               </Link>
               <Link to="/map" onClick={closeDrawer} className={navLinkClass(isRouteActive("/map"))}>
                 <span className="flex items-center gap-3 min-w-0">
-                  <MapPin className={iconClass(isRouteActive("/map"))} />
+                  <MapPin className={iconClass(isRouteActive("/map"))} strokeWidth={1.5} />
                   <span className="truncate">নোয়াখালী ম্যাপ ও দূরত্ব</span>
                 </span>
               </Link>
               <Link to="/directory" onClick={closeDrawer} className={navLinkClass(isRouteActive("/directory"))}>
                 <span className="flex items-center gap-3 min-w-0">
-                  <Building2 className={iconClass(isRouteActive("/directory"))} />
+                  <Building2 className={iconClass(isRouteActive("/directory"))} strokeWidth={1.5} />
                   <span className="truncate">প্রতিষ্ঠান ও ব্যবসা ডিরেক্টরি</span>
                 </span>
               </Link>
               <Link to="/career" onClick={closeDrawer} className={navLinkClass(isRouteActive("/career"))}>
                 <span className="flex items-center gap-3 min-w-0">
-                  <Briefcase className={iconClass(isRouteActive("/career"))} />
+                  <Briefcase className={iconClass(isRouteActive("/career"))} strokeWidth={1.5} />
                   <span className="truncate">শিক্ষা ও ক্যারিয়ার হাব</span>
                 </span>
               </Link>
               <Link to="/complaint-tracking" onClick={closeDrawer} className={navLinkClass(isRouteActive("/complaint-tracking"))}>
                 <span className="flex items-center gap-3 min-w-0">
-                  <AlertTriangle className={iconClass(isRouteActive("/complaint-tracking"))} />
+                  <AlertTriangle className={iconClass(isRouteActive("/complaint-tracking"))} strokeWidth={1.5} />
                   <span className="truncate">নাগরিক অভিযোগ ট্র্যাকিং</span>
                 </span>
               </Link>
               <Link to="/profile" onClick={closeDrawer} className={navLinkClass(isRouteActive("/profile"))}>
                 <span className="flex items-center gap-3 min-w-0">
-                  <UserIcon className={iconClass(isRouteActive("/profile"))} />
+                  <UserIcon className={iconClass(isRouteActive("/profile"))} strokeWidth={1.5} />
                   <span className="truncate">আমার প্রোফাইল ও বুকমার্ক</span>
                 </span>
               </Link>
             </div>
           </div>
 
-          <div className="border-t border-emerald-950/8" />
+          <div className="border-t border-[#E6E1D6]" />
 
           {/* Dynamic Categories */}
           <div>
