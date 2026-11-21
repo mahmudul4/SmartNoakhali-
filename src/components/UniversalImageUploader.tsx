@@ -296,7 +296,7 @@ export function UniversalImageUploader({
     <input
       ref={fileInputRef}
       type="file"
-      accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
+      accept="image/jpeg,image/png,image/webp,image/gif,image/avif,image/svg+xml,.svg"
       onChange={handleFileChange}
       disabled={disabled || isProcessing}
       className="hidden"
@@ -417,7 +417,9 @@ export function UniversalImageUploader({
         {hiddenInput}
         <div
           onClick={() => !disabled && !isProcessing && fileInputRef.current?.click()}
-          className={`relative flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-xl border border-border bg-muted/40 transition hover:border-primary ${
+          className={`relative flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-xl border border-border ${
+            category === "category" || category === "logo" ? "bg-[#FAF7F2] p-1" : "bg-muted/40"
+          } transition hover:border-primary ${
             disabled ? "opacity-50 cursor-not-allowed" : ""
           }`}
           title="ছবি নির্বাচন করুন"
@@ -426,7 +428,9 @@ export function UniversalImageUploader({
             <img
               src={displayImage}
               alt="Preview"
-              className="h-full w-full object-cover"
+              className={`h-full w-full ${
+                category === "category" || category === "logo" ? "object-contain" : "object-cover"
+              }`}
               onLoad={() => setImgLoadFailed(false)}
               onError={() => setImgLoadFailed(true)}
             />

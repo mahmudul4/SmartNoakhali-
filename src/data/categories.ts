@@ -75,6 +75,7 @@ import {
   Sparkles,
   type LucideIcon,
 } from "lucide-react";
+import { getBuiltInCategoryIconUrl } from "./categoryIcons";
 
 export type CategorySlug = string;
 
@@ -131,6 +132,7 @@ export interface Category {
   description: string;
   formType?: CategoryFormType;
   customIconUrl?: string;
+  iconCleared?: boolean;
   customRoute?: string;
   visible?: boolean;
   sort_order?: number;
@@ -477,9 +479,9 @@ export const DIVISIONS: Division[] = [
 ];
 
 // ============================================================================
-// All 181 Categories (২ থেকে ২২ নম্বর বিভাগের নির্ধারিত সকল ১৮১টি ক্যাটাগরি)
+// All Master Categories (১৯৩টি ক্যাটাগরি — এর মধ্যে ১৮২টিতে বিল্ট-ইন ফ্ল্যাট PNG আইকন যুক্ত)
 // ============================================================================
-export const categories: Category[] = [
+const RAW_CATEGORIES: Category[] = [
   // --------------------------------------------------------------------------
   // বিভাগ ১: অনুদান ও মানবিক সহায়তা (১১টি পূর্ণাঙ্গ ক্যাটাগরি + সংরক্ষিত সেবা)
   // --------------------------------------------------------------------------
@@ -761,6 +763,11 @@ export const categories: Category[] = [
   { slug: "specialized-services", divisionId: "other_services", bn: "বিশেষায়িত সেবা", en: "Specialized Services", icon: Star, iconName: "Star", tint: "from-amber-500/15 to-orange-700/10", description: "অনন্য বা বিশেষ ধরনের নাগরিক পরিষেবা", formType: "other_services", visible: true, sort_order: 3 },
   { slug: "community-activities", divisionId: "other_services", bn: "নতুন কমিউনিটি কার্যক্রম", en: "Community Activities", icon: HeartHandshake, iconName: "HeartHandshake", tint: "from-rose-500/15 to-pink-700/10", description: "এলাকাভিত্তিক নতুন উদ্যোগ ও নাগরিক সহায়তা", formType: "other_services", visible: true, sort_order: 4 },
 ];
+
+export const categories: Category[] = RAW_CATEGORIES.map((c) => {
+  const builtInUrl = getBuiltInCategoryIconUrl(c.slug);
+  return builtInUrl && !c.customIconUrl ? { ...c, customIconUrl: builtInUrl } : c;
+});
 
 export const getDivisions = () => DIVISIONS;
 export const getDivision = (id: string) => DIVISIONS.find((d) => d.id === id);

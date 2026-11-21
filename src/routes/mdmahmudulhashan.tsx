@@ -68,6 +68,7 @@ import { toast } from "sonner";
 import { auth, SUPER_ADMIN_EMAIL, isSuperAdminEmail } from "@/lib/firebase";
 import { sendBrowserNotification } from "@/lib/notifications";
 import { CATEGORY_ICONS, CATEGORY_TINTS } from "@/data/categories";
+import { getBuiltInCategoryIconUrl } from "@/data/categoryIcons";
 import {
   syncCategoriesToFirestore,
   auditCategoriesFromFirestore,
@@ -168,6 +169,7 @@ import { HeroBannerManager } from "@/components/HeroBannerManager";
 import { AdminNotificationsManager } from "@/components/AdminNotificationsManager";
 import { TaskManager } from "@/components/TaskManager";
 import { MediaLibraryManager, MediaPickerModal } from "@/components/MediaLibraryManager";
+import { CategoryIconLibraryPanel, BuiltInIconPickerModal } from "@/components/CategoryIconLibraryPanel";
 import { DivisionAndCategoryTools } from "@/components/DivisionAndCategoryTools";
 import { HomepageContentManager } from "@/components/HomepageContentManager";
 import { DonorImportModal } from "@/components/DonorImportModal";
@@ -2057,6 +2059,8 @@ function CategoriesEditor() {
   const [busy, setBusy] = useState(false);
   const [selectedBulkSlugs, setSelectedBulkSlugs] = useState<string[]>([]);
   const [catMediaPickerTarget, setCatMediaPickerTarget] = useState<"new" | "edit" | null>(null);
+  const [builtInPickerTarget, setBuiltInPickerTarget] = useState<"new" | "edit" | null>(null);
+  const [showIconLibrary, setShowIconLibrary] = useState(false);
 
   // Sync & Audit states
   const [syncing, setSyncing] = useState(false);
@@ -2087,6 +2091,7 @@ function CategoriesEditor() {
     sort_order: 100,
     visible: true,
     customIconUrl: "",
+    iconCleared: false,
     customRoute: "",
   });
 
@@ -2214,7 +2219,7 @@ function CategoriesEditor() {
         formType: newCat.formType,
         sort_order: Number(newCat.sort_order) || rawItems.length + 1,
         visible: newCat.visible,
-        ...(cleanCustomIcon ? { customIconUrl: cleanCustomIcon } : {}),
+        ...(cleanCustomIcon ? { customIconUrl: cleanCustomIcon, iconCleared: false } : newCat.iconCleared ? { iconCleared: true } : {}),
         ...(cleanCustomRoute ? { customRoute: cleanCustomRoute } : {}),
       });
       void recordSuperAdminAudit({
@@ -2222,7 +2227,7 @@ function CategoriesEditor() {
         module: "categories",
         target_id: newCat.slug.trim(),
         target_label: newCat.bn.trim(),
-        summary: `নতুন ক্যাটাগরি যোগ করা হয়েছে: ${newCat.bn.trim()}`,
+        summary: `নতুন ক্যাটাগরি যোগ করা হয়েছে: ${newCat.bn.trim()}`,
       });
       toast.success("নতুন ক্যাটাগরি সফলভাবে তৈরি ও ফায়ারবেসে সংরক্ষিত হয়েছে!");
       setNewCat({
@@ -2237,6 +2242,7 @@ function CategoriesEditor() {
         sort_order: rawItems.length + 2,
         visible: true,
         customIconUrl: "",
+        iconCleared: false,
         customRoute: "",
       });
       setShowAdd(false);
@@ -2405,6 +2411,17 @@ function CategoriesEditor() {
           <div className="flex flex-wrap gap-1.5">
             <button
               type="button"
+              onClick={() => setShowIconLibrary((v) => !v)}
+              className={`flex items-center gap-1 rounded-full px-3.5 py-1.5 text-xs font-bold transition ${
+                showIconLibrary
+                  ? "bg-[#0F4D3A] text-white shadow-card"
+                  : "border border-[#E6E1D6] bg-[#FAF7F2] text-primary-deep hover:bg-primary/10"
+              }`}
+            >
+              <Layers className="h-3.5 w-3.5" /> ১৮২টি আইকন লাইব্রেরি
+            </button>
+            <button
+              type="button"
               onClick={() => setShowAdd((v) => !v)}
               className="flex items-center gap-1 rounded-full bg-gradient-hero px-3.5 py-1.5 text-xs font-bold text-primary-foreground shadow-card"
             >
@@ -2420,6 +2437,30 @@ function CategoriesEditor() {
             </button>
           </div>
         </div>
+
+        {/* Dedicated Category Icon Library Panel */}
+        {showIconLibrary && (
+          <div className="mt-4">
+            <CategoryIconLibraryPanel
+              rawItems={rawItems}
+              onAssignIcon={async (slug, customIconUrl, iconCleared) => {
+                await updateCategory(slug, {
+                  customIconUrl,
+                  iconCleared: Boolean(iconCleared),
+                });
+                void recordSuperAdminAudit({
+                  action: "update",
+                  module: "categories",
+                  target_id: slug,
+                  target_label: slug,
+                  summary: iconCleared
+                    ? `ক্যাটাগরি আইকন মুছে ভেক্টরে নেওয়া হয়েছে: ${slug}`
+                    : `ক্যাটাগরি আইকন আপডেট করা হয়েছে: ${slug}`,
+                });
+              }}
+            />
+          </div>
+        )}
 
         {/* Add Category Form */}
         {showAdd && (
@@ -2517,20 +2558,70 @@ function CategoriesEditor() {
                 placeholder="কাস্টম রুট / লিংক (ঐচ্ছিক, যেমন: /blood-donor বা https://...)"
                 className="rounded-xl border border-border bg-background px-3 py-2 font-mono text-xs"
               />
-              <div className="flex gap-1.5 sm:col-span-2">
+              <div className="space-y-2 rounded-2xl border border-[#E6E1D6] bg-background p-3 sm:col-span-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="text-xs font-bold text-primary-deep">
+                    ক্যাটাগরি আইকন (PNG, SVG, JPG, WebP)
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setBuiltInPickerTarget("new")}
+                      className="inline-flex items-center gap-1 rounded-xl border border-emerald-600/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold text-emerald-800 hover:bg-emerald-500/20"
+                    >
+                      <Layers className="h-3 w-3" /> ১৮২টি PNG লাইব্রেরি
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCatMediaPickerTarget("new")}
+                      className="inline-flex items-center gap-1 rounded-xl border border-border bg-card px-2.5 py-1 text-[11px] font-semibold hover:bg-muted"
+                    >
+                      <ImageIcon className="h-3 w-3" /> মিডিয়া লাইব্রেরি
+                    </button>
+                    {newCat.customIconUrl && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setNewCat((prev) => ({
+                            ...prev,
+                            customIconUrl: "",
+                            iconCleared: true,
+                          }))
+                        }
+                        className="inline-flex items-center gap-1 rounded-xl border border-rose-500/25 bg-rose-500/10 px-2.5 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-500/20"
+                      >
+                        <Trash2 className="h-3 w-3" /> আইকন মুছুন
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <UniversalImageUploader
+                  variant="inline"
+                  category="category"
+                  entityId={newCat.slug.trim() || "new-category"}
+                  value={newCat.iconCleared ? null : newCat.customIconUrl || null}
+                  autoDeleteOld={false}
+                  hint="৫১২×৫১২ PNG, SVG, JPG বা WebP আপলোড করুন"
+                  onChange={(url) =>
+                    setNewCat((prev) => ({
+                      ...prev,
+                      customIconUrl: url || "",
+                      iconCleared: !url,
+                    }))
+                  }
+                />
                 <input
                   value={newCat.customIconUrl}
-                  onChange={(e) => setNewCat({ ...newCat, customIconUrl: e.target.value })}
-                  placeholder="কাস্টম আইকন URL (ঐচ্ছিক, https://...)"
-                  className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-xs"
+                  onChange={(e) =>
+                    setNewCat({
+                      ...newCat,
+                      customIconUrl: e.target.value,
+                      iconCleared: !e.target.value.trim(),
+                    })
+                  }
+                  placeholder="অথবা কাস্টম আইকন URL লিখুন (যেমন: /icons/categories/hospital.png বা https://...)"
+                  className="w-full rounded-xl border border-border bg-background px-3 py-1.5 font-mono text-[11px]"
                 />
-                <button
-                  type="button"
-                  onClick={() => setCatMediaPickerTarget("new")}
-                  className="inline-flex items-center gap-1 rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold hover:bg-muted"
-                >
-                  <ImageIcon className="h-3.5 w-3.5" /> লাইব্রেরি
-                </button>
               </div>
             </div>
             <div className="flex gap-2">
@@ -2768,27 +2859,90 @@ function CategoriesEditor() {
                     />
                   </div>
 
-                  <div className="sm:col-span-2">
-                    <label className="text-[11px] font-semibold text-muted-foreground">
-                      কাস্টম আইকন URL (ঐচ্ছিক)
-                    </label>
-                    <div className="mt-0.5 flex gap-1.5">
-                      <input
-                        value={editDraft.customIconUrl ?? ""}
-                        onChange={(e) =>
-                          setEditDraft({ ...editDraft, customIconUrl: e.target.value })
-                        }
-                        placeholder="https://... বা খালি রাখুন"
-                        className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-xs"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setCatMediaPickerTarget("edit")}
-                        className="inline-flex items-center gap-1 rounded-xl border border-border bg-background px-3 text-xs font-semibold hover:bg-muted"
-                      >
-                        <ImageIcon className="h-3.5 w-3.5" /> লাইব্রেরি
-                      </button>
+                  <div className="space-y-2 rounded-2xl border border-[#E6E1D6] bg-background p-3 sm:col-span-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="text-xs font-bold text-primary-deep">
+                        ক্যাটাগরি আইকন (PNG / SVG / JPG / WebP)
+                      </label>
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setBuiltInPickerTarget("edit")}
+                          className="inline-flex items-center gap-1 rounded-xl border border-emerald-600/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold text-emerald-800 hover:bg-emerald-500/20"
+                        >
+                          <Layers className="h-3 w-3" /> ১৮২টি PNG লাইব্রেরি
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCatMediaPickerTarget("edit")}
+                          className="inline-flex items-center gap-1 rounded-xl border border-border bg-card px-2.5 py-1 text-[11px] font-semibold hover:bg-muted"
+                        >
+                          <ImageIcon className="h-3 w-3" /> মিডিয়া লাইব্রেরি
+                        </button>
+                        {getBuiltInCategoryIconUrl(c.slug) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const builtInUrl = getBuiltInCategoryIconUrl(c.slug);
+                              if (builtInUrl) {
+                                setEditDraft({
+                                  ...editDraft,
+                                  customIconUrl: builtInUrl,
+                                  iconCleared: false,
+                                });
+                              }
+                            }}
+                            className="inline-flex items-center gap-1 rounded-xl border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-[11px] font-bold text-blue-800 hover:bg-blue-500/20"
+                          >
+                            <RotateCcw className="h-3 w-3" /> ডিফল্ট PNG
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditDraft({
+                              ...editDraft,
+                              customIconUrl: "",
+                              iconCleared: true,
+                            })
+                          }
+                          className="inline-flex items-center gap-1 rounded-xl border border-rose-500/25 bg-rose-500/10 px-2.5 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-500/20"
+                        >
+                          <Trash2 className="h-3 w-3" /> ভেক্টর রাখুন
+                        </button>
+                      </div>
                     </div>
+                    <UniversalImageUploader
+                      variant="inline"
+                      category="category"
+                      entityId={c.slug}
+                      value={
+                        editDraft.iconCleared
+                          ? null
+                          : editDraft.customIconUrl || null
+                      }
+                      autoDeleteOld={false}
+                      hint="সরাসরি PNG/SVG/JPG/WebP আপলোড বা নিচে URL পরিবর্তন করুন"
+                      onChange={(url) =>
+                        setEditDraft((prev) => ({
+                          ...prev,
+                          customIconUrl: url || "",
+                          iconCleared: !url,
+                        }))
+                      }
+                    />
+                    <input
+                      value={editDraft.customIconUrl ?? ""}
+                      onChange={(e) =>
+                        setEditDraft({
+                          ...editDraft,
+                          customIconUrl: e.target.value,
+                          iconCleared: !e.target.value.trim(),
+                        })
+                      }
+                      placeholder="/icons/categories/... অথবা https://... (খালি রাখলে ভেক্টর দেখাবে)"
+                      className="w-full rounded-xl border border-border bg-background px-3 py-1.5 font-mono text-[11px]"
+                    />
                   </div>
                 </div>
 
@@ -2845,17 +2999,17 @@ function CategoriesEditor() {
                   aria-label={`${c.bn} নির্বাচন`}
                   className="h-4 w-4 shrink-0 accent-emerald-700"
                 />
-                <div
-                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${c.tint} text-primary-deep overflow-hidden`}
-                >
-                  {c.customIconUrl ? (
+                <div className="aspect-square flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[#E6E1D6] bg-[#FAF7F2] p-1 text-[#0F4D3A]">
+                  {!c.iconCleared && c.customIconUrl ? (
                     <img
                       src={c.customIconUrl}
                       alt={c.bn}
-                      className="h-full w-full object-cover"
+                      loading="lazy"
+                      decoding="async"
+                      className="h-full w-full object-contain select-none"
                     />
                   ) : (
-                    <IconComp className="h-5 w-5" />
+                    <IconComp className="h-5 w-5" strokeWidth={1.6} />
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
@@ -2864,6 +3018,21 @@ function CategoriesEditor() {
                     <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
                       {c.slug}
                     </span>
+                    {!c.iconCleared && c.customIconUrl ? (
+                      c.customIconUrl.startsWith("/icons/categories/") ? (
+                        <span className="rounded-md bg-emerald-500/12 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
+                          PNG
+                        </span>
+                      ) : (
+                        <span className="rounded-md bg-blue-500/12 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">
+                          কাস্টম
+                        </span>
+                      )
+                    ) : (
+                      <span className="rounded-md bg-amber-500/12 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
+                        ভেক্টর
+                      </span>
+                    )}
                     {divName && (
                       <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary-deep">
                         {divName}
@@ -2942,9 +3111,47 @@ function CategoriesEditor() {
         onClose={() => setCatMediaPickerTarget(null)}
         onSelect={(url) => {
           if (catMediaPickerTarget === "new") {
-            setNewCat((prev) => ({ ...prev, customIconUrl: url }));
+            setNewCat((prev) => ({
+              ...prev,
+              customIconUrl: url,
+              iconCleared: false,
+            }));
           } else if (catMediaPickerTarget === "edit") {
-            setEditDraft((prev) => ({ ...prev, customIconUrl: url }));
+            setEditDraft((prev) => ({
+              ...prev,
+              customIconUrl: url,
+              iconCleared: false,
+            }));
+          }
+        }}
+      />
+
+      <BuiltInIconPickerModal
+        open={Boolean(builtInPickerTarget)}
+        onClose={() => setBuiltInPickerTarget(null)}
+        currentSlug={
+          builtInPickerTarget === "edit"
+            ? editingSlug || undefined
+            : newCat.slug || undefined
+        }
+        currentValue={
+          builtInPickerTarget === "edit"
+            ? editDraft.customIconUrl
+            : newCat.customIconUrl
+        }
+        onSelect={(url) => {
+          if (builtInPickerTarget === "new") {
+            setNewCat((prev) => ({
+              ...prev,
+              customIconUrl: url,
+              iconCleared: false,
+            }));
+          } else if (builtInPickerTarget === "edit") {
+            setEditDraft((prev) => ({
+              ...prev,
+              customIconUrl: url,
+              iconCleared: false,
+            }));
           }
         }}
       />

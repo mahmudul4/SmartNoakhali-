@@ -1111,13 +1111,14 @@ function DivisionHorizontalSection({
       {/* Clear Bengali Section Heading */}
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2.5">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-[#E6E1D6] bg-white text-[#0F4D3A]">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] text-[#0F4D3A]">
             {division.customIconUrl ? (
               <img
                 src={division.customIconUrl}
                 alt={division.bn}
                 loading="lazy"
-                className="h-full w-full rounded-[10px] object-cover"
+                decoding="async"
+                className="h-full w-full object-contain p-1"
               />
             ) : (
               <DivIcon className="h-4 w-4 shrink-0" strokeWidth={1.5} />

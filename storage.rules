@@ -26,8 +26,34 @@ service firebase.storage {
         request.auth.token.email.lower() == "mr.bear444plus@gmail.com";
     }
 
+    function isNonSuspendedStaffDoc(userDoc) {
+      return (!('suspended' in userDoc) || userDoc.suspended != true) && (
+        ('roles' in userDoc && userDoc.roles is list &&
+          userDoc.roles.hasAny(['admin', 'editor', 'moderator'])) ||
+        ('custom_role_id' in userDoc && userDoc.custom_role_id is string && userDoc.custom_role_id.size() > 0)
+      );
+    }
+
     function isStaff() {
-      return isMainAdmin() || isSecondaryAdmin();
+      return isMainAdmin() ||
+        isSecondaryAdmin() || (
+          isSignedIn() &&
+          request.auth.token.firebase.sign_in_provider != 'anonymous' &&
+          (
+            request.auth.token.email_verified == true ||
+            request.auth.token.firebase.sign_in_provider == 'password'
+          ) && (
+            (
+              firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
+              isNonSuspendedStaffDoc(firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data)
+            ) || (
+              firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid)) && (
+                !firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) ||
+                firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.suspended != true
+              )
+            )
+          )
+        );
     }
 
     function isValidImageUpload() {
@@ -39,6 +65,7 @@ service firebase.storage {
           request.resource.contentType == 'image/jpg' ||
           request.resource.contentType == 'image/png' ||
           request.resource.contentType == 'image/webp' ||
+          request.resource.contentType == 'image/avif' ||
           request.resource.contentType == 'image/gif' ||
           request.resource.contentType == 'image/svg+xml' ||
           request.resource.contentType == 'image/x-icon'
@@ -112,7 +139,7 @@ service firebase.storage {
     // Category images — Staff / Main Admin
     match /categories/{categorySlug}/{fileName} {
       allow write: if isStaff() && isValidImageUpload();
-      allow delete: if isMainAdmin();
+      allow delete: if isStaff();
     }
 
     // Hero Banner assets — STRICTLY Main Admin ONLY

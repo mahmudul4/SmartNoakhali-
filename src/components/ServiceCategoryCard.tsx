@@ -20,16 +20,18 @@ export function CategoryIconBadge({
 
   useEffect(() => {
     setImgFailed(false);
-  }, [category.customIconUrl]);
+  }, [category.customIconUrl, category.iconCleared]);
 
-  const showCustomIcon = Boolean(category.customIconUrl && !imgFailed);
+  const showCustomIcon = Boolean(
+    !category.iconCleared && category.customIconUrl && !imgFailed
+  );
 
   const boxSizes =
     size === "lg"
-      ? "h-12 w-12 rounded-[12px] sm:h-14 sm:w-14"
+      ? "h-12 w-12 rounded-[12px] p-1.5 sm:h-14 sm:w-14"
       : size === "sm"
-      ? "h-8 w-8 rounded-[8px]"
-      : "h-10 w-10 rounded-[10px] sm:h-11 sm:w-11";
+      ? "h-8 w-8 rounded-[8px] p-1"
+      : "h-10 w-10 rounded-[10px] p-1.5 sm:h-11 sm:w-11";
 
   const iconSizes =
     size === "lg"
@@ -40,15 +42,17 @@ export function CategoryIconBadge({
 
   return (
     <div
-      className={`flex shrink-0 items-center justify-center overflow-hidden border border-[#E6E1D6] bg-[#FAF7F2] ${boxSizes}`}
+      className={`aspect-square flex shrink-0 items-center justify-center overflow-hidden border border-[#E6E1D6] bg-[#FAF7F2] ${boxSizes}`}
     >
       {showCustomIcon ? (
         <img
           src={category.customIconUrl}
           alt={category.bn}
           loading="lazy"
+          decoding="async"
+          draggable={false}
           onError={() => setImgFailed(true)}
-          className="h-full w-full object-cover"
+          className="h-full w-full object-contain select-none"
         />
       ) : (
         <Icon

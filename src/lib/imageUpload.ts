@@ -153,9 +153,15 @@ async function encodeCompactFallbackDataUrl(
   processed: ProcessedImageResult,
   category: ImageUploadCategory
 ): Promise<string> {
+  if (processed.format === "svg" || processed.file.type === "image/svg+xml") {
+    return blobToDataUrl(processed.blob);
+  }
+
   const maxFallbackBytes =
     category === "profile" || category === "staff_avatar"
       ? 60 * 1024
+      : category === "category"
+      ? 100 * 1024
       : category === "logo"
       ? 140 * 1024
       : 165 * 1024;
@@ -167,7 +173,7 @@ async function encodeCompactFallbackDataUrl(
   const maxDim =
     category === "profile" || category === "staff_avatar"
       ? 384
-      : category === "logo"
+      : category === "logo" || category === "category"
       ? 512
       : 1200;
 
@@ -182,7 +188,7 @@ async function encodeCompactFallbackDataUrl(
     targetMaxSizeBytes: maxFallbackBytes,
     initialQuality: 0.78,
     minQuality: 0.45,
-    preserveTransparency: category === "logo",
+    preserveTransparency: category === "logo" || category === "category",
     squareCrop: category === "profile" || category === "staff_avatar",
   });
   try {
@@ -250,6 +256,8 @@ async function runImageUploadInternal(
     options.compression?.preset ||
     (options.category === "profile" || options.category === "staff_avatar"
       ? "avatar"
+      : options.category === "category"
+      ? "icon"
       : options.category === "logo"
       ? "logo"
       : options.category === "banner"

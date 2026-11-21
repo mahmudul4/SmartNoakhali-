@@ -11,6 +11,9 @@
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
 
+/icons/categories/*
+  Cache-Control: public, max-age=2592000, stale-while-revalidate=86400
+
 /sw.js
   Cache-Control: public, max-age=0, must-revalidate
 

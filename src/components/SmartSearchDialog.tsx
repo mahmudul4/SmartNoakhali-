@@ -16,6 +16,8 @@ import {
   CheckCircle,
 } from "lucide-react";
 import { useCategories, useDivisions } from "@/lib/store";
+import { CategoryIconBadge } from "@/components/ServiceCategoryCard";
+import type { Category } from "@/data/categories";
 import { useCloudSubmissions } from "@/lib/cloud";
 import {
   useInstitutions,
@@ -51,6 +53,7 @@ export interface SearchResultItem {
   link: string;
   badge?: string;
   iconType: "category" | "institution" | "job" | "service";
+  categoryObj?: Category;
 }
 
 interface SmartSearchProps {
@@ -139,6 +142,7 @@ export function SmartSearchModal({ isOpen, onClose, initialQuery = "" }: SmartSe
                 ? "/emergency-request"
                 : `/category/${cat.slug}`,
             iconType: "category",
+            categoryObj: cat,
           });
         }
       }
@@ -376,22 +380,26 @@ export function SmartSearchModal({ isOpen, onClose, initialQuery = "" }: SmartSe
                   className="group flex items-start justify-between gap-3 rounded-2xl border border-border/70 bg-card p-3 shadow-xs transition hover:border-primary/50 hover:bg-muted/40 hover:shadow-sm"
                 >
                   <div className="flex items-start gap-3 min-w-0">
-                    <div
-                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white ${
-                        item.iconType === "institution"
-                          ? "bg-emerald-600"
-                          : item.iconType === "job"
-                          ? "bg-blue-600"
-                          : item.iconType === "service"
-                          ? "bg-amber-600"
-                          : "bg-teal-600"
-                      }`}
-                    >
-                      {item.iconType === "institution" && <Building2 className="h-4 w-4" />}
-                      {item.iconType === "job" && <Briefcase className="h-4 w-4" />}
-                      {item.iconType === "service" && <Layers className="h-4 w-4" />}
-                      {item.iconType === "category" && <Sparkles className="h-4 w-4" />}
-                    </div>
+                    {item.iconType === "category" && item.categoryObj ? (
+                      <CategoryIconBadge category={item.categoryObj} size="sm" />
+                    ) : (
+                      <div
+                        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white ${
+                          item.iconType === "institution"
+                            ? "bg-emerald-600"
+                            : item.iconType === "job"
+                            ? "bg-blue-600"
+                            : item.iconType === "service"
+                            ? "bg-amber-600"
+                            : "bg-teal-600"
+                        }`}
+                      >
+                        {item.iconType === "institution" && <Building2 className="h-4 w-4" />}
+                        {item.iconType === "job" && <Briefcase className="h-4 w-4" />}
+                        {item.iconType === "service" && <Layers className="h-4 w-4" />}
+                        {item.iconType === "category" && <Sparkles className="h-4 w-4" />}
+                      </div>
+                    )}
 
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5 flex-wrap">

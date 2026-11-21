@@ -56,10 +56,38 @@ export default defineConfig(() => {
           importScripts: ['/sw-push.js'],
           maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-          globIgnores: ['**/downloads/**', '**/logo.png'],
+          globIgnores: ['**/downloads/**', '**/logo.png', '**/icons/categories/**'],
           navigateFallback: 'index.html',
           navigateFallbackDenylist: [/^\/api\//, /^\/downloads\//],
           runtimeCaching: [
+            {
+              urlPattern: /^\/icons\/categories\/.*/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'category-icons-cache',
+                expiration: {
+                  maxEntries: 250,
+                  maxAgeSeconds: 60 * 60 * 24 * 90,
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
+            },
+            {
+              urlPattern: /^https:\/\/firebasestorage\.googleapis\.com\/.*%2Fcategories%2F.*/i,
+              handler: 'StaleWhileRevalidate',
+              options: {
+                cacheName: 'category-custom-icons-cache',
+                expiration: {
+                  maxEntries: 250,
+                  maxAgeSeconds: 60 * 60 * 24 * 30,
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
+            },
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
               handler: 'CacheFirst',

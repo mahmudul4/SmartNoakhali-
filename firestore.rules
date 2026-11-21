@@ -101,8 +101,7 @@ service cloud.firestore {
         settingId == "site_meta_config" ||
         settingId == "services_config" ||
         settingId == "app_packages_config" ||
-        settingId == "divisions_config" ||
-        settingId == "categories_config";
+        settingId == "divisions_config";
     }
 
     function isValidSiteSetting(data) {
@@ -166,14 +165,14 @@ service cloud.firestore {
         incoming().key == settingId &&
         incoming().updatedAt == request.time && (
           isMainAdmin() ||
-          (settingId == "staff_profiles_config" && isEditor())
+          ((settingId == "staff_profiles_config" || settingId == "categories_config") && isEditor())
         );
       allow update: if isValidId(settingId) && isValidSiteSetting(incoming()) &&
         incoming().key == settingId &&
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly(['key', 'logo_url', 'visible', 'updatedAt']) && (
           isMainAdmin() ||
-          (!isMainAdminProtectedSetting(settingId) && settingId == "staff_profiles_config" && isEditor())
+          (!isMainAdminProtectedSetting(settingId) && (settingId == "staff_profiles_config" || settingId == "categories_config") && isEditor())
         );
       allow delete: if isValidId(settingId) && isMainAdmin();
     }
@@ -502,7 +501,7 @@ service cloud.firestore {
     // =========================================================
     match /categories/{categoryId} {
       allow get: if isValidId(categoryId) && (resource == null || existing().visible != false || isEditor());
-      allow list: if existing().visible != false || isMainAdmin() || isBootstrappedOrdinaryAdmin();
+      allow list: if existing().visible != false || isMainAdmin() || isBootstrappedOrdinaryAdmin() || isEditor();
       allow create, update: if isValidId(categoryId) && isEditor();
       allow delete: if isValidId(categoryId) && isMainAdmin();
     }

@@ -975,6 +975,7 @@ export interface CategoryConfigItem {
   description: string;
   formType?: string;
   customIconUrl?: string;
+  iconCleared?: boolean;
   customRoute?: string;
   displayOrder?: number;
   sort_order: number;
@@ -1158,7 +1159,8 @@ function parseCategoryConfigWrapper(raw: string | null | undefined): ParsedCateg
           fallback?.divisionId
         );
         const formType = String(item.formType || fallback?.formType || "general");
-        const rawCustomIcon = item.customIconUrl || fallback?.customIconUrl;
+        const iconCleared = item.iconCleared === true;
+        const rawCustomIcon = iconCleared ? undefined : (item.customIconUrl || fallback?.customIconUrl);
         const customIconUrl =
           typeof rawCustomIcon === "string" && rawCustomIcon.trim()
             ? rawCustomIcon.trim()
@@ -1195,8 +1197,9 @@ function parseCategoryConfigWrapper(raw: string | null | undefined): ParsedCateg
           isDeleted: item.isDeleted === true || deletedSlugs.has(targetSlug),
           deletedAt: item.deletedAt,
           updatedAt: item.updatedAt,
+          ...(iconCleared ? { iconCleared: true } : {}),
         };
-        if (customIconUrl) {
+        if (customIconUrl && !iconCleared) {
           catItem.customIconUrl = customIconUrl;
         }
         if (customRoute) {
@@ -1240,6 +1243,7 @@ function toResolvedCategory(item: CategoryConfigItem): Category {
       ? item.tint
       : fallback?.tint || item.tint || "from-emerald-500/15 to-emerald-700/10";
   const description = item.description || fallback?.description || "";
+  const iconCleared = item.iconCleared === true;
 
   return {
     slug: item.slug,
@@ -1251,7 +1255,8 @@ function toResolvedCategory(item: CategoryConfigItem): Category {
     tint,
     description,
     formType: (item.formType || fallback?.formType || "general") as Category["formType"],
-    customIconUrl: item.customIconUrl || fallback?.customIconUrl,
+    customIconUrl: iconCleared ? undefined : (item.customIconUrl || fallback?.customIconUrl),
+    iconCleared,
     customRoute: item.customRoute,
     visible: item.visible,
     sort_order: item.sort_order,
@@ -1309,10 +1314,14 @@ export function useCategories() {
       } catch {}
     };
 
-    // 1. Pull from Server Content API immediately on mount
+    let collectionHasLoaded = false;
+    const collectionDocsCache = new Map<string, CategoryConfigItem>();
+
+    // 1. Pull from Server Content API immediately on mount (if collection hasn't arrived yet)
     fetch(`/api/content?collection=settings&id=${CATEGORIES_CONFIG_ID}`)
       .then((r) => r.json())
       .then((d) => {
+        if (collectionHasLoaded) return;
         if (d?.item?.logo_url) {
           const parsed = parseCategoryConfigWrapper(d.item.logo_url);
           if (parsed && parsed.items.length > 0) {
@@ -1325,11 +1334,13 @@ export function useCategories() {
       })
       .catch(() => {});
 
-    // 2. Real-time sync directly from Firestore /categories collection
+    // 2. Real-time sync directly from Firestore /categories collection (Authoritative per-doc source)
     const unsubCategories = onSnapshot(
       collection(db, "categories"),
       (snapshot) => {
         if (!snapshot.empty) {
+          collectionHasLoaded = true;
+          collectionDocsCache.clear();
           const firestoreMap = new Map<string, CategoryConfigItem>();
           const deletedSet = new Set<string>(deletedSlugsSet);
           const nextTrashedMap = new Map<string, CategoryConfigItem>(trashedMap);
@@ -1375,7 +1386,8 @@ export function useCategories() {
                   ? data.displayOrder
                   : fallback?.sort_order || 999;
             const divId = resolveSafeDivisionId(data.divisionId || data.departmentId, fallback?.divisionId);
-            const rawCustomIcon = data.customIconUrl || fallback?.customIconUrl;
+            const iconCleared = data.iconCleared === true;
+            const rawCustomIcon = iconCleared ? undefined : (data.customIconUrl || fallback?.customIconUrl);
             const customIconUrl =
               typeof rawCustomIcon === "string" && rawCustomIcon.trim()
                 ? rawCustomIcon.trim()
@@ -1405,7 +1417,8 @@ export function useCategories() {
               isDeleted: data.isDeleted === true || deletedSlugsSet.has(canonicalSlug),
               deletedAt: data.deletedAt,
               updatedAt: data.updatedAt,
-              ...(customIconUrl ? { customIconUrl } : {}),
+              ...(iconCleared ? { iconCleared: true } : {}),
+              ...(customIconUrl && !iconCleared ? { customIconUrl } : {}),
               ...(customRoute ? { customRoute } : {}),
             };
 
@@ -1416,6 +1429,7 @@ export function useCategories() {
               firestoreMap.delete(canonicalSlug);
             } else if (!firestoreMap.has(canonicalSlug) || docSnap.id === canonicalSlug) {
               firestoreMap.set(canonicalSlug, firestoreCat);
+              collectionDocsCache.set(canonicalSlug, firestoreCat);
             }
           });
 
@@ -1446,7 +1460,7 @@ export function useCategories() {
       }
     );
 
-    // 3. Listen directly to settings document
+    // 3. Listen to settings/categories_config (preserves collection icons when wrapper compacts data: URLs)
     const unsubDirect = onSnapshot(
       doc(db, "settings", CATEGORIES_CONFIG_ID),
       (docSnap) => {
@@ -1456,8 +1470,25 @@ export function useCategories() {
           if (parsed && (parsed.items.length > 0 || parsed.deletedSlugs.length > 0)) {
             parsed.deletedSlugs.forEach((s) => deletedSlugsSet.add(s));
             parsed.trashedItems.forEach((t) => trashedMap.set(t.slug, t));
+            const mergedItems = parsed.items
+              .filter((c) => !deletedSlugsSet.has(c.slug))
+              .map((c) => {
+                const liveDoc = collectionDocsCache.get(c.slug);
+                if (collectionHasLoaded && liveDoc) {
+                  // Authoritative icon state lives on /categories/{slug} doc
+                  return {
+                    ...c,
+                    ...(liveDoc.iconCleared
+                      ? { iconCleared: true, customIconUrl: undefined }
+                      : liveDoc.customIconUrl
+                        ? { customIconUrl: liveDoc.customIconUrl, iconCleared: false }
+                        : {}),
+                  };
+                }
+                return c;
+              });
             const sanitized: ParsedCategoryWrapper = {
-              items: parsed.items.filter((c) => !deletedSlugsSet.has(c.slug)),
+              items: mergedItems,
               deletedSlugs: Array.from(deletedSlugsSet),
               trashedItems: Array.from(trashedMap.values()),
             };
@@ -1521,16 +1552,47 @@ export function useCategories() {
         trashedItems: Array.from(trashedMap.values()),
       };
 
-      const serialized = JSON.stringify({
+      const fullSerialized = JSON.stringify({
         ...wrapper,
         updatedAt: new Date().toISOString(),
       });
       try {
-        localStorage.setItem(LOCAL_CATEGORIES_KEY, serialized);
+        localStorage.setItem(LOCAL_CATEGORIES_KEY, fullSerialized);
       } catch {}
 
       setCatState(wrapper);
-      await upsertSettingDoc(CATEGORIES_CONFIG_ID, serialized);
+
+      // Keep Firestore settings/categories_config safely under 295KB by compacting oversized data: URLs only if needed
+      let cloudSerialized = fullSerialized;
+      if (cloudSerialized.length > 275000) {
+        const compactedItems = normalized.map((c) => {
+          if (
+            typeof c.customIconUrl === "string" &&
+            c.customIconUrl.startsWith("data:") &&
+            c.customIconUrl.length > 2048
+          ) {
+            const copy = { ...c };
+            delete copy.customIconUrl;
+            return copy;
+          }
+          return c;
+        });
+        cloudSerialized = JSON.stringify({
+          items: compactedItems,
+          deletedSlugs: Array.from(deletedSet),
+          trashedItems: Array.from(trashedMap.values()).map((t) => {
+            if (typeof t.customIconUrl === "string" && t.customIconUrl.startsWith("data:")) {
+              const copy = { ...t };
+              delete copy.customIconUrl;
+              return copy;
+            }
+            return t;
+          }),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+
+      await upsertSettingDoc(CATEGORIES_CONFIG_ID, cloudSerialized);
     },
     [catState.deletedSlugs, catState.trashedItems]
   );
@@ -1552,6 +1614,8 @@ export function useCategories() {
       const docRef = doc(db, "categories", cleanSlug);
 
       const updatePayload: Record<string, any> = {
+        slug: cleanSlug,
+        id: cleanSlug,
         updatedAt: serverTimestamp(),
         updatedBy: auth.currentUser?.email || "admin",
       };
@@ -1586,9 +1650,21 @@ export function useCategories() {
         updatePayload.isActive = Boolean(patch.visible);
       }
 
-      if (patch.customIconUrl !== undefined) {
+      if (patch.iconCleared === true) {
+        updatePayload.iconCleared = true;
+        updatePayload.customIconUrl = "";
+      } else if (patch.customIconUrl !== undefined) {
         const trimmed = typeof patch.customIconUrl === "string" ? patch.customIconUrl.trim() : "";
         updatePayload.customIconUrl = trimmed;
+        if (trimmed) {
+          updatePayload.iconCleared = false;
+        } else if (patch.iconCleared === false) {
+          updatePayload.iconCleared = false;
+        } else {
+          updatePayload.iconCleared = true;
+        }
+      } else if (patch.iconCleared === false) {
+        updatePayload.iconCleared = false;
       }
 
       const safePayload = sanitizeFirestorePayload(updatePayload);
@@ -1633,13 +1709,20 @@ export function useCategories() {
           updated.visible = Boolean(patch.visible);
           updated.isActive = Boolean(patch.visible);
         }
-        if (patch.customIconUrl !== undefined) {
+        if (patch.iconCleared === true) {
+          updated.iconCleared = true;
+          delete updated.customIconUrl;
+        } else if (patch.customIconUrl !== undefined) {
           const trimmed = typeof patch.customIconUrl === "string" ? patch.customIconUrl.trim() : "";
           if (trimmed) {
             updated.customIconUrl = trimmed;
+            updated.iconCleared = false;
           } else {
             delete updated.customIconUrl;
+            updated.iconCleared = patch.iconCleared !== false;
           }
+        } else if (patch.iconCleared === false) {
+          updated.iconCleared = false;
         }
         return updated;
       });
@@ -1687,7 +1770,7 @@ export function useCategories() {
         isActive: newCat.visible !== false,
         visible: newCat.visible !== false,
         isDeleted: false,
-        ...(cleanIconUrl ? { customIconUrl: cleanIconUrl } : {}),
+        ...(cleanIconUrl ? { customIconUrl: cleanIconUrl, iconCleared: false } : {}),
         ...(cleanCustomRoute ? { customRoute: cleanCustomRoute } : {}),
       };
 

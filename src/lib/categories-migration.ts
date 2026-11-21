@@ -196,19 +196,30 @@ export async function syncCategoriesToFirestore(
     onProgress?.("ক্যাটাগরি কনফিগ রেজিস্ট্রি ক্লাউডে সিঙ্ক হচ্ছে...", 85);
     const categoryRegistry = masterCategories
       .filter((c) => !deletedSet.has(c.slug))
-      .map((c, idx) => ({
-        slug: c.slug,
-        divisionId: c.divisionId,
-        bn: c.bn,
-        en: c.en,
-        iconName: c.iconName || "Users",
-        tint: c.tint,
-        description: c.description,
-        formType: c.formType || "general",
-        visible: true,
-        isDeleted: false,
-        sort_order: c.sort_order || idx + 1,
-      }));
+      .map((c, idx) => {
+        const existing = existingDocsMap.get(c.slug);
+        const iconCleared = existing?.iconCleared === true;
+        const resolvedIconUrl = iconCleared
+          ? undefined
+          : (typeof existing?.customIconUrl === "string" && existing.customIconUrl.trim()
+              ? existing.customIconUrl.trim()
+              : c.customIconUrl);
+        return {
+          slug: c.slug,
+          divisionId: c.divisionId,
+          bn: (typeof existing?.bn === "string" && existing.bn.trim()) || c.bn,
+          en: (typeof existing?.en === "string" && existing.en.trim()) || c.en,
+          iconName: (typeof existing?.iconName === "string" && existing.iconName) || c.iconName || "Users",
+          tint: (typeof existing?.tint === "string" && existing.tint) || c.tint,
+          description: (typeof existing?.description === "string" && existing.description) || c.description,
+          formType: c.formType || "general",
+          visible: existing?.visible !== false,
+          isDeleted: false,
+          sort_order: typeof existing?.sort_order === "number" ? existing.sort_order : c.sort_order || idx + 1,
+          ...(iconCleared ? { iconCleared: true } : {}),
+          ...(resolvedIconUrl && !iconCleared ? { customIconUrl: resolvedIconUrl } : {}),
+        };
+      });
 
     const divisionsRegistry = masterDivisions.map((d, idx) => ({
       id: d.id,

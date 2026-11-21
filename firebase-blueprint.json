@@ -886,6 +886,7 @@
         "description": { "type": "string" },
         "formType": { "type": "string" },
         "customIconUrl": { "type": "string" },
+        "iconCleared": { "type": "boolean" },
         "customRoute": { "type": "string", "maxLength": 200 },
         "sort_order": { "type": "number" },
         "displayOrder": { "type": "number" },

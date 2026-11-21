@@ -10,7 +10,9 @@
  * - Zero Node.js-only libraries (100% browser & Cloudflare compatible)
  */
 
-export type ImagePreset = "avatar" | "logo" | "content" | "banner" | "chat" | "custom";
+import { sanitizeSvgMarkup } from "@/lib/svgSanitizer";
+
+export type ImagePreset = "avatar" | "logo" | "icon" | "content" | "banner" | "chat" | "custom";
 
 export interface CompressionOptions {
   preset?: ImagePreset;
@@ -32,7 +34,7 @@ export interface ProcessedImageResult {
   compressionRatio: number; // percentage saved (e.g. 75 means 75% smaller)
   width: number;
   height: number;
-  format: "webp" | "jpeg" | "png";
+  format: "webp" | "jpeg" | "png" | "svg";
 }
 
 const PRESET_CONFIGS: Record<
@@ -51,6 +53,13 @@ const PRESET_CONFIGS: Record<
     maxHeight: 1024,
     targetMaxSizeBytes: 300 * 1024, // ~300 KB
     initialQuality: 0.90,
+    preserveTransparency: true,
+  },
+  icon: {
+    maxWidth: 512,
+    maxHeight: 512,
+    targetMaxSizeBytes: 150 * 1024, // ~150 KB crisp RGBA icon
+    initialQuality: 0.92,
     preserveTransparency: true,
   },
   content: {
@@ -112,7 +121,7 @@ export function validateImageFile(file: File): { ok: boolean; error?: string } {
   if (!fileType.startsWith("image/") && !validMimes.includes(fileType) && !hasImageExt) {
     return {
       ok: false,
-      error: "নির্বাচিত ফাইলটি অনুমোদিত ছবি নয়। শুধুমাত্র JPG, PNG, WebP বা GIF ছবি নির্বাচন করুন।",
+      error: "নির্বাচিত ফাইলটি অনুমোদিত ছবি নয়। শুধুমাত্র JPG, PNG, WebP, SVG বা GIF ছবি নির্বাচন করুন।",
     };
   }
 
@@ -270,6 +279,39 @@ export async function processAndCompressImage(
       width: 500,
       height: 500,
       format: "png",
+    };
+  }
+
+  // XSS-safe SVG sanitization passthrough (preserves crisp vector graphics)
+  const isSvg =
+    file.type === "image/svg+xml" || file.name.trim().toLowerCase().endsWith(".svg");
+  if (isSvg) {
+    const rawSvg = await file.text();
+    const check = sanitizeSvgMarkup(rawSvg);
+    if (!check.ok || !check.sanitized) {
+      throw new Error(check.error || "SVG ফাইলটি নিরাপদ নয়।");
+    }
+    const baseName = file.name.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9_-]/g, "_");
+    const sanitizedBlob = new Blob([check.sanitized], { type: "image/svg+xml" });
+    const sanitizedFile = new File([sanitizedBlob], `${baseName || "icon"}_${Date.now()}.svg`, {
+      type: "image/svg+xml",
+      lastModified: Date.now(),
+    });
+    const previewUrl = URL.createObjectURL(sanitizedBlob);
+    const compressionRatio =
+      file.size > sanitizedBlob.size
+        ? Math.round(((file.size - sanitizedBlob.size) / file.size) * 100)
+        : 0;
+    return {
+      file: sanitizedFile,
+      blob: sanitizedBlob,
+      previewUrl,
+      originalSizeBytes: file.size,
+      compressedSizeBytes: sanitizedBlob.size,
+      compressionRatio,
+      width: 512,
+      height: 512,
+      format: "svg",
     };
   }
 

@@ -17,6 +17,7 @@ import {
   Bell,
 } from "lucide-react";
 import type { Category } from "@/data/categories";
+import { CategoryIconBadge } from "@/components/ServiceCategoryCard";
 
 interface DrawerUser {
   email?: string | null;
@@ -571,7 +572,7 @@ export function NavigationDrawer({
                         className={navLinkClass(false)}
                       >
                         <span className="flex items-center gap-3 min-w-0">
-                          <c.icon className={iconClass(false)} />
+                          <CategoryIconBadge category={c} size="sm" />
                           <span className="truncate">{c.bn}</span>
                         </span>
                       </a>
@@ -587,7 +588,7 @@ export function NavigationDrawer({
                         className={navLinkClass(active)}
                       >
                         <span className="flex items-center gap-3 min-w-0">
-                          <c.icon className={iconClass(active)} />
+                          <CategoryIconBadge category={c} size="sm" />
                           <span className="truncate">{c.bn}</span>
                         </span>
                       </Link>
@@ -604,7 +605,7 @@ export function NavigationDrawer({
                       className={navLinkClass(active)}
                     >
                       <span className="flex items-center gap-3 min-w-0">
-                        <c.icon className={iconClass(active)} />
+                        <CategoryIconBadge category={c} size="sm" />
                         <span className="truncate">{c.bn}</span>
                       </span>
                     </Link>
