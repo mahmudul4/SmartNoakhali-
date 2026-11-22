@@ -16,6 +16,8 @@ import {
   uploadImageToR2,
   deleteR2FileByUrl,
   useResolvedR2Url,
+  isOwnedCategoryR2IconUrl,
+  type R2UploadMetadata,
 } from "@/lib/r2Storage";
 import type { ImageUploadCategory } from "@/lib/imageUpload";
 import {
@@ -38,7 +40,7 @@ export type UploadLifecycle =
 
 export interface UniversalImageUploaderProps {
   value?: string | null;
-  onChange: (url: string | null) => void;
+  onChange: (url: string | null, metadata?: R2UploadMetadata) => void | Promise<void>;
   category: ImageUploadCategory;
   entityId?: string;
   variant?: UploaderVariant;
@@ -50,6 +52,7 @@ export interface UniversalImageUploaderProps {
   aspectRatioClass?: string; // e.g. "aspect-video", "aspect-square", "h-32 w-32"
   placeholderIcon?: React.ReactNode;
   autoDeleteOld?: boolean;
+  suppressSuccessToast?: boolean;
   className?: string;
 }
 
@@ -62,7 +65,7 @@ function getStageBengaliText(stage: UploadLifecycle, progress: number): string {
     case "uploading":
       return `Cloudflare R2 স্টোরেজে আপলোড হচ্ছে (${progress}%)...`;
     case "saving":
-      return "ডাউনলোড লিংক প্রস্তুত করা হচ্ছে...";
+      return "ডেটাবেসে সংরক্ষণ ও যাচাই করা হচ্ছে...";
     case "success":
       return "সফলভাবে আপলোড সম্পন্ন হয়েছে!";
     default:
@@ -84,6 +87,7 @@ export function UniversalImageUploader({
   aspectRatioClass,
   placeholderIcon,
   autoDeleteOld = false,
+  suppressSuccessToast = false,
   className = "",
 }: UniversalImageUploaderProps) {
   const displayHint = description || hint;
@@ -217,17 +221,34 @@ export function UniversalImageUploader({
         },
         onProgress: (pct) => {
           if (isMountedRef.current) {
-            setProgress(Math.max(10, pct));
+            setProgress(Math.max(10, Math.min(90, pct)));
           }
         },
       });
 
       if (!isMountedRef.current) return;
 
+      updateLifecycle("saving");
+      setProgress(95);
+
+      try {
+        await Promise.resolve(onChange(result.downloadUrl, result.r2));
+      } catch (saveErr) {
+        // DB persistence failed — clean up newly uploaded orphaned R2 file and preserve oldUrl
+        if (result.downloadUrl && result.downloadUrl !== oldUrl) {
+          void deleteR2FileByUrl(result.downloadUrl);
+        }
+        throw saveErr;
+      }
+
+      if (!isMountedRef.current) return;
+
       setStats(result.processed);
+      setProgress(100);
       updateLifecycle("success");
-      onChange(result.downloadUrl);
-      toast.success("ছবি সফলভাবে Cloudflare R2-তে আপলোড ও অপ্টিমাইজ হয়েছে!");
+      if (!suppressSuccessToast) {
+        toast.success("ছবি সফলভাবে Cloudflare R2-তে আপলোড ও সংরক্ষণ হয়েছে!");
+      }
 
       if (instantPreviewRef.current) {
         URL.revokeObjectURL(instantPreviewRef.current);
@@ -235,14 +256,22 @@ export function UniversalImageUploader({
       }
       setInstantPreview(null);
 
-      // If requested, clean up old R2 storage object in background safely
+      // Only clean up old R2 storage object AFTER DB persistence succeeded
       if (autoDeleteOld && oldUrl && oldUrl !== result.downloadUrl) {
-        void deleteR2FileByUrl(oldUrl);
+        const isCategoryMode = category === "category" || category === "category_icon";
+        if (!isCategoryMode || isOwnedCategoryR2IconUrl(oldUrl, entityId)) {
+          void deleteR2FileByUrl(oldUrl);
+        }
       }
     } catch (err: any) {
       if (!isMountedRef.current) return;
       console.error("[UniversalImageUploader Error]", err);
-      const msg = err?.message || "ছবি আপলোড ব্যর্থ হয়েছে। পুনরায় চেষ্টা করুন।";
+      if (instantPreviewRef.current) {
+        URL.revokeObjectURL(instantPreviewRef.current);
+        instantPreviewRef.current = null;
+      }
+      setInstantPreview(null);
+      const msg = err?.message || "ছবি আপলোড বা ডেটাবেস সংরক্ষণ ব্যর্থ হয়েছে। পুনরায় চেষ্টা করুন।";
       updateLifecycle("error");
       setErrorMsg(msg);
       toast.error(msg);
@@ -267,22 +296,37 @@ export function UniversalImageUploader({
     if (disabled || isProcessing) return;
 
     const oldUrl = value;
-    if (instantPreviewRef.current) {
-      URL.revokeObjectURL(instantPreviewRef.current);
-      instantPreviewRef.current = null;
-    }
-    setInstantPreview(null);
-    setImgLoadFailed(false);
-    onChange(null);
-    setStats(null);
+    updateLifecycle("saving");
     setErrorMsg(null);
-    setLastSelectedFile(null);
-    updateLifecycle("idle");
+    try {
+      await Promise.resolve(onChange(null));
+      if (!isMountedRef.current) return;
+      if (instantPreviewRef.current) {
+        URL.revokeObjectURL(instantPreviewRef.current);
+        instantPreviewRef.current = null;
+      }
+      setInstantPreview(null);
+      setImgLoadFailed(false);
+      setStats(null);
+      setLastSelectedFile(null);
+      updateLifecycle("idle");
 
-    if (autoDeleteOld && oldUrl) {
-      void deleteR2FileByUrl(oldUrl);
+      if (autoDeleteOld && oldUrl) {
+        const isCategoryMode = category === "category" || category === "category_icon";
+        if (!isCategoryMode || isOwnedCategoryR2IconUrl(oldUrl, entityId)) {
+          void deleteR2FileByUrl(oldUrl);
+        }
+      }
+      if (!suppressSuccessToast) {
+        toast.info("ছবি মুছে ফেলা হয়েছে।");
+      }
+    } catch (err: any) {
+      if (!isMountedRef.current) return;
+      const msg = err?.message || "ছবি মুছে ফেলা ডেটাবেসে সংরক্ষণ করা যায়নি।";
+      updateLifecycle("error");
+      setErrorMsg(msg);
+      toast.error(msg);
     }
-    toast.info("ছবি মুছে ফেলা হয়েছে।");
   };
 
   const handleRetry = (e?: React.MouseEvent) => {
@@ -324,6 +368,7 @@ export function UniversalImageUploader({
           >
             {displayImage && !imgLoadFailed ? (
               <img
+                key={displayImage}
                 src={displayImage}
                 alt={label || "Avatar"}
                 className="h-full w-full object-cover bg-white"
@@ -421,7 +466,7 @@ export function UniversalImageUploader({
         <div
           onClick={() => !disabled && !isProcessing && fileInputRef.current?.click()}
           className={`relative flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-xl border border-border ${
-            category === "category" || category === "logo" ? "bg-[#FAF7F2] p-1" : "bg-muted/40"
+            category === "category" || category === "category_icon" || category === "logo" ? "bg-[#FAF7F2] p-1" : "bg-muted/40"
           } transition hover:border-primary ${
             disabled ? "opacity-50 cursor-not-allowed" : ""
           }`}
@@ -429,10 +474,11 @@ export function UniversalImageUploader({
         >
           {displayImage && !imgLoadFailed ? (
             <img
+              key={displayImage}
               src={displayImage}
               alt="Preview"
               className={`h-full w-full ${
-                category === "category" || category === "logo" ? "object-contain" : "object-cover"
+                category === "category" || category === "category_icon" || category === "logo" ? "object-contain" : "object-cover"
               }`}
               onLoad={() => setImgLoadFailed(false)}
               onError={() => setImgLoadFailed(true)}
@@ -538,6 +584,7 @@ export function UniversalImageUploader({
         {displayImage && !imgLoadFailed ? (
           <>
             <img
+              key={displayImage}
               src={displayImage}
               alt={label || "Uploaded Image"}
               className="h-full w-full object-contain p-2"

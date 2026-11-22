@@ -325,14 +325,11 @@ export function buildR2ObjectKey(params: {
   deterministicSlug?: string;
 }): string {
   const policy = CATEGORY_POLICIES[params.category];
-  if (params.category === "category_icon" && params.deterministicSlug) {
-    const slug = sanitizeSlugSegment(params.deterministicSlug, "icon");
-    return `categories/${slug}.${params.extension}`;
-  }
-  const safeEntity = sanitizeSlugSegment(
-    params.entityId || (params.category === "profile" ? params.uid : "general"),
-    "general"
-  );
+  const rawEntity =
+    params.category === "category_icon" && params.deterministicSlug
+      ? params.deterministicSlug
+      : params.entityId || (params.category === "profile" ? params.uid : "general");
+  const safeEntity = sanitizeSlugSegment(rawEntity, "general");
   const rand = crypto.randomUUID().slice(0, 8);
   const uniqueName = `${Date.now()}_${rand}.${params.extension}`;
   return `${policy.prefix}/${safeEntity}/${uniqueName}`;

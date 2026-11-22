@@ -228,6 +228,7 @@ export const onRequestPost = async (context: { request: Request; env: StorageEnv
 
   return jsonResponse(
     {
+      success: true,
       ok: true,
       storageProvider: "cloudflare-r2",
       bucketType,
@@ -236,6 +237,7 @@ export const onRequestPost = async (context: { request: Request; env: StorageEnv
       fileUrl,
       publicUrl: bucketType === "public" ? fileUrl : null,
       contentType: mimeType,
+      fileSize: verified.size,
       size: verified.size,
       checksumSha256,
       uploadedAt,

@@ -25,18 +25,30 @@ import { isR2Url, migrateSourceUrlToR2 } from "@/lib/r2Storage";
 
 type IconLibraryTab = "all" | "active_png" | "custom_upload" | "vector_only";
 
+export interface CategoryIconMetadataPatch {
+  iconObjectKey?: string;
+  iconContentType?: string;
+  iconFileSize?: number;
+  iconUpdatedAt?: string;
+}
+
 export interface CategoryIconLibraryPanelProps {
   rawItems: CategoryConfigItem[];
   onAssignIcon: (
     slug: string,
     customIconUrl: string,
-    iconCleared?: boolean
+    iconCleared?: boolean,
+    metadata?: CategoryIconMetadataPatch
   ) => Promise<void>;
   onBatchAssignIcons?: (
     updates: Array<{
       slug: string;
       customIconUrl: string;
       iconCleared?: boolean;
+      iconObjectKey?: string;
+      iconContentType?: string;
+      iconFileSize?: number;
+      iconUpdatedAt?: string;
     }>
   ) => Promise<void>;
 }
@@ -89,7 +101,11 @@ export function CategoryIconLibraryPanel({
       }
       if (c.iconCleared || !url) {
         usingVector++;
-      } else if ((builtIn && url === builtIn) || url.includes(`/categories/${c.slug}.png`)) {
+      } else if (
+        (builtIn && url === builtIn) ||
+        url.includes(`/categories/${c.slug}.png`) ||
+        url.includes(`/categories/${c.slug}/builtin_`)
+      ) {
         usingBuiltInPng++;
       } else {
         usingCustomIcon++;
@@ -152,16 +168,21 @@ export function CategoryIconLibraryPanel({
     slug: string,
     url: string,
     iconCleared = false,
-    successText?: string
+    successText?: string,
+    metadata?: CategoryIconMetadataPatch,
+    options?: { rethrow?: boolean }
   ) {
     if (!slug) return;
     setBusySlug(slug);
     try {
-      await onAssignIcon(slug, url, iconCleared);
+      await onAssignIcon(slug, url, iconCleared, metadata);
       toast.success(
         successText || "আইকন সফলভাবে ক্যাটাগরিতে সংরক্ষণ করা হয়েছে!"
       );
     } catch (err: any) {
+      if (options?.rethrow) {
+        throw err;
+      }
       toast.error(err?.message || "আইকন সংরক্ষণ করা যায়নি");
     } finally {
       setBusySlug(null);
@@ -189,7 +210,15 @@ export function CategoryIconLibraryPanel({
       currentFile: queue[0]?.filename || "",
     });
 
-    const updates: Array<{ slug: string; customIconUrl: string; iconCleared?: boolean }> = [];
+    const updates: Array<{
+      slug: string;
+      customIconUrl: string;
+      iconCleared?: boolean;
+      iconObjectKey?: string;
+      iconContentType?: string;
+      iconFileSize?: number;
+      iconUpdatedAt?: string;
+    }> = [];
     let done = 0;
     let failed = 0;
 
@@ -202,9 +231,10 @@ export function CategoryIconLibraryPanel({
           const idx = cursor++;
           const item = queue[idx];
           try {
+            const uniqueSuffix = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
             const res = await migrateSourceUrlToR2({
               sourceUrl: item.url,
-              targetKey: `categories/${item.filename}`,
+              targetKey: `categories/${item.slug}/builtin_${uniqueSuffix}.png`,
               bucketType: "public",
               category: "category_icon",
               overwrite: !onlyMissing,
@@ -214,6 +244,10 @@ export function CategoryIconLibraryPanel({
                 slug: item.slug,
                 customIconUrl: res.fileUrl,
                 iconCleared: false,
+                iconObjectKey: res.objectKey,
+                iconContentType: res.contentType,
+                iconFileSize: res.size,
+                iconUpdatedAt: new Date().toISOString(),
               });
             }
           } catch {
@@ -237,7 +271,12 @@ export function CategoryIconLibraryPanel({
           await onBatchAssignIcons(updates);
         } else {
           for (const u of updates) {
-            await onAssignIcon(u.slug, u.customIconUrl, false);
+            await onAssignIcon(u.slug, u.customIconUrl, false, {
+              iconObjectKey: u.iconObjectKey,
+              iconContentType: u.iconContentType,
+              iconFileSize: u.iconFileSize,
+              iconUpdatedAt: u.iconUpdatedAt,
+            });
           }
         }
       }
@@ -375,7 +414,7 @@ export function CategoryIconLibraryPanel({
               <div className="mt-1">
                 <UniversalImageUploader
                   variant="inline"
-                  category="category"
+                  category="category_icon"
                   entityId={selectedTargetCat.slug}
                   value={
                     selectedTargetCat.iconCleared
@@ -383,21 +422,33 @@ export function CategoryIconLibraryPanel({
                       : selectedTargetCat.customIconUrl || null
                   }
                   autoDeleteOld={false}
+                  suppressSuccessToast
                   hint="৫১২×৫১২ পিক্সেল স্বচ্ছ ব্যাকগ্রাউন্ড সাপোর্টেড"
-                  onChange={(url) => {
+                  onChange={async (url, meta) => {
                     if (url) {
-                      void handleAssign(
+                      await handleAssign(
                         selectedTargetCat.slug,
                         url,
                         false,
-                        `"${selectedTargetCat.bn}"-এ নতুন আইকন সেট হয়েছে`
+                        `"${selectedTargetCat.bn}"-এ নতুন আইকন R2 ও ডেটাবেসে সংরক্ষিত হয়েছে!`,
+                        meta
+                          ? {
+                              iconObjectKey: meta.objectKey,
+                              iconContentType: meta.contentType,
+                              iconFileSize: meta.size,
+                              iconUpdatedAt: meta.uploadedAt,
+                            }
+                          : undefined,
+                        { rethrow: true }
                       );
                     } else {
-                      void handleAssign(
+                      await handleAssign(
                         selectedTargetCat.slug,
                         "",
                         true,
-                        `"${selectedTargetCat.bn}" আইকন মুছে ভেক্টরে নেওয়া হয়েছে`
+                        `"${selectedTargetCat.bn}" আইকন মুছে ভেক্টরে নেওয়া হয়েছে`,
+                        undefined,
+                        { rethrow: true }
                       );
                     }
                   }}
@@ -637,9 +688,13 @@ export function CategoryIconLibraryPanel({
                   <div className="aspect-square flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-[11px] border border-[#E6E1D6] bg-[#FAF7F2] p-1.5">
                     {showImg ? (
                       <img
+                        key={c.customIconUrl}
                         src={c.customIconUrl}
                         alt={c.bn}
                         className="h-full w-full object-contain"
+                        onError={(e) => {
+                          e.currentTarget.style.display = "none";
+                        }}
                       />
                     ) : (
                       <IconComp className="h-5 w-5 text-[#0F4D3A]" strokeWidth={1.6} />

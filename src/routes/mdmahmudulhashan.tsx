@@ -68,7 +68,12 @@ import {
 import { toast } from "sonner";
 import { doc, serverTimestamp, writeBatch } from "firebase/firestore";
 import { auth, db, SUPER_ADMIN_EMAIL, isSuperAdminEmail } from "@/lib/firebase";
-import { useResolvedR2Url } from "@/lib/r2Storage";
+import {
+  deleteR2FileByUrl,
+  isOwnedCategoryR2IconUrl,
+  isValidPersistedIconUrl,
+  useResolvedR2Url,
+} from "@/lib/r2Storage";
 import { sendBrowserNotification } from "@/lib/notifications";
 import { CATEGORY_ICONS, CATEGORY_TINTS } from "@/data/categories";
 import { getBuiltInCategoryIconUrl } from "@/data/categoryIcons";
@@ -2054,6 +2059,41 @@ const FORM_TYPE_OPTIONS = [
   { value: "general", label: "সাধারণ তথ্য" },
 ];
 
+function AdminCategoryRowIcon({
+  category,
+}: {
+  category: CategoryConfigItem;
+}) {
+  const [failed, setFailed] = useState(false);
+  const IconComp = CATEGORY_ICONS[category.iconName] || CATEGORY_ICONS.Users;
+  const cleanUrl =
+    !category.iconCleared && isValidPersistedIconUrl(category.customIconUrl)
+      ? category.customIconUrl.trim()
+      : "";
+
+  useEffect(() => {
+    setFailed(false);
+  }, [cleanUrl, category.iconCleared]);
+
+  return (
+    <div className="aspect-square flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[#E6E1D6] bg-[#FAF7F2] p-1 text-[#0F4D3A]">
+      {cleanUrl && !failed ? (
+        <img
+          key={cleanUrl}
+          src={cleanUrl}
+          alt={category.bn}
+          loading="lazy"
+          decoding="async"
+          onError={() => setFailed(true)}
+          className="h-full w-full object-contain select-none"
+        />
+      ) : (
+        <IconComp className="h-5 w-5" strokeWidth={1.6} />
+      )}
+    </div>
+  );
+}
+
 function CategoriesEditor() {
   const {
     rawItems,
@@ -2065,6 +2105,8 @@ function CategoriesEditor() {
     resetCategories,
     checkCategoryReferences,
   } = useCategories();
+  const rawItemsRef = useRef(rawItems);
+  rawItemsRef.current = rawItems;
   const { rawDivisions } = useDivisions();
   const [search, setSearch] = useState("");
   const [divisionFilter, setDivisionFilter] = useState("all");
@@ -2094,7 +2136,25 @@ function CategoriesEditor() {
 
   const defaultDivisionId = rawDivisions[0]?.id || "donation";
 
-  const [newCat, setNewCat] = useState({
+  const [newCat, setNewCat] = useState<{
+    slug: string;
+    divisionId: string;
+    bn: string;
+    en: string;
+    iconName: string;
+    tint: string;
+    description: string;
+    formType: string;
+    sort_order: number;
+    visible: boolean;
+    customIconUrl: string;
+    iconObjectKey?: string;
+    iconContentType?: string;
+    iconFileSize?: number;
+    iconUpdatedAt?: string;
+    iconCleared: boolean;
+    customRoute: string;
+  }>({
     slug: "",
     divisionId: defaultDivisionId,
     bn: "",
@@ -2139,12 +2199,75 @@ function CategoriesEditor() {
     setEditDraft(draft);
   }
 
+  async function persistEditedCategoryIcon(
+    slug: string,
+    nextUrl: string,
+    iconCleared: boolean,
+    meta?: {
+      iconObjectKey?: string;
+      iconContentType?: string;
+      iconFileSize?: number;
+      iconUpdatedAt?: string;
+    },
+    successMessage?: string
+  ) {
+    const prevItem = rawItemsRef.current.find((item) => item.slug === slug);
+    const prevUrl = prevItem?.customIconUrl?.trim() || "";
+    const cleanUrl = nextUrl.trim();
+
+    if (!iconCleared && cleanUrl && !isValidPersistedIconUrl(cleanUrl)) {
+      throw new Error("অবৈধ আইকন লিংক ডেটাবেসে সংরক্ষণ করা যাবে না।");
+    }
+
+    await updateCategory(slug, {
+      customIconUrl: iconCleared ? "" : cleanUrl,
+      iconCleared,
+      iconObjectKey: iconCleared ? "" : meta?.iconObjectKey || "",
+      iconContentType: iconCleared ? "" : meta?.iconContentType || "",
+      iconFileSize: iconCleared ? 0 : meta?.iconFileSize || 0,
+      iconUpdatedAt: meta?.iconUpdatedAt || new Date().toISOString(),
+    });
+
+    setEditDraft((prev) => ({
+      ...prev,
+      customIconUrl: iconCleared ? "" : cleanUrl,
+      iconCleared,
+      iconObjectKey: iconCleared ? undefined : meta?.iconObjectKey,
+      iconContentType: iconCleared ? undefined : meta?.iconContentType,
+      iconFileSize: iconCleared ? undefined : meta?.iconFileSize,
+      iconUpdatedAt: meta?.iconUpdatedAt || new Date().toISOString(),
+    }));
+
+    void recordSuperAdminAudit({
+      action: "update",
+      module: "categories",
+      target_id: slug,
+      target_label: prevItem?.bn || slug,
+      summary: iconCleared
+        ? `ক্যাটাগরি আইকন মুছে ভেক্টরে নেওয়া হয়েছে: ${prevItem?.bn || slug}`
+        : `ক্যাটাগরি আইকন আপলোড ও সংরক্ষণ করা হয়েছে: ${prevItem?.bn || slug}`,
+    });
+
+    if (prevUrl && prevUrl !== cleanUrl && isOwnedCategoryR2IconUrl(prevUrl, slug)) {
+      void deleteR2FileByUrl(prevUrl);
+    }
+
+    if (successMessage) {
+      toast.success(successMessage);
+    }
+  }
+
   async function saveEdit(slug: string) {
     setBusy(true);
     try {
+      const prevItem = rawItemsRef.current.find((item) => item.slug === slug);
+      const prevUrl = prevItem?.customIconUrl?.trim() || "";
       const draftToSend: Partial<CategoryConfigItem> = { ...editDraft };
       if (typeof draftToSend.customIconUrl === "string") {
         draftToSend.customIconUrl = draftToSend.customIconUrl.trim();
+        if (draftToSend.customIconUrl && !isValidPersistedIconUrl(draftToSend.customIconUrl)) {
+          throw new Error("অবৈধ আইকন লিংক ডেটাবেসে সংরক্ষণ করা যাবে না।");
+        }
       } else if (draftToSend.customIconUrl === undefined) {
         delete draftToSend.customIconUrl;
       }
@@ -2152,6 +2275,12 @@ function CategoriesEditor() {
         draftToSend.customRoute = draftToSend.customRoute.trim();
       }
       await updateCategory(slug, draftToSend);
+
+      const nextUrl = draftToSend.iconCleared ? "" : draftToSend.customIconUrl || "";
+      if (prevUrl && prevUrl !== nextUrl && isOwnedCategoryR2IconUrl(prevUrl, slug)) {
+        void deleteR2FileByUrl(prevUrl);
+      }
+
       void recordSuperAdminAudit({
         action: "update",
         module: "categories",
@@ -2222,6 +2351,9 @@ function CategoriesEditor() {
     setBusy(true);
     try {
       const cleanCustomIcon = newCat.customIconUrl.trim();
+      if (cleanCustomIcon && !isValidPersistedIconUrl(cleanCustomIcon)) {
+        throw new Error("অবৈধ আইকন লিংক সংরক্ষণ করা যাবে না।");
+      }
       const cleanCustomRoute = newCat.customRoute.trim();
       await addCategory({
         slug: newCat.slug.trim(),
@@ -2232,9 +2364,20 @@ function CategoriesEditor() {
         tint: newCat.tint,
         description: newCat.description.trim() || newCat.bn.trim(),
         formType: newCat.formType,
-        sort_order: Number(newCat.sort_order) || rawItems.length + 1,
+        sort_order: Number(newCat.sort_order) || rawItemsRef.current.length + 1,
         visible: newCat.visible,
-        ...(cleanCustomIcon ? { customIconUrl: cleanCustomIcon, iconCleared: false } : newCat.iconCleared ? { iconCleared: true } : {}),
+        ...(cleanCustomIcon
+          ? {
+              customIconUrl: cleanCustomIcon,
+              iconCleared: false,
+              ...(newCat.iconObjectKey ? { iconObjectKey: newCat.iconObjectKey } : {}),
+              ...(newCat.iconContentType ? { iconContentType: newCat.iconContentType } : {}),
+              ...(typeof newCat.iconFileSize === "number" ? { iconFileSize: newCat.iconFileSize } : {}),
+              ...(newCat.iconUpdatedAt ? { iconUpdatedAt: newCat.iconUpdatedAt } : {}),
+            }
+          : newCat.iconCleared
+            ? { iconCleared: true }
+            : {}),
         ...(cleanCustomRoute ? { customRoute: cleanCustomRoute } : {}),
       });
       void recordSuperAdminAudit({
@@ -2254,9 +2397,13 @@ function CategoriesEditor() {
         tint: CATEGORY_TINTS[0].value,
         description: "",
         formType: "shopping",
-        sort_order: rawItems.length + 2,
+        sort_order: rawItemsRef.current.length + 2,
         visible: true,
         customIconUrl: "",
+        iconObjectKey: undefined,
+        iconContentType: undefined,
+        iconFileSize: undefined,
+        iconUpdatedAt: undefined,
         iconCleared: false,
         customRoute: "",
       });
@@ -2458,16 +2605,23 @@ function CategoriesEditor() {
           <div className="mt-4">
             <CategoryIconLibraryPanel
               rawItems={rawItems}
-              onAssignIcon={async (slug, customIconUrl, iconCleared) => {
+              onAssignIcon={async (slug, customIconUrl, iconCleared, metadata) => {
+                const prevItem = rawItemsRef.current.find((c) => c.slug === slug);
+                const prevUrl = prevItem?.customIconUrl?.trim() || "";
+                const nextUrl = iconCleared ? "" : customIconUrl.trim();
                 await updateCategory(slug, {
-                  customIconUrl,
+                  customIconUrl: nextUrl,
                   iconCleared: Boolean(iconCleared),
+                  ...(metadata || {}),
                 });
+                if (prevUrl && prevUrl !== nextUrl && isOwnedCategoryR2IconUrl(prevUrl, slug)) {
+                  void deleteR2FileByUrl(prevUrl);
+                }
                 void recordSuperAdminAudit({
                   action: "update",
                   module: "categories",
                   target_id: slug,
-                  target_label: slug,
+                  target_label: prevItem?.bn || slug,
                   summary: iconCleared
                     ? `ক্যাটাগরি আইকন মুছে ভেক্টরে নেওয়া হয়েছে: ${slug}`
                     : `ক্যাটাগরি আইকন আপডেট করা হয়েছে: ${slug}`,
@@ -2492,6 +2646,14 @@ function CategoriesEditor() {
                         id: cleanSlug,
                         customIconUrl: item.iconCleared ? "" : item.customIconUrl.trim(),
                         iconCleared: Boolean(item.iconCleared),
+                        ...(item.iconCleared
+                          ? { iconObjectKey: "", iconContentType: "", iconFileSize: 0 }
+                          : {
+                              ...(item.iconObjectKey ? { iconObjectKey: item.iconObjectKey } : {}),
+                              ...(item.iconContentType ? { iconContentType: item.iconContentType } : {}),
+                              ...(typeof item.iconFileSize === "number" ? { iconFileSize: item.iconFileSize } : {}),
+                              ...(item.iconUpdatedAt ? { iconUpdatedAt: item.iconUpdatedAt } : {}),
+                            }),
                         updatedAt: serverTimestamp(),
                         updatedBy: auth.currentUser?.email || "super-admin",
                       },
@@ -2501,19 +2663,26 @@ function CategoriesEditor() {
                   await batch.commit();
                 }
 
-                // Sync single wrapper config document cleanly
-                const nextList = rawItems.map((cat) => {
+                // Sync single wrapper config document cleanly using latest rawItemsRef
+                const nextList = rawItemsRef.current.map((cat) => {
                   const patch = updateMap.get(cat.slug);
                   if (!patch) return cat;
                   if (patch.iconCleared) {
                     const copy = { ...cat, iconCleared: true };
                     delete copy.customIconUrl;
+                    delete copy.iconObjectKey;
+                    delete copy.iconContentType;
+                    delete copy.iconFileSize;
                     return copy;
                   }
                   return {
                     ...cat,
                     customIconUrl: patch.customIconUrl.trim(),
                     iconCleared: false,
+                    ...(patch.iconObjectKey ? { iconObjectKey: patch.iconObjectKey } : {}),
+                    ...(patch.iconContentType ? { iconContentType: patch.iconContentType } : {}),
+                    ...(typeof patch.iconFileSize === "number" ? { iconFileSize: patch.iconFileSize } : {}),
+                    ...(patch.iconUpdatedAt ? { iconUpdatedAt: patch.iconUpdatedAt } : {}),
                   };
                 });
                 await saveCategories(nextList);
@@ -2665,15 +2834,19 @@ function CategoriesEditor() {
                 </div>
                 <UniversalImageUploader
                   variant="inline"
-                  category="category"
+                  category="category_icon"
                   entityId={newCat.slug.trim() || "new-category"}
                   value={newCat.iconCleared ? null : newCat.customIconUrl || null}
-                  autoDeleteOld={false}
+                  autoDeleteOld
                   hint="৫১২×৫১২ PNG, SVG, JPG বা WebP আপলোড করুন"
-                  onChange={(url) =>
+                  onChange={(url, meta) =>
                     setNewCat((prev) => ({
                       ...prev,
                       customIconUrl: url || "",
+                      iconObjectKey: url ? meta?.objectKey : undefined,
+                      iconContentType: url ? meta?.contentType : undefined,
+                      iconFileSize: url ? meta?.size : undefined,
+                      iconUpdatedAt: url ? meta?.uploadedAt : undefined,
                       iconCleared: !url,
                     }))
                   }
@@ -2684,6 +2857,10 @@ function CategoriesEditor() {
                     setNewCat({
                       ...newCat,
                       customIconUrl: e.target.value,
+                      iconObjectKey: undefined,
+                      iconContentType: undefined,
+                      iconFileSize: undefined,
+                      iconUpdatedAt: undefined,
                       iconCleared: !e.target.value.trim(),
                     })
                   }
@@ -2770,7 +2947,6 @@ function CategoriesEditor() {
         </div>
 
         {filtered.map((c, idx) => {
-          const IconComp = CATEGORY_ICONS[c.iconName] || CATEGORY_ICONS.Users;
           const isEditing = editingSlug === c.slug;
           const divName = c.divisionId ? divisionMap.get(c.divisionId) : undefined;
 
@@ -2950,31 +3126,41 @@ function CategoriesEditor() {
                         {getBuiltInCategoryIconUrl(c.slug) && (
                           <button
                             type="button"
+                            disabled={busy}
                             onClick={() => {
                               const builtInUrl = getBuiltInCategoryIconUrl(c.slug);
                               if (builtInUrl) {
-                                setEditDraft({
-                                  ...editDraft,
-                                  customIconUrl: builtInUrl,
-                                  iconCleared: false,
-                                });
+                                void persistEditedCategoryIcon(
+                                  c.slug,
+                                  builtInUrl,
+                                  false,
+                                  undefined,
+                                  `"${c.bn}"-এ ডিফল্ট PNG পুনঃস্থাপন ও ডেটাবেসে সংরক্ষণ হয়েছে`
+                                ).catch((err: any) =>
+                                  toast.error(err?.message || "আইকন সংরক্ষণ ব্যর্থ হয়েছে")
+                                );
                               }
                             }}
-                            className="inline-flex items-center gap-1 rounded-xl border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-[11px] font-bold text-blue-800 hover:bg-blue-500/20"
+                            className="inline-flex items-center gap-1 rounded-xl border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-[11px] font-bold text-blue-800 hover:bg-blue-500/20 disabled:opacity-50"
                           >
                             <RotateCcw className="h-3 w-3" /> ডিফল্ট PNG
                           </button>
                         )}
                         <button
                           type="button"
+                          disabled={busy}
                           onClick={() =>
-                            setEditDraft({
-                              ...editDraft,
-                              customIconUrl: "",
-                              iconCleared: true,
-                            })
+                            void persistEditedCategoryIcon(
+                              c.slug,
+                              "",
+                              true,
+                              undefined,
+                              `"${c.bn}" আইকন মুছে ভেক্টরে নেওয়া হয়েছে`
+                            ).catch((err: any) =>
+                              toast.error(err?.message || "আইকন মুছে ফেলা ব্যর্থ হয়েছে")
+                            )
                           }
-                          className="inline-flex items-center gap-1 rounded-xl border border-rose-500/25 bg-rose-500/10 px-2.5 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-500/20"
+                          className="inline-flex items-center gap-1 rounded-xl border border-rose-500/25 bg-rose-500/10 px-2.5 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-500/20 disabled:opacity-50"
                         >
                           <Trash2 className="h-3 w-3" /> ভেক্টর রাখুন
                         </button>
@@ -2982,7 +3168,7 @@ function CategoriesEditor() {
                     </div>
                     <UniversalImageUploader
                       variant="inline"
-                      category="category"
+                      category="category_icon"
                       entityId={c.slug}
                       value={
                         editDraft.iconCleared
@@ -2990,14 +3176,34 @@ function CategoriesEditor() {
                           : editDraft.customIconUrl || null
                       }
                       autoDeleteOld={false}
-                      hint="সরাসরি PNG/SVG/JPG/WebP আপলোড বা নিচে URL পরিবর্তন করুন"
-                      onChange={(url) =>
-                        setEditDraft((prev) => ({
-                          ...prev,
-                          customIconUrl: url || "",
-                          iconCleared: !url,
-                        }))
-                      }
+                      suppressSuccessToast
+                      hint="সরাসরি PNG/SVG/JPG/WebP আপলোড করলে সাথে সাথে R2 ও ডেটাবেসে সেভ হবে"
+                      onChange={async (url, meta) => {
+                        if (url) {
+                          await persistEditedCategoryIcon(
+                            c.slug,
+                            url,
+                            false,
+                            meta
+                              ? {
+                                  iconObjectKey: meta.objectKey,
+                                  iconContentType: meta.contentType,
+                                  iconFileSize: meta.size,
+                                  iconUpdatedAt: meta.uploadedAt,
+                                }
+                              : undefined,
+                            `"${c.bn}"-এর নতুন আইকন R2 ও ডেটাবেসে সংরক্ষিত হয়েছে!`
+                          );
+                        } else {
+                          await persistEditedCategoryIcon(
+                            c.slug,
+                            "",
+                            true,
+                            undefined,
+                            `"${c.bn}"-এর আইকন মুছে ভেক্টরে নেওয়া হয়েছে`
+                          );
+                        }
+                      }}
                     />
                     <input
                       value={editDraft.customIconUrl ?? ""}
@@ -3005,6 +3211,9 @@ function CategoriesEditor() {
                         setEditDraft({
                           ...editDraft,
                           customIconUrl: e.target.value,
+                          iconObjectKey: undefined,
+                          iconContentType: undefined,
+                          iconFileSize: undefined,
                           iconCleared: !e.target.value.trim(),
                         })
                       }
@@ -3067,19 +3276,7 @@ function CategoriesEditor() {
                   aria-label={`${c.bn} নির্বাচন`}
                   className="h-4 w-4 shrink-0 accent-emerald-700"
                 />
-                <div className="aspect-square flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[#E6E1D6] bg-[#FAF7F2] p-1 text-[#0F4D3A]">
-                  {!c.iconCleared && c.customIconUrl ? (
-                    <img
-                      src={c.customIconUrl}
-                      alt={c.bn}
-                      loading="lazy"
-                      decoding="async"
-                      className="h-full w-full object-contain select-none"
-                    />
-                  ) : (
-                    <IconComp className="h-5 w-5" strokeWidth={1.6} />
-                  )}
-                </div>
+                <AdminCategoryRowIcon category={c} />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <p className="font-semibold text-foreground">{c.bn}</p>
@@ -3182,14 +3379,22 @@ function CategoriesEditor() {
             setNewCat((prev) => ({
               ...prev,
               customIconUrl: url,
+              iconObjectKey: undefined,
+              iconContentType: undefined,
+              iconFileSize: undefined,
+              iconUpdatedAt: undefined,
               iconCleared: false,
             }));
-          } else if (catMediaPickerTarget === "edit") {
-            setEditDraft((prev) => ({
-              ...prev,
-              customIconUrl: url,
-              iconCleared: false,
-            }));
+          } else if (catMediaPickerTarget === "edit" && editingSlug) {
+            void persistEditedCategoryIcon(
+              editingSlug,
+              url,
+              false,
+              undefined,
+              "মিডিয়া লাইব্রেরির আইকন ক্যাটাগরিতে সংরক্ষিত হয়েছে!"
+            ).catch((err: any) =>
+              toast.error(err?.message || "আইকন সংরক্ষণ ব্যর্থ হয়েছে")
+            );
           }
         }}
       />
@@ -3212,14 +3417,22 @@ function CategoriesEditor() {
             setNewCat((prev) => ({
               ...prev,
               customIconUrl: url,
+              iconObjectKey: undefined,
+              iconContentType: undefined,
+              iconFileSize: undefined,
+              iconUpdatedAt: undefined,
               iconCleared: false,
             }));
-          } else if (builtInPickerTarget === "edit") {
-            setEditDraft((prev) => ({
-              ...prev,
-              customIconUrl: url,
-              iconCleared: false,
-            }));
+          } else if (builtInPickerTarget === "edit" && editingSlug) {
+            void persistEditedCategoryIcon(
+              editingSlug,
+              url,
+              false,
+              undefined,
+              "বিল্ট-ইন PNG আইকন ক্যাটাগরিতে সংরক্ষিত হয়েছে!"
+            ).catch((err: any) =>
+              toast.error(err?.message || "আইকন সংরক্ষণ ব্যর্থ হয়েছে")
+            );
           }
         }}
       />

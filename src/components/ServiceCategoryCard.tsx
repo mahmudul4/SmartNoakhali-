@@ -18,12 +18,19 @@ export function CategoryIconBadge({
   const Icon = category.icon;
   const isEmergency = isEmergencyCategory(category);
 
+  const cleanIconUrl =
+    typeof category.customIconUrl === "string" &&
+    category.customIconUrl.trim() &&
+    !/^blob:/i.test(category.customIconUrl.trim())
+      ? category.customIconUrl.trim()
+      : "";
+
   useEffect(() => {
     setImgFailed(false);
-  }, [category.customIconUrl, category.iconCleared]);
+  }, [cleanIconUrl, category.iconCleared]);
 
   const showCustomIcon = Boolean(
-    !category.iconCleared && category.customIconUrl && !imgFailed
+    !category.iconCleared && cleanIconUrl && !imgFailed
   );
 
   const boxSizes =
@@ -46,7 +53,8 @@ export function CategoryIconBadge({
     >
       {showCustomIcon ? (
         <img
-          src={category.customIconUrl}
+          key={cleanIconUrl}
+          src={cleanIconUrl}
           alt={category.bn}
           loading="lazy"
           decoding="async"

@@ -45,6 +45,8 @@ export type R2UploadCategory =
   | "general";
 
 export interface R2UploadMetadata {
+  success?: boolean;
+  ok?: boolean;
   storageProvider: "cloudflare-r2";
   bucketType: R2BucketType;
   bucketName: string;
@@ -52,6 +54,7 @@ export interface R2UploadMetadata {
   fileUrl: string;
   publicUrl: string | null;
   contentType: string;
+  fileSize?: number;
   size: number;
   checksumSha256: string;
   uploadedAt: string;
@@ -104,6 +107,36 @@ export function isR2Url(url: string | null | undefined): boolean {
     url.includes("/api/storage/file/private/") ||
     url.includes("cdn.smartnoakhali.com")
   );
+}
+
+/**
+ * Checks whether a URL is a valid persisted icon URL (never blob:, data:text/html, or oversized base64).
+ */
+export function isValidPersistedIconUrl(url: unknown): url is string {
+  if (typeof url !== "string") return false;
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+  if (/^blob:/i.test(trimmed)) return false;
+  if (/^javascript:/i.test(trimmed)) return false;
+  if (/^data:/i.test(trimmed) && trimmed.length > 2048) return false;
+  return true;
+}
+
+/**
+ * Returns true ONLY if the URL points to a per-category uploaded icon in R2_PUBLIC (`categories/<slug>/<file>`),
+ * so replacing/removing an icon safely cleans up the old category-specific object without deleting
+ * static `/icons/categories/*.png` assets or shared `media_library/*` items.
+ */
+export function isOwnedCategoryR2IconUrl(
+  url: string | null | undefined,
+  _categorySlug?: string
+): boolean {
+  if (!url || typeof url !== "string") return false;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed.startsWith("/icons/categories/")) return false;
+  const parsed = parseR2Url(trimmed);
+  if (!parsed || parsed.bucketType !== "public") return false;
+  return /^categories\/[^/]+\/[^/]+$/.test(parsed.objectKey);
 }
 
 export function parseR2Url(
@@ -202,11 +235,24 @@ function uploadViaXhr(params: {
       try {
         const parsed = JSON.parse(xhr.responseText || "{}") as R2UploadMetadata & {
           ok?: boolean;
+          success?: boolean;
           error?: string;
         };
-        if (xhr.status >= 200 && xhr.status < 300 && parsed.ok && parsed.fileUrl) {
+        const resolvedUrl = parsed.fileUrl || parsed.publicUrl || "";
+        if (
+          xhr.status >= 200 &&
+          xhr.status < 300 &&
+          (parsed.ok || parsed.success) &&
+          parsed.objectKey &&
+          resolvedUrl &&
+          !resolvedUrl.startsWith("blob:")
+        ) {
           params.onProgress?.(100);
-          resolve(parsed);
+          resolve({
+            ...parsed,
+            fileUrl: resolvedUrl,
+            size: parsed.fileSize ?? parsed.size ?? 0,
+          });
           return;
         }
         reject(

@@ -132,6 +132,10 @@ export interface Category {
   description: string;
   formType?: CategoryFormType;
   customIconUrl?: string;
+  iconObjectKey?: string;
+  iconContentType?: string;
+  iconFileSize?: number;
+  iconUpdatedAt?: string;
   iconCleared?: boolean;
   customRoute?: string;
   visible?: boolean;

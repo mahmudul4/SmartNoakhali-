@@ -277,6 +277,21 @@ export const onRequestPost = async (context: { request: Request; env: StorageEnv
     },
   });
 
+  // Verify the uploaded object actually exists and is non-empty in R2 before confirming
+  const verifiedObj = await bucket.head(objectKey);
+  if (!verifiedObj || verifiedObj.size <= 0) {
+    return jsonResponse(
+      {
+        success: false,
+        ok: false,
+        error: "Cloudflare R2-তে ফাইল সংরক্ষণ যাচাই করা যায়নি। অনুগ্রহ করে পুনরায় চেষ্টা করুন।",
+      },
+      500,
+      request,
+      env
+    );
+  }
+
   const fileUrl =
     bucketType === "public"
       ? buildPublicFileUrl(objectKey, env)
@@ -284,6 +299,7 @@ export const onRequestPost = async (context: { request: Request; env: StorageEnv
 
   return jsonResponse(
     {
+      success: true,
       ok: true,
       storageProvider: "cloudflare-r2",
       bucketType,
@@ -291,8 +307,9 @@ export const onRequestPost = async (context: { request: Request; env: StorageEnv
       objectKey,
       fileUrl,
       publicUrl: bucketType === "public" ? fileUrl : null,
-      contentType: mimeType,
-      size: arrayBuffer.byteLength,
+      contentType: verifiedObj.httpMetadata?.contentType || mimeType,
+      fileSize: verifiedObj.size,
+      size: verifiedObj.size,
       checksumSha256,
       uploadedAt,
       uploadedBy: actor.uid,

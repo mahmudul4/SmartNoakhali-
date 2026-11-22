@@ -32,6 +32,7 @@ import {
 import defaultLogoUrl from "@/assets/logo.png";
 import { clearBinaryFromIdb, saveBinaryToIdb, sanitizeAppFileName } from "@/lib/pwa";
 import { compressDataUrlToWebP } from "@/lib/imageProcessor";
+import { isValidPersistedIconUrl } from "@/lib/r2Storage";
 import {
   normalizeResponsiveLayouts,
   type HeroDeviceBreakpoint,
@@ -975,6 +976,10 @@ export interface CategoryConfigItem {
   description: string;
   formType?: string;
   customIconUrl?: string;
+  iconObjectKey?: string;
+  iconContentType?: string;
+  iconFileSize?: number;
+  iconUpdatedAt?: string;
   iconCleared?: boolean;
   customRoute?: string;
   displayOrder?: number;
@@ -1086,6 +1091,10 @@ interface ParsedCategoryWrapper {
   trashedItems: CategoryConfigItem[];
 }
 
+function sanitizeCategoryIconUrl(raw: unknown): string | undefined {
+  return isValidPersistedIconUrl(raw) ? raw.trim() : undefined;
+}
+
 function parseCategoryConfigWrapper(raw: string | null | undefined): ParsedCategoryWrapper | null {
   if (!raw) return null;
   try {
@@ -1105,7 +1114,11 @@ function parseCategoryConfigWrapper(raw: string | null | undefined): ParsedCateg
         for (const t of parsed.trashedItems) {
           if (t && typeof t.slug === "string") {
             const cSlug = normalizeCategorySlug(t.slug);
-            trashedMap.set(cSlug, { ...t, slug: cSlug, id: cSlug, isDeleted: true });
+            const safeTrashedUrl = t.iconCleared === true ? undefined : sanitizeCategoryIconUrl(t.customIconUrl);
+            const copy: CategoryConfigItem = { ...t, slug: cSlug, id: cSlug, isDeleted: true };
+            if (safeTrashedUrl) copy.customIconUrl = safeTrashedUrl;
+            else delete copy.customIconUrl;
+            trashedMap.set(cSlug, copy);
             deletedSlugs.add(cSlug);
           }
         }
@@ -1160,11 +1173,8 @@ function parseCategoryConfigWrapper(raw: string | null | undefined): ParsedCateg
         );
         const formType = String(item.formType || fallback?.formType || "general");
         const iconCleared = item.iconCleared === true;
-        const rawCustomIcon = iconCleared ? undefined : (item.customIconUrl || fallback?.customIconUrl);
-        const customIconUrl =
-          typeof rawCustomIcon === "string" && rawCustomIcon.trim()
-            ? rawCustomIcon.trim()
-            : undefined;
+        const explicitIcon = sanitizeCategoryIconUrl(item.customIconUrl);
+        const customIconUrl = iconCleared ? undefined : (explicitIcon || sanitizeCategoryIconUrl(fallback?.customIconUrl));
         const rawCustomRoute = item.customRoute;
         const customRoute =
           typeof rawCustomRoute === "string" && rawCustomRoute.trim()
@@ -1201,6 +1211,18 @@ function parseCategoryConfigWrapper(raw: string | null | undefined): ParsedCateg
         };
         if (customIconUrl && !iconCleared) {
           catItem.customIconUrl = customIconUrl;
+          if (typeof item.iconObjectKey === "string" && item.iconObjectKey.trim()) {
+            catItem.iconObjectKey = item.iconObjectKey.trim();
+          }
+          if (typeof item.iconContentType === "string" && item.iconContentType.trim()) {
+            catItem.iconContentType = item.iconContentType.trim();
+          }
+          if (typeof item.iconFileSize === "number" && item.iconFileSize > 0) {
+            catItem.iconFileSize = item.iconFileSize;
+          }
+          if (typeof item.iconUpdatedAt === "string" && item.iconUpdatedAt.trim()) {
+            catItem.iconUpdatedAt = item.iconUpdatedAt.trim();
+          }
         }
         if (customRoute) {
           catItem.customRoute = customRoute;
@@ -1244,6 +1266,9 @@ function toResolvedCategory(item: CategoryConfigItem): Category {
       : fallback?.tint || item.tint || "from-emerald-500/15 to-emerald-700/10";
   const description = item.description || fallback?.description || "";
   const iconCleared = item.iconCleared === true;
+  const resolvedIconUrl = iconCleared
+    ? undefined
+    : (sanitizeCategoryIconUrl(item.customIconUrl) || sanitizeCategoryIconUrl(fallback?.customIconUrl));
 
   return {
     slug: item.slug,
@@ -1255,7 +1280,11 @@ function toResolvedCategory(item: CategoryConfigItem): Category {
     tint,
     description,
     formType: (item.formType || fallback?.formType || "general") as Category["formType"],
-    customIconUrl: iconCleared ? undefined : (item.customIconUrl || fallback?.customIconUrl),
+    customIconUrl: resolvedIconUrl,
+    ...(resolvedIconUrl && item.iconObjectKey ? { iconObjectKey: item.iconObjectKey } : {}),
+    ...(resolvedIconUrl && item.iconContentType ? { iconContentType: item.iconContentType } : {}),
+    ...(resolvedIconUrl && typeof item.iconFileSize === "number" ? { iconFileSize: item.iconFileSize } : {}),
+    ...(resolvedIconUrl && item.iconUpdatedAt ? { iconUpdatedAt: item.iconUpdatedAt } : {}),
     iconCleared,
     customRoute: item.customRoute,
     visible: item.visible,
@@ -1283,20 +1312,28 @@ export function useCategories() {
     }
   });
 
+  const catStateRef = useRef<ParsedCategoryWrapper>(catState);
+  catStateRef.current = catState;
+
+  const applyCatState = useCallback((next: ParsedCategoryWrapper) => {
+    catStateRef.current = next;
+    setCatState(next);
+  }, []);
+
   const [aliasDocIds, setAliasDocIds] = useState<
     Array<{ docId: string; canonicalSlug: string; bn: string; divisionId: string }>
   >([]);
 
   useEffect(() => {
-    const deletedSlugsSet = new Set<string>();
-    const trashedMap = new Map<string, CategoryConfigItem>();
+    const baseDeletedSlugsSet = new Set<string>();
+    const baseTrashedMap = new Map<string, CategoryConfigItem>();
 
     try {
       const raw = localStorage.getItem(LOCAL_CATEGORIES_KEY);
       const parsedLocal = parseCategoryConfigWrapper(raw);
       if (parsedLocal) {
-        parsedLocal.deletedSlugs.forEach((s) => deletedSlugsSet.add(normalizeCategorySlug(s)));
-        parsedLocal.trashedItems.forEach((t) => trashedMap.set(t.slug, t));
+        parsedLocal.deletedSlugs.forEach((s) => baseDeletedSlugsSet.add(normalizeCategorySlug(s)));
+        parsedLocal.trashedItems.forEach((t) => baseTrashedMap.set(t.slug, t));
       }
     } catch {}
 
@@ -1315,20 +1352,105 @@ export function useCategories() {
     };
 
     let collectionHasLoaded = false;
-    const collectionDocsCache = new Map<string, CategoryConfigItem>();
+    let directDocHasLoaded = false;
+    const collectionDocsMap = new Map<string, CategoryConfigItem>();
+    const collectionDeletedSet = new Set<string>();
+    const collectionTrashedMap = new Map<string, CategoryConfigItem>();
+    let latestDirectWrapper: ParsedCategoryWrapper | null = null;
 
-    // 1. Pull from Server Content API immediately on mount (if collection hasn't arrived yet)
+    const reconcileAndApply = () => {
+      const effectiveDeletedSet = new Set<string>(baseDeletedSlugsSet);
+      if (latestDirectWrapper) {
+        latestDirectWrapper.deletedSlugs.forEach((s) => effectiveDeletedSet.add(normalizeCategorySlug(s)));
+      }
+      collectionDeletedSet.forEach((s) => effectiveDeletedSet.add(s));
+      // If a /categories/{slug} doc is explicitly active (isDeleted !== true), it is not deleted
+      collectionDocsMap.forEach((_, slug) => {
+        effectiveDeletedSet.delete(slug);
+      });
+
+      const mergedTrashedMap = new Map<string, CategoryConfigItem>(baseTrashedMap);
+      if (latestDirectWrapper) {
+        latestDirectWrapper.trashedItems.forEach((t) => mergedTrashedMap.set(t.slug, t));
+      }
+      collectionTrashedMap.forEach((t, slug) => mergedTrashedMap.set(slug, t));
+      collectionDocsMap.forEach((_, slug) => mergedTrashedMap.delete(slug));
+
+      const mergedMap = new Map<string, CategoryConfigItem>();
+
+      // 1. Seed defaults unless deleted
+      for (const def of DEFAULT_CATEGORY_ITEMS) {
+        if (!effectiveDeletedSet.has(def.slug)) {
+          mergedMap.set(def.slug, { ...def });
+        }
+      }
+
+      // 2. Overlay settings/categories_config items (preserves wrapper ordering & settings overrides)
+      if (latestDirectWrapper) {
+        for (const directItem of latestDirectWrapper.items) {
+          if (!effectiveDeletedSet.has(directItem.slug)) {
+            mergedMap.set(directItem.slug, { ...directItem });
+          }
+        }
+      }
+
+      // 3. Authoritatively overlay live /categories/{slug} docs (never drop custom docs, always win for icon fields)
+      if (collectionHasLoaded) {
+        collectionDocsMap.forEach((liveDoc, slug) => {
+          if (effectiveDeletedSet.has(slug)) return;
+          const prev = mergedMap.get(slug);
+          mergedMap.set(slug, {
+            ...(prev || {}),
+            ...liveDoc,
+            ...(liveDoc.iconCleared
+              ? {
+                  iconCleared: true,
+                  customIconUrl: undefined,
+                  iconObjectKey: undefined,
+                  iconContentType: undefined,
+                  iconFileSize: undefined,
+                }
+              : liveDoc.customIconUrl
+                ? {
+                    customIconUrl: liveDoc.customIconUrl,
+                    iconCleared: false,
+                    ...(liveDoc.iconObjectKey ? { iconObjectKey: liveDoc.iconObjectKey } : {}),
+                    ...(liveDoc.iconContentType ? { iconContentType: liveDoc.iconContentType } : {}),
+                    ...(typeof liveDoc.iconFileSize === "number" ? { iconFileSize: liveDoc.iconFileSize } : {}),
+                    ...(liveDoc.iconUpdatedAt ? { iconUpdatedAt: liveDoc.iconUpdatedAt } : {}),
+                  }
+                : prev?.iconCleared
+                  ? { iconCleared: true, customIconUrl: undefined }
+                  : prev?.customIconUrl
+                    ? { customIconUrl: prev.customIconUrl, iconCleared: false }
+                    : {}),
+          });
+        });
+      }
+
+      const finalItems = Array.from(mergedMap.values())
+        .filter((c) => !effectiveDeletedSet.has(c.slug) && c.isDeleted !== true)
+        .sort((a, b) => a.sort_order - b.sort_order);
+
+      const wrapper: ParsedCategoryWrapper = {
+        items: finalItems,
+        deletedSlugs: Array.from(effectiveDeletedSet),
+        trashedItems: Array.from(mergedTrashedMap.values()),
+      };
+      applyCatState(wrapper);
+      writeLocalWrapper(wrapper);
+    };
+
+    // 1. Pull from Server Content API immediately on mount (only before Firestore listeners arrive)
     fetch(`/api/content?collection=settings&id=${CATEGORIES_CONFIG_ID}`)
       .then((r) => r.json())
       .then((d) => {
-        if (collectionHasLoaded) return;
+        if (collectionHasLoaded || directDocHasLoaded) return;
         if (d?.item?.logo_url) {
           const parsed = parseCategoryConfigWrapper(d.item.logo_url);
-          if (parsed && parsed.items.length > 0) {
-            parsed.deletedSlugs.forEach((s) => deletedSlugsSet.add(s));
-            parsed.trashedItems.forEach((t) => trashedMap.set(t.slug, t));
-            setCatState(parsed);
-            writeLocalWrapper(parsed);
+          if (parsed && (parsed.items.length > 0 || parsed.deletedSlugs.length > 0)) {
+            latestDirectWrapper = parsed;
+            reconcileAndApply();
           }
         }
       })
@@ -1340,10 +1462,9 @@ export function useCategories() {
       (snapshot) => {
         if (!snapshot.empty) {
           collectionHasLoaded = true;
-          collectionDocsCache.clear();
-          const firestoreMap = new Map<string, CategoryConfigItem>();
-          const deletedSet = new Set<string>(deletedSlugsSet);
-          const nextTrashedMap = new Map<string, CategoryConfigItem>(trashedMap);
+          collectionDocsMap.clear();
+          collectionDeletedSet.clear();
+          collectionTrashedMap.clear();
           const detectedAliases: Array<{
             docId: string;
             canonicalSlug: string;
@@ -1386,12 +1507,18 @@ export function useCategories() {
                   ? data.displayOrder
                   : fallback?.sort_order || 999;
             const divId = resolveSafeDivisionId(data.divisionId || data.departmentId, fallback?.divisionId);
-            const iconCleared = data.iconCleared === true;
-            const rawCustomIcon = iconCleared ? undefined : (data.customIconUrl || fallback?.customIconUrl);
-            const customIconUrl =
-              typeof rawCustomIcon === "string" && rawCustomIcon.trim()
-                ? rawCustomIcon.trim()
-                : undefined;
+
+            const hasExplicitCustomIconField = Object.prototype.hasOwnProperty.call(data, "customIconUrl");
+            const explicitUrl = sanitizeCategoryIconUrl(data.customIconUrl);
+            const explicitEmptyClear =
+              hasExplicitCustomIconField &&
+              typeof data.customIconUrl === "string" &&
+              data.customIconUrl.trim() === "" &&
+              data.iconCleared !== false;
+            const iconCleared = data.iconCleared === true || explicitEmptyClear;
+            const customIconUrl = iconCleared
+              ? undefined
+              : (explicitUrl || sanitizeCategoryIconUrl(fallback?.customIconUrl));
             const customRoute =
               typeof data.customRoute === "string" && data.customRoute.trim()
                 ? data.customRoute.trim()
@@ -1414,45 +1541,41 @@ export function useCategories() {
               sort_order: sortOrder,
               isActive: data.isActive !== false && data.visible !== false,
               visible: data.visible !== false && data.isActive !== false,
-              isDeleted: data.isDeleted === true || deletedSlugsSet.has(canonicalSlug),
+              isDeleted: data.isDeleted === true,
               deletedAt: data.deletedAt,
               updatedAt: data.updatedAt,
               ...(iconCleared ? { iconCleared: true } : {}),
-              ...(customIconUrl && !iconCleared ? { customIconUrl } : {}),
+              ...(customIconUrl && !iconCleared ? { customIconUrl, iconCleared: false } : {}),
+              ...(customIconUrl && !iconCleared && typeof data.iconObjectKey === "string" && data.iconObjectKey.trim()
+                ? { iconObjectKey: data.iconObjectKey.trim() }
+                : {}),
+              ...(customIconUrl && !iconCleared && typeof data.iconContentType === "string" && data.iconContentType.trim()
+                ? { iconContentType: data.iconContentType.trim() }
+                : {}),
+              ...(customIconUrl && !iconCleared && typeof data.iconFileSize === "number" && data.iconFileSize > 0
+                ? { iconFileSize: data.iconFileSize }
+                : {}),
+              ...(customIconUrl && !iconCleared && typeof data.iconUpdatedAt === "string" && data.iconUpdatedAt.trim()
+                ? { iconUpdatedAt: data.iconUpdatedAt.trim() }
+                : {}),
               ...(customRoute ? { customRoute } : {}),
             };
 
             if (firestoreCat.isDeleted) {
-              deletedSet.add(canonicalSlug);
-              deletedSlugsSet.add(canonicalSlug);
-              nextTrashedMap.set(canonicalSlug, firestoreCat);
-              firestoreMap.delete(canonicalSlug);
-            } else if (!firestoreMap.has(canonicalSlug) || docSnap.id === canonicalSlug) {
-              firestoreMap.set(canonicalSlug, firestoreCat);
-              collectionDocsCache.set(canonicalSlug, firestoreCat);
+              collectionDeletedSet.add(canonicalSlug);
+              collectionTrashedMap.set(canonicalSlug, firestoreCat);
+              collectionDocsMap.delete(canonicalSlug);
+            } else {
+              const existing = collectionDocsMap.get(canonicalSlug);
+              // Prefer canonical doc ID over alias doc ID if both exist
+              if (!existing || docSnap.id === canonicalSlug) {
+                collectionDocsMap.set(canonicalSlug, firestoreCat);
+              }
             }
           });
 
           setAliasDocIds(detectedAliases);
-
-          if (firestoreMap.size > 0 || deletedSet.size > 0) {
-            for (const def of DEFAULT_CATEGORY_ITEMS) {
-              if (!firestoreMap.has(def.slug) && !deletedSet.has(def.slug)) {
-                firestoreMap.set(def.slug, { ...def });
-              }
-            }
-            const mergedList = Array.from(firestoreMap.values())
-              .filter((c) => !deletedSet.has(c.slug) && c.isDeleted !== true)
-              .sort((a, b) => a.sort_order - b.sort_order);
-
-            const wrapper: ParsedCategoryWrapper = {
-              items: mergedList,
-              deletedSlugs: Array.from(deletedSet),
-              trashedItems: Array.from(nextTrashedMap.values()),
-            };
-            setCatState(wrapper);
-            writeLocalWrapper(wrapper);
-          }
+          reconcileAndApply();
         }
       },
       (err) => {
@@ -1460,7 +1583,7 @@ export function useCategories() {
       }
     );
 
-    // 3. Listen to settings/categories_config (preserves collection icons when wrapper compacts data: URLs)
+    // 3. Listen to settings/categories_config (reconciled with live /categories docs so icons/custom docs are never lost)
     const unsubDirect = onSnapshot(
       doc(db, "settings", CATEGORIES_CONFIG_ID),
       (docSnap) => {
@@ -1468,32 +1591,9 @@ export function useCategories() {
           const rawPayload = docSnap.data()?.logo_url;
           const parsed = parseCategoryConfigWrapper(rawPayload);
           if (parsed && (parsed.items.length > 0 || parsed.deletedSlugs.length > 0)) {
-            parsed.deletedSlugs.forEach((s) => deletedSlugsSet.add(s));
-            parsed.trashedItems.forEach((t) => trashedMap.set(t.slug, t));
-            const mergedItems = parsed.items
-              .filter((c) => !deletedSlugsSet.has(c.slug))
-              .map((c) => {
-                const liveDoc = collectionDocsCache.get(c.slug);
-                if (collectionHasLoaded && liveDoc) {
-                  // Authoritative icon state lives on /categories/{slug} doc
-                  return {
-                    ...c,
-                    ...(liveDoc.iconCleared
-                      ? { iconCleared: true, customIconUrl: undefined }
-                      : liveDoc.customIconUrl
-                        ? { customIconUrl: liveDoc.customIconUrl, iconCleared: false }
-                        : {}),
-                  };
-                }
-                return c;
-              });
-            const sanitized: ParsedCategoryWrapper = {
-              items: mergedItems,
-              deletedSlugs: Array.from(deletedSlugsSet),
-              trashedItems: Array.from(trashedMap.values()),
-            };
-            setCatState(sanitized);
-            writeLocalWrapper(sanitized);
+            directDocHasLoaded = true;
+            latestDirectWrapper = parsed;
+            reconcileAndApply();
           }
         }
       },
@@ -1504,7 +1604,7 @@ export function useCategories() {
       unsubCategories();
       unsubDirect();
     };
-  }, []);
+  }, [applyCatState]);
 
   const persistCategoryWrapper = useCallback(
     async (
@@ -1516,12 +1616,13 @@ export function useCategories() {
         removeTrashedSlugs?: string[];
       }
     ) => {
-      const deletedSet = new Set(catState.deletedSlugs);
+      const currentState = catStateRef.current;
+      const deletedSet = new Set(currentState.deletedSlugs);
       (options?.addDeleted || []).forEach((s) => deletedSet.add(normalizeCategorySlug(s)));
       (options?.removeDeleted || []).forEach((s) => deletedSet.delete(normalizeCategorySlug(s)));
 
       const trashedMap = new Map<string, CategoryConfigItem>();
-      for (const t of catState.trashedItems) {
+      for (const t of currentState.trashedItems) {
         trashedMap.set(t.slug, t);
       }
       for (const t of options?.addTrashed || []) {
@@ -1539,12 +1640,21 @@ export function useCategories() {
             c.isDeleted !== true &&
             !deletedSet.has(c.slug)
         )
-        .map((c, idx) => ({
-          ...c,
-          sort_order: idx + 1,
-          displayOrder: idx + 1,
-          isActive: c.visible !== false,
-        }));
+        .map((c, idx) => {
+          const sanitizedUrl = c.iconCleared ? undefined : sanitizeCategoryIconUrl(c.customIconUrl);
+          const cleanItem: CategoryConfigItem = {
+            ...c,
+            sort_order: idx + 1,
+            displayOrder: idx + 1,
+            isActive: c.visible !== false,
+          };
+          if (c.iconCleared || !sanitizedUrl) {
+            delete cleanItem.customIconUrl;
+          } else {
+            cleanItem.customIconUrl = sanitizedUrl;
+          }
+          return cleanItem;
+        });
 
       const wrapper: ParsedCategoryWrapper = {
         items: normalized,
@@ -1560,41 +1670,61 @@ export function useCategories() {
         localStorage.setItem(LOCAL_CATEGORIES_KEY, fullSerialized);
       } catch {}
 
-      setCatState(wrapper);
+      applyCatState(wrapper);
 
-      // Keep Firestore settings/categories_config safely under 295KB by compacting oversized data: URLs only if needed
+      // Keep Firestore settings/categories_config safely under 285KB so upsertSettingDoc never slices JSON mid-string
+      const buildCloudJson = (
+        itemsArr: CategoryConfigItem[],
+        trashedArr: CategoryConfigItem[]
+      ) =>
+        JSON.stringify({
+          items: itemsArr,
+          deletedSlugs: Array.from(deletedSet),
+          trashedItems: trashedArr,
+          updatedAt: new Date().toISOString(),
+        });
+
       let cloudSerialized = fullSerialized;
       if (cloudSerialized.length > 275000) {
         const compactedItems = normalized.map((c) => {
-          if (
-            typeof c.customIconUrl === "string" &&
-            c.customIconUrl.startsWith("data:") &&
-            c.customIconUrl.length > 2048
-          ) {
+          if (typeof c.customIconUrl === "string" && c.customIconUrl.startsWith("data:") && c.customIconUrl.length > 2048) {
             const copy = { ...c };
             delete copy.customIconUrl;
             return copy;
           }
           return c;
         });
-        cloudSerialized = JSON.stringify({
-          items: compactedItems,
-          deletedSlugs: Array.from(deletedSet),
-          trashedItems: Array.from(trashedMap.values()).map((t) => {
-            if (typeof t.customIconUrl === "string" && t.customIconUrl.startsWith("data:")) {
-              const copy = { ...t };
-              delete copy.customIconUrl;
-              return copy;
-            }
-            return t;
-          }),
-          updatedAt: new Date().toISOString(),
+        const compactedTrashed = Array.from(trashedMap.values()).map((t) => {
+          if (typeof t.customIconUrl === "string" && t.customIconUrl.startsWith("data:")) {
+            const copy = { ...t };
+            delete copy.customIconUrl;
+            return copy;
+          }
+          return t;
         });
+        cloudSerialized = buildCloudJson(compactedItems, compactedTrashed);
+
+        if (cloudSerialized.length > 280000) {
+          const slimItems = compactedItems.map((c) => ({
+            id: c.id,
+            slug: c.slug,
+            divisionId: c.divisionId,
+            bn: c.bn,
+            en: c.en,
+            iconName: c.iconName,
+            sort_order: c.sort_order,
+            visible: c.visible,
+            ...(c.iconCleared ? { iconCleared: true } : {}),
+            ...(c.customIconUrl && !c.iconCleared ? { customIconUrl: c.customIconUrl } : {}),
+            ...(c.customRoute ? { customRoute: c.customRoute } : {}),
+          })) as CategoryConfigItem[];
+          cloudSerialized = buildCloudJson(slimItems, []);
+        }
       }
 
       await upsertSettingDoc(CATEGORIES_CONFIG_ID, cloudSerialized);
     },
-    [catState.deletedSlugs, catState.trashedItems]
+    [applyCatState]
   );
 
   const saveCategories = useCallback(
@@ -1610,7 +1740,19 @@ export function useCategories() {
 
   const updateCategory = useCallback(
     async (slug: string, patch: Partial<CategoryConfigItem>) => {
-      const cleanSlug = normalizeCategorySlug(slug);
+      const normalizedInput = normalizeCategorySlug(slug);
+      const currentItems = catStateRef.current.items;
+      const existingMatch = currentItems.find(
+        (c) => c.slug === normalizedInput || canonicalMatchKey(c.slug) === canonicalMatchKey(normalizedInput)
+      );
+      const masterMatch = defaultCategories.find(
+        (d) => d.slug === normalizedInput || canonicalMatchKey(d.slug) === canonicalMatchKey(normalizedInput)
+      );
+      const cleanSlug = existingMatch?.slug || masterMatch?.slug || normalizedInput;
+      if (!cleanSlug) {
+        throw new Error("সঠিক ক্যাটাগরি স্লাগ পাওয়া যায়নি।");
+      }
+
       const docRef = doc(db, "categories", cleanSlug);
 
       const updatePayload: Record<string, any> = {
@@ -1650,21 +1792,60 @@ export function useCategories() {
         updatePayload.isActive = Boolean(patch.visible);
       }
 
+      let expectedIconUrl: string | undefined;
+      let expectedIconCleared: boolean | undefined;
+
       if (patch.iconCleared === true) {
         updatePayload.iconCleared = true;
         updatePayload.customIconUrl = "";
+        updatePayload.iconObjectKey = "";
+        updatePayload.iconContentType = "";
+        updatePayload.iconFileSize = 0;
+        updatePayload.iconUpdatedAt = new Date().toISOString();
+        expectedIconUrl = "";
+        expectedIconCleared = true;
       } else if (patch.customIconUrl !== undefined) {
-        const trimmed = typeof patch.customIconUrl === "string" ? patch.customIconUrl.trim() : "";
-        updatePayload.customIconUrl = trimmed;
-        if (trimmed) {
+        const rawTrimmed = typeof patch.customIconUrl === "string" ? patch.customIconUrl.trim() : "";
+        if (rawTrimmed) {
+          const validUrl = sanitizeCategoryIconUrl(rawTrimmed);
+          if (!validUrl) {
+            throw new Error("অবৈধ বা অস্থায়ী (blob) আইকন লিংক ডেটাবেসে সংরক্ষণ করা যাবে না।");
+          }
+          updatePayload.customIconUrl = validUrl;
           updatePayload.iconCleared = false;
+          updatePayload.iconObjectKey =
+            typeof patch.iconObjectKey === "string" ? patch.iconObjectKey.trim() : "";
+          updatePayload.iconContentType =
+            typeof patch.iconContentType === "string" ? patch.iconContentType.trim() : "";
+          updatePayload.iconFileSize =
+            typeof patch.iconFileSize === "number" && patch.iconFileSize > 0 ? patch.iconFileSize : 0;
+          updatePayload.iconUpdatedAt =
+            typeof patch.iconUpdatedAt === "string" && patch.iconUpdatedAt.trim()
+              ? patch.iconUpdatedAt.trim()
+              : new Date().toISOString();
+          expectedIconUrl = validUrl;
+          expectedIconCleared = false;
         } else if (patch.iconCleared === false) {
+          updatePayload.customIconUrl = "";
           updatePayload.iconCleared = false;
+          updatePayload.iconObjectKey = "";
+          updatePayload.iconContentType = "";
+          updatePayload.iconFileSize = 0;
+          expectedIconUrl = "";
+          expectedIconCleared = false;
         } else {
+          updatePayload.customIconUrl = "";
           updatePayload.iconCleared = true;
+          updatePayload.iconObjectKey = "";
+          updatePayload.iconContentType = "";
+          updatePayload.iconFileSize = 0;
+          updatePayload.iconUpdatedAt = new Date().toISOString();
+          expectedIconUrl = "";
+          expectedIconCleared = true;
         }
       } else if (patch.iconCleared === false) {
         updatePayload.iconCleared = false;
+        expectedIconCleared = false;
       }
 
       const safePayload = sanitizeFirestorePayload(updatePayload);
@@ -1674,9 +1855,23 @@ export function useCategories() {
       if (!verifiedSnap.exists()) {
         throw new Error("ফায়ারবেস ডেটাবেসে ক্যাটাগরি আপডেট নিশ্চিত করা যায়নি।");
       }
+      const verifiedData = verifiedSnap.data() || {};
+      if (expectedIconUrl !== undefined) {
+        const savedIconUrl = typeof verifiedData.customIconUrl === "string" ? verifiedData.customIconUrl.trim() : "";
+        if (expectedIconCleared) {
+          if (verifiedData.iconCleared !== true || savedIconUrl !== "") {
+            throw new Error("ফায়ারবেস ডেটাবেসে আইকন রিমুভ নিশ্চিত করা যায়নি।");
+          }
+        } else if (expectedIconUrl && savedIconUrl !== expectedIconUrl) {
+          throw new Error("ফায়ারবেস ডেটাবেসে নতুন আইকন লিংক সংরক্ষণ যাচাই করা যায়নি।");
+        }
+      }
 
-      const next = catState.items.map((c) => {
+      const freshItems = catStateRef.current.items;
+      let foundInList = false;
+      const next = freshItems.map((c) => {
         if (c.slug !== cleanSlug) return c;
+        foundInList = true;
         const updated: CategoryConfigItem = { ...c };
         if (patch.bn !== undefined) {
           updated.bn = patch.bn;
@@ -1709,26 +1904,68 @@ export function useCategories() {
           updated.visible = Boolean(patch.visible);
           updated.isActive = Boolean(patch.visible);
         }
-        if (patch.iconCleared === true) {
+        if (expectedIconCleared === true) {
           updated.iconCleared = true;
           delete updated.customIconUrl;
-        } else if (patch.customIconUrl !== undefined) {
-          const trimmed = typeof patch.customIconUrl === "string" ? patch.customIconUrl.trim() : "";
-          if (trimmed) {
-            updated.customIconUrl = trimmed;
-            updated.iconCleared = false;
-          } else {
-            delete updated.customIconUrl;
-            updated.iconCleared = patch.iconCleared !== false;
-          }
+          delete updated.iconObjectKey;
+          delete updated.iconContentType;
+          delete updated.iconFileSize;
+          updated.iconUpdatedAt = updatePayload.iconUpdatedAt;
+        } else if (expectedIconUrl) {
+          updated.customIconUrl = expectedIconUrl;
+          updated.iconCleared = false;
+          if (updatePayload.iconObjectKey) updated.iconObjectKey = updatePayload.iconObjectKey;
+          else delete updated.iconObjectKey;
+          if (updatePayload.iconContentType) updated.iconContentType = updatePayload.iconContentType;
+          else delete updated.iconContentType;
+          if (updatePayload.iconFileSize > 0) updated.iconFileSize = updatePayload.iconFileSize;
+          else delete updated.iconFileSize;
+          if (updatePayload.iconUpdatedAt) updated.iconUpdatedAt = updatePayload.iconUpdatedAt;
+        } else if (patch.customIconUrl !== undefined && !expectedIconUrl) {
+          delete updated.customIconUrl;
+          delete updated.iconObjectKey;
+          delete updated.iconContentType;
+          delete updated.iconFileSize;
+          updated.iconCleared = false;
         } else if (patch.iconCleared === false) {
           updated.iconCleared = false;
         }
         return updated;
       });
+
+      if (!foundInList) {
+        const baseFallback = DEFAULT_CATEGORY_ITEMS.find((d) => d.slug === cleanSlug);
+        const createdEntry: CategoryConfigItem = {
+          ...(baseFallback || {
+            id: cleanSlug,
+            slug: cleanSlug,
+            name: String(verifiedData.bn || cleanSlug),
+            bn: String(verifiedData.bn || cleanSlug),
+            en: String(verifiedData.en || cleanSlug),
+            divisionId: resolveSafeDivisionId(verifiedData.divisionId),
+            departmentId: resolveSafeDivisionId(verifiedData.divisionId),
+            icon: String(verifiedData.iconName || "Users"),
+            iconName: String(verifiedData.iconName || "Users"),
+            tint: String(verifiedData.tint || "from-emerald-500/15 to-emerald-700/10"),
+            description: String(verifiedData.description || ""),
+            formType: String(verifiedData.formType || "general"),
+            sort_order: typeof verifiedData.sort_order === "number" ? verifiedData.sort_order : freshItems.length + 1,
+            displayOrder: typeof verifiedData.sort_order === "number" ? verifiedData.sort_order : freshItems.length + 1,
+            visible: verifiedData.visible !== false,
+            isActive: verifiedData.visible !== false,
+          }),
+          ...(expectedIconCleared
+            ? { iconCleared: true, customIconUrl: undefined }
+            : expectedIconUrl
+              ? { customIconUrl: expectedIconUrl, iconCleared: false }
+              : {}),
+        };
+        next.push(createdEntry);
+      }
+
       await persistCategoryWrapper(next);
     },
-    [catState.items, persistCategoryWrapper]
+    [persistCategoryWrapper]
   );
 
   const addCategory = useCallback(
@@ -1737,15 +1974,20 @@ export function useCategories() {
     ) => {
       const cleanSlug = normalizeCategorySlug(newCat?.slug || "");
       if (!cleanSlug) throw new Error("সঠিক ক্যাটাগরি স্লাগ (ইংরেজি অক্ষর) দিন");
-      if (catState.items.some((c) => canonicalMatchKey(c?.slug || "") === canonicalMatchKey(cleanSlug))) {
+      const currentItems = catStateRef.current.items;
+      if (currentItems.some((c) => canonicalMatchKey(c?.slug || "") === canonicalMatchKey(cleanSlug))) {
         throw new Error("এই স্লাগের ক্যাটাগরি ইতিমধ্যে ডেটাবেসে বিদ্যমান রয়েছে");
       }
 
-      const sortOrder = typeof newCat.sort_order === "number" ? newCat.sort_order : catState.items.length + 1;
-      const cleanIconUrl =
-        typeof newCat.customIconUrl === "string" && newCat.customIconUrl.trim().length > 0
-          ? newCat.customIconUrl.trim()
-          : undefined;
+      const sortOrder = typeof newCat.sort_order === "number" ? newCat.sort_order : currentItems.length + 1;
+      const rawCustomIcon = typeof newCat.customIconUrl === "string" ? newCat.customIconUrl.trim() : "";
+      let cleanIconUrl: string | undefined;
+      if (rawCustomIcon) {
+        cleanIconUrl = sanitizeCategoryIconUrl(rawCustomIcon);
+        if (!cleanIconUrl) {
+          throw new Error("অবৈধ বা অস্থায়ী (blob) আইকন লিংক ডেটাবেসে সংরক্ষণ করা যাবে না।");
+        }
+      }
       const cleanCustomRoute =
         typeof newCat.customRoute === "string" && newCat.customRoute.trim().length > 0
           ? newCat.customRoute.trim()
@@ -1770,7 +2012,20 @@ export function useCategories() {
         isActive: newCat.visible !== false,
         visible: newCat.visible !== false,
         isDeleted: false,
-        ...(cleanIconUrl ? { customIconUrl: cleanIconUrl, iconCleared: false } : {}),
+        ...(cleanIconUrl
+          ? {
+              customIconUrl: cleanIconUrl,
+              iconCleared: false,
+              ...(newCat.iconObjectKey ? { iconObjectKey: newCat.iconObjectKey } : {}),
+              ...(newCat.iconContentType ? { iconContentType: newCat.iconContentType } : {}),
+              ...(typeof newCat.iconFileSize === "number" && newCat.iconFileSize > 0
+                ? { iconFileSize: newCat.iconFileSize }
+                : {}),
+              iconUpdatedAt: newCat.iconUpdatedAt || new Date().toISOString(),
+            }
+          : newCat.iconCleared
+            ? { iconCleared: true }
+            : {}),
         ...(cleanCustomRoute ? { customRoute: cleanCustomRoute } : {}),
       };
 
@@ -1790,14 +2045,17 @@ export function useCategories() {
         throw new Error("ফায়ারবেস ডেটাবেসে ক্যাটাগরি সংরক্ষণ নিশ্চিত করা যায়নি");
       }
 
-      const next: CategoryConfigItem[] = [...catState.items.filter((c) => c.slug !== cleanSlug), itemToInsert];
+      const next: CategoryConfigItem[] = [
+        ...catStateRef.current.items.filter((c) => c.slug !== cleanSlug),
+        itemToInsert,
+      ];
       await persistCategoryWrapper(next, {
         removeDeleted: [cleanSlug],
         removeTrashedSlugs: [cleanSlug],
       });
       return itemToInsert;
     },
-    [catState.items, persistCategoryWrapper]
+    [persistCategoryWrapper]
   );
 
   const deleteCategory = useCallback(
@@ -1812,7 +2070,8 @@ export function useCategories() {
         );
       }
 
-      const existingItem = catState.items.find((c) => c.slug === cleanSlug);
+      const currentItems = catStateRef.current.items;
+      const existingItem = currentItems.find((c) => c.slug === cleanSlug);
       const docRef = doc(db, "categories", cleanSlug);
       const deletePayload = sanitizeFirestorePayload({
         id: cleanSlug,
@@ -1842,19 +2101,20 @@ export function useCategories() {
           }
         : undefined;
 
-      const next = catState.items.filter((c) => c.slug !== cleanSlug);
+      const next = catStateRef.current.items.filter((c) => c.slug !== cleanSlug);
       await persistCategoryWrapper(next, {
         addDeleted: [cleanSlug],
         addTrashed: trashedEntry ? [trashedEntry] : [],
       });
     },
-    [catState.items, persistCategoryWrapper]
+    [persistCategoryWrapper]
   );
 
   const restoreCategory = useCallback(
     async (slug: string) => {
       const cleanSlug = normalizeCategorySlug(slug);
-      const trashed = catState.trashedItems.find((t) => t.slug === cleanSlug);
+      const currentState = catStateRef.current;
+      const trashed = currentState.trashedItems.find((t) => t.slug === cleanSlug);
       const masterFallback = DEFAULT_CATEGORY_ITEMS.find((d) => d.slug === cleanSlug);
       const restoredItem: CategoryConfigItem | undefined = trashed
         ? {
@@ -1883,7 +2143,7 @@ export function useCategories() {
       );
 
       await persistCategoryWrapper(
-        [...catState.items.filter((c) => c.slug !== cleanSlug), restoredItem],
+        [...catStateRef.current.items.filter((c) => c.slug !== cleanSlug), restoredItem],
         {
           removeDeleted: [cleanSlug],
           removeTrashedSlugs: [cleanSlug],
@@ -1891,7 +2151,7 @@ export function useCategories() {
       );
       return restoredItem;
     },
-    [catState.items, catState.trashedItems, persistCategoryWrapper]
+    [persistCategoryWrapper]
   );
 
   const permanentlyDeleteCategory = useCallback(
@@ -1899,14 +2159,14 @@ export function useCategories() {
       const cleanSlug = normalizeCategorySlug(slug);
       await deleteDoc(doc(db, "categories", cleanSlug)).catch(() => {});
       await persistCategoryWrapper(
-        catState.items.filter((c) => c.slug !== cleanSlug),
+        catStateRef.current.items.filter((c) => c.slug !== cleanSlug),
         {
           addDeleted: [cleanSlug],
           removeTrashedSlugs: [cleanSlug],
         }
       );
     },
-    [catState.items, persistCategoryWrapper]
+    [persistCategoryWrapper]
   );
 
   const bulkDeleteCategories = useCallback(
@@ -1925,7 +2185,7 @@ export function useCategories() {
             skipped.push(s);
             continue;
           }
-          const existingItem = catState.items.find((c) => c.slug === s);
+          const existingItem = catStateRef.current.items.find((c) => c.slug === s);
           await setDoc(
             doc(db, "categories", s),
             sanitizeFirestorePayload({
@@ -1957,7 +2217,7 @@ export function useCategories() {
 
       if (deletedList.length > 0) {
         await persistCategoryWrapper(
-          catState.items.filter((c) => !deletedList.includes(c.slug)),
+          catStateRef.current.items.filter((c) => !deletedList.includes(c.slug)),
           {
             addDeleted: deletedList,
             addTrashed: trashedAdditions,
@@ -1967,7 +2227,7 @@ export function useCategories() {
 
       return { deleted: deletedList.length, skipped };
     },
-    [catState.items, persistCategoryWrapper]
+    [persistCategoryWrapper]
   );
 
   const cleanupDuplicateCategories = useCallback(
@@ -1989,14 +2249,15 @@ export function useCategories() {
   );
 
   const exportCategoriesBackupJson = useCallback(() => {
+    const current = catStateRef.current;
     const payload = {
       exportedAt: new Date().toISOString(),
       platform: "Smart Noakhali",
-      activeCount: catState.items.length,
-      trashedCount: catState.trashedItems.length,
-      deletedSlugs: catState.deletedSlugs,
-      categories: catState.items,
-      trashedCategories: catState.trashedItems,
+      activeCount: current.items.length,
+      trashedCount: current.trashedItems.length,
+      deletedSlugs: current.deletedSlugs,
+      categories: current.items,
+      trashedCategories: current.trashedItems,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
       type: "application/json",
@@ -2007,31 +2268,54 @@ export function useCategories() {
     a.download = `smart-noakhali-categories-backup-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [catState]);
+  }, []);
 
   const moveCategory = useCallback(
     async (slug: string, direction: "up" | "down") => {
-      const idx = catState.items.findIndex((c) => c.slug === slug);
+      const currentItems = catStateRef.current.items;
+      const idx = currentItems.findIndex((c) => c.slug === slug);
       if (idx === -1) return;
       const targetIdx = direction === "up" ? idx - 1 : idx + 1;
-      if (targetIdx < 0 || targetIdx >= catState.items.length) return;
-      const copy = [...catState.items];
+      if (targetIdx < 0 || targetIdx >= currentItems.length) return;
+      const copy = [...currentItems];
       const [moved] = copy.splice(idx, 1);
       copy.splice(targetIdx, 0, moved);
+      const firstChanged = copy[Math.min(idx, targetIdx)];
+      const secondChanged = copy[Math.max(idx, targetIdx)];
+      await Promise.all(
+        [
+          { slug: firstChanged.slug, order: Math.min(idx, targetIdx) + 1 },
+          { slug: secondChanged.slug, order: Math.max(idx, targetIdx) + 1 },
+        ].map((entry) =>
+          setDoc(
+            doc(db, "categories", entry.slug),
+            sanitizeFirestorePayload({
+              slug: entry.slug,
+              id: entry.slug,
+              sort_order: entry.order,
+              displayOrder: entry.order,
+              updatedAt: serverTimestamp(),
+              updatedBy: auth.currentUser?.email || "admin",
+            }),
+            { merge: true }
+          ).catch(() => {})
+        )
+      );
       await persistCategoryWrapper(copy);
     },
-    [catState.items, persistCategoryWrapper]
+    [persistCategoryWrapper]
   );
 
   const resetCategories = useCallback(async () => {
     try {
       localStorage.removeItem(LOCAL_CATEGORIES_KEY);
     } catch {}
+    const currentState = catStateRef.current;
     await persistCategoryWrapper(DEFAULT_CATEGORY_ITEMS, {
-      removeDeleted: catState.deletedSlugs,
-      removeTrashedSlugs: catState.trashedItems.map((t) => t.slug),
+      removeDeleted: currentState.deletedSlugs,
+      removeTrashedSlugs: currentState.trashedItems.map((t) => t.slug),
     });
-  }, [catState.deletedSlugs, catState.trashedItems, persistCategoryWrapper]);
+  }, [persistCategoryWrapper]);
 
   const duplicateDiagnostics: DuplicateCategoryDiagnostics = useMemo(() => {
     const sameDivMap = new Map<string, string[]>();

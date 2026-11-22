@@ -194,14 +194,18 @@ export async function syncCategoriesToFirestore(
 
     // 3. Sync full categories wrapper payload to Firestore settings/categories_config & Server content store
     onProgress?.("ক্যাটাগরি কনফিগ রেজিস্ট্রি ক্লাউডে সিঙ্ক হচ্ছে...", 85);
-    const categoryRegistry = masterCategories
+    const seenMasterSlugs = new Set<string>();
+    const categoryRegistry: Array<Record<string, any>> = masterCategories
       .filter((c) => !deletedSet.has(c.slug))
       .map((c, idx) => {
+        seenMasterSlugs.add(c.slug);
         const existing = existingDocsMap.get(c.slug);
         const iconCleared = existing?.iconCleared === true;
-        const resolvedIconUrl = iconCleared
+        const rawIcon = iconCleared
           ? undefined
-          : (typeof existing?.customIconUrl === "string" && existing.customIconUrl.trim()
+          : (typeof existing?.customIconUrl === "string" &&
+             existing.customIconUrl.trim() &&
+             !/^blob:/i.test(existing.customIconUrl.trim())
               ? existing.customIconUrl.trim()
               : c.customIconUrl);
         return {
@@ -217,9 +221,47 @@ export async function syncCategoriesToFirestore(
           isDeleted: false,
           sort_order: typeof existing?.sort_order === "number" ? existing.sort_order : c.sort_order || idx + 1,
           ...(iconCleared ? { iconCleared: true } : {}),
-          ...(resolvedIconUrl && !iconCleared ? { customIconUrl: resolvedIconUrl } : {}),
+          ...(rawIcon && !iconCleared ? { customIconUrl: rawIcon } : {}),
+          ...(existing?.iconObjectKey && !iconCleared ? { iconObjectKey: existing.iconObjectKey } : {}),
+          ...(existing?.iconContentType && !iconCleared ? { iconContentType: existing.iconContentType } : {}),
+          ...(typeof existing?.iconFileSize === "number" && !iconCleared ? { iconFileSize: existing.iconFileSize } : {}),
+          ...(existing?.iconUpdatedAt && !iconCleared ? { iconUpdatedAt: existing.iconUpdatedAt } : {}),
         };
       });
+
+    // Preserve any custom admin-added categories that are not part of masterCategories
+    for (const [docSlug, existing] of existingDocsMap.entries()) {
+      if (seenMasterSlugs.has(docSlug) || deletedSet.has(docSlug) || existing?.isDeleted === true) {
+        continue;
+      }
+      const iconCleared = existing?.iconCleared === true;
+      const rawIcon = iconCleared
+        ? undefined
+        : (typeof existing?.customIconUrl === "string" &&
+           existing.customIconUrl.trim() &&
+           !/^blob:/i.test(existing.customIconUrl.trim())
+            ? existing.customIconUrl.trim()
+            : undefined);
+      categoryRegistry.push({
+        slug: docSlug,
+        divisionId: String(existing.divisionId || existing.departmentId || "other_services"),
+        bn: String(existing.bn || existing.name || docSlug),
+        en: String(existing.en || docSlug),
+        iconName: String(existing.iconName || "Users"),
+        tint: String(existing.tint || "from-emerald-500/15 to-emerald-700/10"),
+        description: String(existing.description || ""),
+        formType: String(existing.formType || "general"),
+        visible: existing.visible !== false,
+        isDeleted: false,
+        sort_order: typeof existing.sort_order === "number" ? existing.sort_order : categoryRegistry.length + 1,
+        ...(iconCleared ? { iconCleared: true } : {}),
+        ...(rawIcon && !iconCleared ? { customIconUrl: rawIcon } : {}),
+        ...(existing?.iconObjectKey && !iconCleared ? { iconObjectKey: existing.iconObjectKey } : {}),
+        ...(existing?.iconContentType && !iconCleared ? { iconContentType: existing.iconContentType } : {}),
+        ...(typeof existing?.iconFileSize === "number" && !iconCleared ? { iconFileSize: existing.iconFileSize } : {}),
+        ...(existing?.iconUpdatedAt && !iconCleared ? { iconUpdatedAt: existing.iconUpdatedAt } : {}),
+      });
+    }
 
     const divisionsRegistry = masterDivisions.map((d, idx) => ({
       id: d.id,

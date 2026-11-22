@@ -20,6 +20,7 @@ export type ImageUploadCategory =
   | "donor"
   | "donor_event"
   | "category"
+  | "category_icon"
   | "banner"
   | "logo"
   | "chat"
@@ -82,6 +83,7 @@ export function buildStoragePath(
     case "donor_event":
       return `donor-events/${safeEntity}/${uniqueName}`;
     case "category":
+    case "category_icon":
       return `categories/${safeEntity}/${uniqueName}`;
     case "logo":
       return `logos/${safeEntity}/${uniqueName}`;

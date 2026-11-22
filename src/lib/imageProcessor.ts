@@ -360,11 +360,16 @@ export async function processAndCompressImage(
     targetH = Math.max(Math.round(origH * ratio), 1);
   }
 
-  // Fast-path: if image is already within target bytes & dimensions, and WebP/JPEG
+  // Fast-path: if image is already within target bytes & dimensions, preserve lossless PNG icons or WebP/JPEG
   const fastPathMaxBytes = Math.min(180 * 1024, targetMaxSizeBytes);
   const isAlreadySmall =
     file.size <= fastPathMaxBytes && origW <= maxWidth && origH <= maxHeight && !squareCrop;
-  if (isAlreadySmall && (file.type === "image/webp" || file.type === "image/jpeg")) {
+  if (
+    isAlreadySmall &&
+    (file.type === "image/webp" ||
+      file.type === "image/jpeg" ||
+      (preset === "icon" && file.type === "image/png"))
+  ) {
     const previewUrl = URL.createObjectURL(file);
     return {
       file,
@@ -375,7 +380,7 @@ export async function processAndCompressImage(
       compressionRatio: 0,
       width: origW,
       height: origH,
-      format: file.type === "image/webp" ? "webp" : "jpeg",
+      format: file.type === "image/webp" ? "webp" : file.type === "image/png" ? "png" : "jpeg",
     };
   }
 
