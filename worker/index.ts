@@ -11,7 +11,9 @@ import * as uploadFn from "../functions/api/storage/upload";
 import * as migrateFn from "../functions/api/storage/migrate";
 import * as fileFn from "../functions/api/storage/file/[[path]]";
 import { buildCorsHeaders, jsonResponse } from "../functions/lib/r2-security";
-import type { StorageEnv } from "../functions/lib/r2-types";
+import type { Env, StorageEnv } from "../functions/lib/r2-types";
+
+export type { Env };
 
 export interface WorkerExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
@@ -107,7 +109,7 @@ async function handleApiRequest(request: Request, env: StorageEnv): Promise<Resp
 export default {
   async fetch(
     request: Request,
-    env: StorageEnv,
+    env: Env,
     _ctx: WorkerExecutionContext
   ): Promise<Response> {
     const url = new URL(request.url);

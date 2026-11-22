@@ -1,6 +1,7 @@
-import { verifyAuthenticatedActor } from "../../lib/firebase-auth";
 import { buildCorsHeaders, jsonResponse } from "../../lib/r2-security";
 import type { StorageEnv } from "../../lib/r2-types";
+
+export type BindingHealthStatus = "configured" | "not_configured" | "unreachable";
 
 export const onRequestOptions = async (context: { request: Request; env: StorageEnv }) => {
   return new Response(null, {
@@ -12,29 +13,17 @@ export const onRequestOptions = async (context: { request: Request; env: Storage
 export const onRequestGet = async (context: { request: Request; env: StorageEnv }) => {
   const { request, env } = context;
 
-  // Require valid Firebase Auth session for detailed diagnostics; unauthenticated callers get minimal availability status
-  let isAuthorizedInspector = false;
-  try {
-    const actor = await verifyAuthenticatedActor(request, env);
-    isAuthorizedInspector = actor.isMainAdmin || actor.isStaff;
-  } catch {
-    isAuthorizedInspector = false;
-  }
-
   const hasPublicBinding = Boolean(env.R2_PUBLIC);
   const hasPrivateBinding = Boolean(env.R2_PRIVATE);
-  const cdnBase = (env.PUBLIC_R2_CDN_URL || "").trim().replace(/\/+$/, "");
+  const cdnBase = (env.PUBLIC_R2_CDN_URL || "").trim();
 
   let publicReachable = false;
   let privateReachable = false;
-  let publicSampleCount = 0;
-  let privateSampleCount = 0;
 
   if (env.R2_PUBLIC) {
     try {
-      const list = await env.R2_PUBLIC.list({ limit: 5 });
+      await env.R2_PUBLIC.list({ limit: 1 });
       publicReachable = true;
-      publicSampleCount = list.objects?.length || 0;
     } catch {
       publicReachable = false;
     }
@@ -42,57 +31,38 @@ export const onRequestGet = async (context: { request: Request; env: StorageEnv 
 
   if (env.R2_PRIVATE) {
     try {
-      const list = await env.R2_PRIVATE.list({ limit: 5 });
+      await env.R2_PRIVATE.list({ limit: 1 });
       privateReachable = true;
-      privateSampleCount = list.objects?.length || 0;
     } catch {
       privateReachable = false;
     }
   }
 
-  const healthy = hasPublicBinding && hasPrivateBinding && publicReachable && privateReachable;
+  const publicStatus: BindingHealthStatus = !hasPublicBinding
+    ? "not_configured"
+    : publicReachable
+      ? "configured"
+      : "unreachable";
 
-  if (!isAuthorizedInspector) {
-    return jsonResponse(
-      {
-        ok: healthy,
-        provider: "cloudflare-r2",
-        publicReady: hasPublicBinding && publicReachable,
-        privateReady: hasPrivateBinding && privateReachable,
-        cdnConfigured: Boolean(cdnBase),
-        timestamp: new Date().toISOString(),
-      },
-      healthy ? 200 : 503,
-      request,
-      env
-    );
-  }
+  const privateStatus: BindingHealthStatus = !hasPrivateBinding
+    ? "not_configured"
+    : privateReachable
+      ? "configured"
+      : "unreachable";
+
+  const healthy = publicStatus === "configured" && privateStatus === "configured";
 
   return jsonResponse(
     {
       ok: healthy,
       provider: "cloudflare-r2",
-      buckets: {
-        public: {
-          binding: "R2_PUBLIC",
-          bucketName: "smart-noakhali-public",
-          bound: hasPublicBinding,
-          reachable: publicReachable,
-          sampleObjectsFound: publicSampleCount,
-          deliveryBase: cdnBase || "/api/storage/file/public",
-        },
-        private: {
-          binding: "R2_PRIVATE",
-          bucketName: "smart-noakhali-private",
-          bound: hasPrivateBinding,
-          reachable: privateReachable,
-          sampleObjectsFound: privateSampleCount,
-          deliveryBase: "/api/storage/file/private",
-        },
+      bindings: {
+        R2_PUBLIC: publicStatus,
+        R2_PRIVATE: privateStatus,
       },
-      cdnConfigured: Boolean(cdnBase),
-      cdnUrl: cdnBase || null,
-      authVerification: "firebase-rs256-jwks",
+      publicReady: publicStatus === "configured",
+      privateReady: privateStatus === "configured",
+      cdnConfigured: Boolean(cdnBase && /^https?:\/\//i.test(cdnBase)),
       timestamp: new Date().toISOString(),
     },
     healthy ? 200 : 503,

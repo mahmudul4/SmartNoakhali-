@@ -18,13 +18,11 @@
   "r2_buckets": [
     {
       "binding": "R2_PUBLIC",
-      "bucket_name": "smart-noakhali-public",
-      "preview_bucket_name": "smart-noakhali-public-preview"
+      "bucket_name": "smart-noakhali-public"
     },
     {
       "binding": "R2_PRIVATE",
-      "bucket_name": "smart-noakhali-private",
-      "preview_bucket_name": "smart-noakhali-private-preview"
+      "bucket_name": "smart-noakhali-private"
     }
   ]
 }

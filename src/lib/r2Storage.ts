@@ -561,43 +561,19 @@ export function useResolvedR2Url(url: string | null | undefined): {
 export interface R2HealthReport {
   ok: boolean;
   provider: string;
+  bindings?: {
+    R2_PUBLIC: "configured" | "not_configured" | "unreachable";
+    R2_PRIVATE: "configured" | "not_configured" | "unreachable";
+  };
   publicReady?: boolean;
   privateReady?: boolean;
   cdnConfigured?: boolean;
-  cdnUrl?: string | null;
-  buckets?: {
-    public: {
-      binding: string;
-      bucketName: string;
-      bound: boolean;
-      reachable: boolean;
-      sampleObjectsFound: number;
-      deliveryBase: string;
-    };
-    private: {
-      binding: string;
-      bucketName: string;
-      bound: boolean;
-      reachable: boolean;
-      sampleObjectsFound: number;
-      deliveryBase: string;
-    };
-  };
-  authVerification?: string;
   timestamp?: string;
   error?: string;
 }
 
 export async function checkR2StorageHealth(): Promise<R2HealthReport> {
-  const headers: Record<string, string> = {};
-  try {
-    if (auth.currentUser) {
-      headers.Authorization = `Bearer ${await auth.currentUser.getIdToken()}`;
-    }
-  } catch {
-    // ignore
-  }
-  const res = await fetch("/api/storage/health", { headers });
+  const res = await fetch("/api/storage/health");
   const data = (await res.json().catch(() => ({}))) as R2HealthReport;
   return {
     ...data,

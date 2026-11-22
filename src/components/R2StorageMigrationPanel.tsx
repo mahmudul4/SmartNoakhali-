@@ -27,7 +27,7 @@ import {
   Upload,
 } from "lucide-react";
 import { toast } from "sonner";
-import { db } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
 import {
   checkR2StorageHealth,
   deleteR2FileByUrl,
@@ -38,6 +38,13 @@ import {
   type R2HealthReport,
 } from "@/lib/r2Storage";
 import { recordSuperAdminAudit } from "@/lib/staff-audit";
+
+interface DiagStepResult {
+  id: string;
+  label: string;
+  status: "passed" | "failed";
+  detail: string;
+}
 
 interface ScannedMediaRef {
   collectionName: string;
@@ -145,9 +152,9 @@ export function R2StorageMigrationPanel() {
   } | null>(null);
   const [manifest, setManifest] = useState<MigrationManifestEntry[]>([]);
 
-  const [diagBucket, setDiagBucket] = useState<"public" | "private">("private");
   const [diagBusy, setDiagBusy] = useState(false);
-  const [diagResult, setDiagResult] = useState<string | null>(null);
+  const [diagSteps, setDiagSteps] = useState<DiagStepResult[]>([]);
+  const [diagSummary, setDiagSummary] = useState<string | null>(null);
 
   const loadHealth = useCallback(async () => {
     setCheckingHealth(true);
@@ -425,33 +432,148 @@ export function R2StorageMigrationPanel() {
     }
   };
 
+  const createTinyTestPng = (name: string): File => {
+    const pngBase64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const raw = atob(pngBase64);
+    const arr = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+    return new File([arr], name, { type: "image/png" });
+  };
+
   const runSelfDiagnostic = async () => {
     setDiagBusy(true);
-    setDiagResult(null);
-    try {
-      // Create a tiny valid 1x1 PNG binary in memory to verify upload -> read -> delete
-      const pngBase64 =
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
-      const raw = atob(pngBase64);
-      const arr = new Uint8Array(raw.length);
-      for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
-      const file = new File([arr], `r2-diag-${Date.now()}.png`, { type: "image/png" });
+    setDiagSteps([]);
+    setDiagSummary(null);
+    const steps: DiagStepResult[] = [];
+    let publicUrlToClean: string | null = null;
+    let privateUrlToClean: string | null = null;
 
-      const uploaded = await uploadFileToR2(file, {
-        category: diagBucket === "private" ? "admin_private" : "general",
-        bucketType: diagBucket,
+    try {
+      const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : "";
+      if (!idToken) {
+        throw new Error("অ্যাডমিন সেশন পাওয়া যায়নি।");
+      }
+
+      // 1. Bindings & /api/storage/health
+      const h = await checkR2StorageHealth();
+      setHealth(h);
+      const bindingsOk =
+        h.ok &&
+        h.bindings?.R2_PUBLIC === "configured" &&
+        h.bindings?.R2_PRIVATE === "configured";
+      steps.push({
+        id: "health",
+        label: "১. বাকেট বাইন্ডিং ও /api/storage/health",
+        status: bindingsOk ? "passed" : "failed",
+        detail: `R2_PUBLIC=${h.bindings?.R2_PUBLIC || (h.publicReady ? "configured" : "not_configured")}, R2_PRIVATE=${h.bindings?.R2_PRIVATE || (h.privateReady ? "configured" : "not_configured")}, CDN=${h.cdnConfigured ? "configured" : "worker_proxy"}`,
+      });
+
+      // 2. Public Bucket Upload (Admin Auth)
+      const pubFile = createTinyTestPng(`r2-e2e-pub-${Date.now()}.png`);
+      const pubUp = await uploadFileToR2(pubFile, {
+        category: "general",
+        bucketType: "public",
         entityId: "diagnostic",
         skipCompression: true,
       });
+      publicUrlToClean = pubUp.fileUrl;
+      steps.push({
+        id: "pub_upload",
+        label: "২. Public Bucket আপলোড (Admin Auth)",
+        status: pubUp.objectKey && pubUp.fileUrl ? "passed" : "failed",
+        detail: `Key: ${pubUp.objectKey} • URL: ${pubUp.fileUrl} • Size: ${pubUp.size}B`,
+      });
 
-      const deleted = await deleteR2FileByUrl(uploaded.fileUrl, diagBucket);
-      setDiagResult(
-        `✅ ${diagBucket === "private" ? "Private (smart-noakhali-private)" : "Public (smart-noakhali-public)"} টেস্ট সফল! Key: ${uploaded.objectKey} • Size: ${uploaded.size}B • Cleanup: ${deleted ? "OK" : "Skipped"}`
+      // 3. Public URL / CDN Delivery Read Check
+      const pubReadRes = await fetch(pubUp.fileUrl, { cache: "no-store" });
+      const pubReadBytes = await pubReadRes.arrayBuffer();
+      const pubReadOk = pubReadRes.ok && pubReadBytes.byteLength === pubUp.size;
+      steps.push({
+        id: "pub_read",
+        label: h.cdnConfigured
+          ? "৩. Public CDN URL ডেলিভারি যাচাই"
+          : "৩. Public URL ডেলিভারি যাচাই (CDN নিষ্ক্রিয়, Worker রুট সক্রিয়)",
+        status: pubReadOk ? "passed" : "failed",
+        detail: `GET ${pubUp.fileUrl} → HTTP ${pubReadRes.status} (${pubReadBytes.byteLength} bytes)`,
+      });
+
+      // 4. Private Bucket Upload (Admin Auth)
+      const privFile = createTinyTestPng(`r2-e2e-priv-${Date.now()}.png`);
+      const privUp = await uploadFileToR2(privFile, {
+        category: "admin_private",
+        bucketType: "private",
+        entityId: "diagnostic",
+        skipCompression: true,
+      });
+      privateUrlToClean = privUp.fileUrl;
+      steps.push({
+        id: "priv_upload",
+        label: "৪. Private Bucket আপলোড (Admin Auth)",
+        status: privUp.objectKey && privUp.fileUrl ? "passed" : "failed",
+        detail: `Key: ${privUp.objectKey} • URL: ${privUp.fileUrl}`,
+      });
+
+      // 5. Private Unauthorized Block + Authorized Read Check
+      const unauthRes = await fetch(privUp.fileUrl, {
+        cache: "no-store",
+        credentials: "omit",
+      });
+      const authPrivRes = await fetch(privUp.fileUrl, {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      const privBlockedOk = unauthRes.status === 401 || unauthRes.status === 403;
+      const privAuthReadOk = authPrivRes.ok;
+      steps.push({
+        id: "priv_security",
+        label: "৫. Private Unauthorized Access Block ও Authorized Read",
+        status: privBlockedOk && privAuthReadOk ? "passed" : "failed",
+        detail: `Unauth GET → HTTP ${unauthRes.status} (Blocked) • Auth GET → HTTP ${authPrivRes.status}`,
+      });
+
+      // 6. Delete Both Test Files
+      const pubDel = await deleteR2FileByUrl(pubUp.fileUrl, "public");
+      const privDel = await deleteR2FileByUrl(privUp.fileUrl, "private");
+      publicUrlToClean = null;
+      privateUrlToClean = null;
+      steps.push({
+        id: "delete",
+        label: "৬. টেস্ট ফাইল Delete করা",
+        status: pubDel && privDel ? "passed" : "failed",
+        detail: `Public Delete: ${pubDel ? "OK" : "Failed"} • Private Delete: ${privDel ? "OK" : "Failed"}`,
+      });
+
+      // 7. Post-Delete 404 Verification
+      const afterPub = await fetch(pubUp.fileUrl, { cache: "no-store" });
+      const afterPriv = await fetch(privUp.fileUrl, {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      const deletedVerified = afterPub.status === 404 && afterPriv.status === 404;
+      steps.push({
+        id: "post_delete",
+        label: "৭. R2 থেকে স্থায়ীভাবে মুছে যাওয়া নিশ্চিতকরণ (404 চেক)",
+        status: deletedVerified ? "passed" : "failed",
+        detail: `Public after delete → HTTP ${afterPub.status} • Private after delete → HTTP ${afterPriv.status}`,
+      });
+
+      setDiagSteps(steps);
+      const passedCount = steps.filter((s) => s.status === "passed").length;
+      setDiagSummary(
+        `${passedCount}/${steps.length}টি ধাপ সফল হয়েছে (${steps.length - passedCount}টি ব্যর্থ)`
       );
-      toast.success("R2 আপলোড ও ডিলিট ডায়াগনস্টিক সফল হয়েছে!");
+      if (passedCount === steps.length) {
+        toast.success("Cloudflare R2 সম্পূর্ণ E2E ইন্টিগ্রেশন টেস্ট সফল হয়েছে!");
+      } else {
+        toast.warning("কিছু ডায়াগনস্টিক ধাপ ব্যর্থ হয়েছে — বিস্তারিত নিচে দেখুন।");
+      }
     } catch (err: any) {
+      if (publicUrlToClean) void deleteR2FileByUrl(publicUrlToClean, "public");
+      if (privateUrlToClean) void deleteR2FileByUrl(privateUrlToClean, "private");
       const msg = err?.message || "Diagnostic failed";
-      setDiagResult(`❌ ব্যর্থ: ${msg}`);
+      setDiagSteps(steps);
+      setDiagSummary(`❌ ত্রুটি: ${msg}`);
       toast.error(msg);
     } finally {
       setDiagBusy(false);
@@ -510,7 +632,7 @@ export function R2StorageMigrationPanel() {
                 <Globe className="h-4 w-4 text-emerald-600" />
                 পাবলিক বাকেট (<code>R2_PUBLIC</code>)
               </span>
-              {health?.buckets?.public?.reachable || health?.publicReady ? (
+              {health?.bindings?.R2_PUBLIC === "configured" || health?.publicReady ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white">
                   <CheckCircle2 className="h-3 w-3" /> সক্রিয়
                 </span>
@@ -521,8 +643,8 @@ export function R2StorageMigrationPanel() {
               )}
             </div>
             <p className="mt-1.5 text-[11px] text-muted-foreground">
-              Bucket: <strong>smart-noakhali-public</strong> • Delivery:{" "}
-              <code>{health?.buckets?.public?.deliveryBase || "/api/storage/file/public"}</code>
+              Status: <strong>{health?.bindings?.R2_PUBLIC || (health?.publicReady ? "configured" : "not_configured")}</strong> • Delivery:{" "}
+              <code>{health?.cdnConfigured ? "Custom CDN Active" : "/api/storage/file/public"}</code>
             </p>
             <p className="mt-1 text-[11px] text-muted-foreground">
               ব্যবহৃত ফাইল: ক্যাটাগরি আইকন, হিরো ব্যানার, লোগো, ব্র্যান্ডিং, প্রোফাইল ছবি, সেবা ও ডিরেক্টরি ছবি।
@@ -535,7 +657,7 @@ export function R2StorageMigrationPanel() {
                 <Lock className="h-4 w-4 text-indigo-600" />
                 প্রাইভেট বাকেট (<code>R2_PRIVATE</code>)
               </span>
-              {health?.buckets?.private?.reachable || health?.privateReady ? (
+              {health?.bindings?.R2_PRIVATE === "configured" || health?.privateReady ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-bold text-white">
                   <ShieldCheck className="h-3 w-3" /> সংরক্ষিত ও সক্রিয়
                 </span>
@@ -546,7 +668,7 @@ export function R2StorageMigrationPanel() {
               )}
             </div>
             <p className="mt-1.5 text-[11px] text-muted-foreground">
-              Bucket: <strong>smart-noakhali-private</strong> • Auth: Firebase RS256 Token + Ownership/RBAC
+              Status: <strong>{health?.bindings?.R2_PRIVATE || (health?.privateReady ? "configured" : "not_configured")}</strong> • Auth: Firebase RS256 Token + Ownership/RBAC
             </p>
             <p className="mt-1 text-[11px] text-muted-foreground">
               ব্যবহৃত ফাইল: অভিযোগ প্রমাণক, লাইভ চ্যাট ভয়েস ও সংযুক্তি, এবং সংরক্ষিত অ্যাডমিন ডকুমেন্ট।
@@ -682,41 +804,53 @@ export function R2StorageMigrationPanel() {
         )}
       </div>
 
-      {/* Live Upload/Delete Diagnostic */}
+      {/* Live E2E Upload / Security / Delete Verification */}
       <div className="rounded-3xl border border-border bg-card p-5 shadow-card space-y-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="flex items-center gap-2 font-display text-sm font-bold text-foreground">
               <Upload className="h-4 w-4 text-primary" />
-              R2 বাকেট লাইভ আপলোড ও ডিলিট পরীক্ষা
+              R2 বাকেট সম্পূর্ণ E2E লাইভ ইন্টিগ্রেশন পরীক্ষা
             </h3>
             <p className="text-xs text-muted-foreground">
-              ১×১ পরীক্ষামূলক PNG আপলোড করে Firebase Auth + R2 Write + Cleanup যাচাই করুন।
+              ১×১ পরীক্ষামূলক PNG দিয়ে Public/Private আপলোড, Unauthorized ব্লক, ডেলিভারি ও Delete-পরবর্তী 404 যাচাই করুন (প্রোডাকশন ডেটা অপরিবর্তিত থাকবে)।
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <select
-              value={diagBucket}
-              onChange={(e) => setDiagBucket(e.target.value as "public" | "private")}
-              className="rounded-xl border border-border bg-background px-3 py-1.5 text-xs font-bold"
-            >
-              <option value="public">R2_PUBLIC (smart-noakhali-public)</option>
-              <option value="private">R2_PRIVATE (smart-noakhali-private)</option>
-            </select>
-            <button
-              type="button"
-              disabled={diagBusy}
-              onClick={() => void runSelfDiagnostic()}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50"
-            >
-              {diagBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-              টেস্ট চালান
-            </button>
-          </div>
+          <button
+            type="button"
+            disabled={diagBusy}
+            onClick={() => void runSelfDiagnostic()}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50"
+          >
+            {diagBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+            পূর্ণ E2E টেস্ট চালান
+          </button>
         </div>
-        {diagResult && (
-          <div className="rounded-2xl border border-border bg-muted/40 p-3 text-xs font-mono">
-            {diagResult}
+
+        {diagSummary && (
+          <div className="rounded-2xl border border-primary/25 bg-primary/5 px-3.5 py-2 text-xs font-bold text-foreground">
+            {diagSummary}
+          </div>
+        )}
+
+        {diagSteps.length > 0 && (
+          <div className="space-y-1.5">
+            {diagSteps.map((st) => (
+              <div
+                key={st.id}
+                className={`rounded-xl border px-3 py-2 text-xs ${
+                  st.status === "passed"
+                    ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-900 dark:text-emerald-200"
+                    : "border-rose-500/30 bg-rose-500/5 text-rose-900 dark:text-rose-200"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 font-bold">
+                  <span>{st.label}</span>
+                  <span>{st.status === "passed" ? "PASSED" : "FAILED"}</span>
+                </div>
+                <p className="mt-0.5 font-mono text-[11px] opacity-85 break-all">{st.detail}</p>
+              </div>
+            ))}
           </div>
         )}
       </div>

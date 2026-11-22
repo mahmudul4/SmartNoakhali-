@@ -80,6 +80,8 @@ export interface StorageEnv {
   VITE_FIREBASE_PROJECT_ID?: string;
 }
 
+export type Env = StorageEnv;
+
 export type R2BucketType = "public" | "private";
 
 export type StorageCategory =
