@@ -46,6 +46,7 @@ import {
 } from "@/lib/store";
 import { useAuth } from "@/lib/auth";
 import { auth, ensureFirebaseAuthUser } from "@/lib/firebase";
+import { useResolvedR2Url } from "@/lib/r2Storage";
 import { toast } from "sonner";
 import type { AiChatMessage } from "@/components/FloatingLiveChat";
 import { FormattedChatMessage } from "@/lib/chat-formatter";
@@ -1131,15 +1132,32 @@ function ChatPage() {
 }
 
 export function AttachmentView({ url }: { url: string }) {
+  const { resolvedUrl, loading, error } = useResolvedR2Url(url);
   const [imgBroken, setImgBroken] = useState(false);
-  const isImg = /\.(png|jpe?g|gif|webp|avif)$/i.test(url) || url.startsWith("data:image");
-  const isAudio = /\.(webm|mp3|ogg|wav|m4a)$/i.test(url) || url.startsWith("data:audio");
-  if (isAudio) return <audio controls src={url} className="mt-1 h-9 w-full max-w-[240px]" />;
+  const displayUrl = resolvedUrl || url;
+  const isImg = /\.(png|jpe?g|gif|webp|avif)(\?|$)/i.test(url) || url.startsWith("data:image");
+  const isAudio = /\.(webm|mp3|ogg|wav|m4a)(\?|$)/i.test(url) || url.startsWith("data:audio");
+
+  if (loading && url.includes("/api/storage/file/private/")) {
+    return (
+      <span className="mt-1 inline-flex items-center gap-1.5 rounded-lg bg-black/10 px-2.5 py-1 text-[11px] font-semibold">
+        <Loader2 className="h-3 w-3 animate-spin" /> ফাইল লোড হচ্ছে...
+      </span>
+    );
+  }
+  if (error && url.includes("/api/storage/file/private/")) {
+    return (
+      <span className="mt-1 inline-flex items-center gap-1 rounded-lg bg-destructive/15 px-2.5 py-1 text-[11px] font-semibold text-destructive">
+        সংযুক্তি প্রদর্শনের অনুমতি নেই
+      </span>
+    );
+  }
+  if (isAudio) return <audio controls src={displayUrl} className="mt-1 h-9 w-full max-w-[240px]" />;
   if (isImg && !imgBroken)
     return (
-      <a href={url} target="_blank" rel="noreferrer" className="mt-1.5 block">
+      <a href={displayUrl} target="_blank" rel="noreferrer" className="mt-1.5 block">
         <img
-          src={url}
+          src={displayUrl}
           alt="সংযুক্ত ছবি"
           onError={() => setImgBroken(true)}
           className="max-h-48 rounded-lg object-cover ring-1 ring-border shadow-sm"
@@ -1148,9 +1166,10 @@ export function AttachmentView({ url }: { url: string }) {
     );
   return (
     <a
-      href={url}
+      href={displayUrl}
       target="_blank"
       rel="noreferrer"
+      download={url.includes("/api/storage/file/private/") ? true : undefined}
       className="mt-1 inline-flex items-center gap-1.5 rounded-lg bg-black/10 px-2.5 py-1 text-xs font-semibold"
     >
       <ImageIcon className="h-3.5 w-3.5" /> {isImg ? "ছবি দেখুন" : "ফাইল দেখুন"}

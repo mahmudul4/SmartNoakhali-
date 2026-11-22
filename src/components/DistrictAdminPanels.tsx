@@ -12,8 +12,10 @@ import {
   Check,
   X,
   Loader2,
+  Paperclip,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useResolvedR2Url } from "@/lib/r2Storage";
 import {
   useInstitutions,
   updateInstitution,
@@ -758,6 +760,7 @@ export function ComplaintsAdminPanel() {
                       <span className="font-bold text-foreground">এডমিন নোট:</span> {comp.admin_remarks}
                     </div>
                   )}
+                  {comp.attachment_url && <AdminComplaintAttachmentBadge url={comp.attachment_url} />}
                 </div>
 
                 {/* Actions */}
@@ -858,3 +861,30 @@ export function ComplaintsAdminPanel() {
     </div>
   );
 }
+
+function AdminComplaintAttachmentBadge({ url }: { url: string }) {
+  const { resolvedUrl, loading } = useResolvedR2Url(url);
+  if (!url) return null;
+
+  return (
+    <div className="mt-2.5 flex flex-wrap items-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-2.5 py-2 text-[11px]">
+      <Paperclip className="h-3.5 w-3.5 shrink-0 text-primary" />
+      <span className="font-semibold text-foreground">সংযুক্ত প্রমাণপত্র:</span>
+      {resolvedUrl && !loading ? (
+        <a
+          href={resolvedUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 rounded-lg bg-primary px-2.5 py-1 font-bold text-primary-foreground shadow-xs hover:opacity-90"
+        >
+          <ExternalLink className="h-3 w-3" /> দেখুন / ডাউনলোড
+        </a>
+      ) : (
+        <span className="inline-flex items-center gap-1 text-muted-foreground">
+          <Loader2 className="h-3 w-3 animate-spin" /> নিরাপদ প্রিভিউ লোড হচ্ছে...
+        </span>
+      )}
+    </div>
+  );
+}
+

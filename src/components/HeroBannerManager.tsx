@@ -73,9 +73,9 @@ import {
 } from "@/lib/heroPositioning";
 import { useRolePermissions } from "@/lib/permissions";
 import {
-  uploadImageToFirebaseStorage,
-  deleteStorageImageByUrl,
-} from "@/lib/imageUpload";
+  uploadImageToR2,
+  deleteR2FileByUrl,
+} from "@/lib/r2Storage";
 import { validateImageFile, formatFileSizeBn } from "@/lib/imageProcessor";
 import { recordSuperAdminAudit } from "@/lib/staff-audit";
 
@@ -426,8 +426,8 @@ export function HeroBannerManager() {
     setSaving(true);
     try {
       await deleteBanner(b.id);
-      if (b.desktopImageUrl) void deleteStorageImageByUrl(b.desktopImageUrl);
-      if (b.mobileImageUrl) void deleteStorageImageByUrl(b.mobileImageUrl);
+      if (b.desktopImageUrl) void deleteR2FileByUrl(b.desktopImageUrl);
+      if (b.mobileImageUrl) void deleteR2FileByUrl(b.mobileImageUrl);
       setConfirmDeleteBanner(null);
       const remaining = sortedBanners.filter((x) => x.id !== b.id);
       if (remaining[0]) setSelectedId(remaining[0].id);
@@ -492,10 +492,9 @@ export function HeroBannerManager() {
     setStage("validating");
     setProgress(5);
     try {
-      const result = await uploadImageToFirebaseStorage(file, {
+      const result = await uploadImageToR2(file, {
         category: "banner",
         entityId: draft.id || "hero_banner",
-        allowClientFallback: false,
         onStageChange: (stage) => setStage(stage),
         onProgress: (p) => setProgress(p),
       });
@@ -558,7 +557,7 @@ export function HeroBannerManager() {
       targetUrl &&
       targetUrl !== (target === "desktop" ? selectedSaved.desktopImageUrl : selectedSaved.mobileImageUrl)
     ) {
-      void deleteStorageImageByUrl(targetUrl);
+      void deleteR2FileByUrl(targetUrl);
     }
     if (target === "desktop") {
       setDesktopError(null);
@@ -636,13 +635,13 @@ export function HeroBannerManager() {
       await saveBanner(nextToSave);
 
       if (selectedSaved.desktopImageUrl && selectedSaved.desktopImageUrl !== draft.desktopImageUrl) {
-        void deleteStorageImageByUrl(selectedSaved.desktopImageUrl);
+        void deleteR2FileByUrl(selectedSaved.desktopImageUrl);
         if (!draft.desktopImageUrl || !draft.desktopImageUrl.startsWith("data:")) {
           void deleteHeroImageAsset(draft.id, "desktop");
         }
       }
       if (selectedSaved.mobileImageUrl && selectedSaved.mobileImageUrl !== draft.mobileImageUrl) {
-        void deleteStorageImageByUrl(selectedSaved.mobileImageUrl);
+        void deleteR2FileByUrl(selectedSaved.mobileImageUrl);
         if (!draft.mobileImageUrl || !draft.mobileImageUrl.startsWith("data:")) {
           void deleteHeroImageAsset(draft.id, "mobile");
         }

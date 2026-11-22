@@ -75,12 +75,30 @@ export default defineConfig(() => {
               },
             },
             {
-              urlPattern: /^https:\/\/firebasestorage\.googleapis\.com\/.*%2Fcategories%2F.*/i,
+              urlPattern: /^\/api\/storage\/(upload|migrate|health|file\/private\/).*/i,
+              handler: 'NetworkOnly',
+            },
+            {
+              urlPattern: /^\/api\/storage\/file\/public\/.*/i,
               handler: 'StaleWhileRevalidate',
               options: {
-                cacheName: 'category-custom-icons-cache',
+                cacheName: 'r2-public-assets-cache',
                 expiration: {
-                  maxEntries: 250,
+                  maxEntries: 400,
+                  maxAgeSeconds: 60 * 60 * 24 * 30,
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
+            },
+            {
+              urlPattern: /^https:\/\/cdn\.smartnoakhali\.com\/.*/i,
+              handler: 'StaleWhileRevalidate',
+              options: {
+                cacheName: 'r2-cdn-assets-cache',
+                expiration: {
+                  maxEntries: 400,
                   maxAgeSeconds: 60 * 60 * 24 * 30,
                 },
                 cacheableResponse: {

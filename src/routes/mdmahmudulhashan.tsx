@@ -63,9 +63,12 @@ import {
   Shield,
   Wallet,
   Layers,
+  Cloud,
 } from "lucide-react";
 import { toast } from "sonner";
-import { auth, SUPER_ADMIN_EMAIL, isSuperAdminEmail } from "@/lib/firebase";
+import { doc, serverTimestamp, writeBatch } from "firebase/firestore";
+import { auth, db, SUPER_ADMIN_EMAIL, isSuperAdminEmail } from "@/lib/firebase";
+import { useResolvedR2Url } from "@/lib/r2Storage";
 import { sendBrowserNotification } from "@/lib/notifications";
 import { CATEGORY_ICONS, CATEGORY_TINTS } from "@/data/categories";
 import { getBuiltInCategoryIconUrl } from "@/data/categoryIcons";
@@ -170,6 +173,7 @@ import { AdminNotificationsManager } from "@/components/AdminNotificationsManage
 import { TaskManager } from "@/components/TaskManager";
 import { MediaLibraryManager, MediaPickerModal } from "@/components/MediaLibraryManager";
 import { CategoryIconLibraryPanel, BuiltInIconPickerModal } from "@/components/CategoryIconLibraryPanel";
+import { R2StorageMigrationPanel } from "@/components/R2StorageMigrationPanel";
 import { DivisionAndCategoryTools } from "@/components/DivisionAndCategoryTools";
 import { HomepageContentManager } from "@/components/HomepageContentManager";
 import { DonorImportModal } from "@/components/DonorImportModal";
@@ -546,6 +550,7 @@ type Tab =
   | "jobs"
   | "complaints"
   | "settings"
+  | "r2_storage"
   | "security";
 
 function Dashboard({
@@ -838,6 +843,12 @@ function Dashboard({
           },
           { key: "apps", label: "অ্যাপ আপলোড", icon: Smartphone, show: isMainAdmin },
           {
+            key: "r2_storage",
+            label: "ক্লাউড স্টোরেজ (R2)",
+            icon: Cloud,
+            show: isMainAdmin,
+          },
+          {
             key: "settings",
             label: "সেটিংস",
             icon: Settings,
@@ -885,6 +896,7 @@ function Dashboard({
       "apps",
       "users",
       "access",
+      "r2_storage",
       "security",
     ];
     if (!isMainAdmin && mainAdminOnlyTabs.includes(tab)) {
@@ -1274,6 +1286,8 @@ function Dashboard({
         )}
 
         {tab === "settings" && (isMainAdmin || hasPermission("manage_settings")) && <SettingsAdminPanel />}
+
+        {tab === "r2_storage" && isMainAdmin && <R2StorageMigrationPanel />}
 
         {tab === "security" && isMainAdmin && <SecurityPanel />}
         </main>
@@ -2044,6 +2058,7 @@ function CategoriesEditor() {
   const {
     rawItems,
     updateCategory,
+    saveCategories,
     addCategory,
     deleteCategory,
     moveCategory,
@@ -2456,6 +2471,59 @@ function CategoriesEditor() {
                   summary: iconCleared
                     ? `ক্যাটাগরি আইকন মুছে ভেক্টরে নেওয়া হয়েছে: ${slug}`
                     : `ক্যাটাগরি আইকন আপডেট করা হয়েছে: ${slug}`,
+                });
+              }}
+              onBatchAssignIcons={async (updates) => {
+                if (!updates.length) return;
+                const updateMap = new Map(
+                  updates.map((u) => [u.slug.trim(), u])
+                );
+                // Chunked Firestore batch updates for individual category docs (<= 400 per batch)
+                for (let i = 0; i < updates.length; i += 400) {
+                  const chunk = updates.slice(i, i + 400);
+                  const batch = writeBatch(db);
+                  for (const item of chunk) {
+                    const cleanSlug = item.slug.trim();
+                    const ref = doc(db, "categories", cleanSlug);
+                    batch.set(
+                      ref,
+                      {
+                        slug: cleanSlug,
+                        id: cleanSlug,
+                        customIconUrl: item.iconCleared ? "" : item.customIconUrl.trim(),
+                        iconCleared: Boolean(item.iconCleared),
+                        updatedAt: serverTimestamp(),
+                        updatedBy: auth.currentUser?.email || "super-admin",
+                      },
+                      { merge: true }
+                    );
+                  }
+                  await batch.commit();
+                }
+
+                // Sync single wrapper config document cleanly
+                const nextList = rawItems.map((cat) => {
+                  const patch = updateMap.get(cat.slug);
+                  if (!patch) return cat;
+                  if (patch.iconCleared) {
+                    const copy = { ...cat, iconCleared: true };
+                    delete copy.customIconUrl;
+                    return copy;
+                  }
+                  return {
+                    ...cat,
+                    customIconUrl: patch.customIconUrl.trim(),
+                    iconCleared: false,
+                  };
+                });
+                await saveCategories(nextList);
+
+                void recordSuperAdminAudit({
+                  action: "update",
+                  module: "categories",
+                  target_id: "r2_batch_icons",
+                  target_label: `${updates.length}টি ক্যাটাগরি আইকন`,
+                  summary: `Cloudflare R2 থেকে ${updates.length}টি ক্যাটাগরি আইকন একসাথে আপডেট করা হয়েছে`,
                 });
               }}
             />
@@ -4737,6 +4805,7 @@ function DonationsAdminPanel({
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [previewSlipUrl, setPreviewSlipUrl] = useState<string | null>(null);
+  const { resolvedUrl: resolvedPreviewSlipUrl } = useResolvedR2Url(previewSlipUrl);
   const [rejectItem, setRejectItem] = useState<DonationRow | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
 
@@ -5024,7 +5093,7 @@ function DonationsAdminPanel({
             </div>
             <div className="max-h-[70vh] overflow-auto rounded-2xl bg-muted/30 p-2">
               <img
-                src={previewSlipUrl}
+                src={resolvedPreviewSlipUrl || previewSlipUrl}
                 alt="Deposit Slip"
                 className="mx-auto max-h-[65vh] w-auto rounded-xl object-contain shadow-sm"
               />

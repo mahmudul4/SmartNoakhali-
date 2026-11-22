@@ -6,6 +6,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "url";
 import nodemailer from "nodemailer";
 import { GoogleGenAI } from "@google/genai";
+import { registerLocalR2Routes } from "./server-r2-local";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -597,6 +598,9 @@ async function startServer() {
     }
     next();
   });
+
+  // Mount Cloudflare R2 local simulator for /api/storage/* before JSON body parsing
+  registerLocalR2Routes(app, __dirname);
 
   // Support large file uploads for direct Android (.apk) and iOS (.ipa) app packages
   app.use(express.json({ limit: "120mb" }));

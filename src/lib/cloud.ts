@@ -29,7 +29,6 @@ import {
 import { useAuth } from "@/lib/auth";
 import { useRolePermissions } from "@/lib/permissions";
 import { recordStaffActivity } from "@/lib/staff-audit";
-import { uploadImageToFirebaseStorage, type ImageUploadCategory } from "@/lib/imageUpload";
 
 export type BloodGroupType = "A+" | "A-" | "B+" | "B-" | "AB+" | "AB-" | "O+" | "O-";
 export type ModerationStatus = "pending" | "approved" | "rejected";
@@ -4524,69 +4523,64 @@ export async function handoffAiToLiveChat(params: {
   return { ok: true };
 }
 
-// ---------- Universal Client Image & Media Upload Service ----------
+// ---------- Universal Client Image & Media Upload Service (Cloudflare R2) ----------
 export async function uploadPublicImage(file: File, folder = "uploads"): Promise<string | null> {
-  // If image, route through universal image compression & Firebase Storage
-  if (file.type.startsWith("image/")) {
-    try {
-      let category: ImageUploadCategory = "general";
-      let entityId: string | undefined;
+  const cleanFolder = (folder || "uploads").replace(/^\/+|\/+$/g, "");
+  const parts = cleanFolder.split("/");
 
-      const cleanFolder = (folder || "uploads").replace(/^\/+|\/+$/g, "");
-      const parts = cleanFolder.split("/");
+  let category:
+    | "staff_avatar"
+    | "profile"
+    | "submission"
+    | "donor"
+    | "donor_event"
+    | "logo"
+    | "banner"
+    | "chat_private"
+    | "category_icon"
+    | "general" = "general";
+  let entityId: string | undefined;
 
-      if (parts[0] === "staff_avatars") {
-        category = "staff_avatar";
-        entityId = parts[1];
-      } else if (parts[0] === "users") {
-        category = "profile";
-        entityId = parts[1];
-      } else if (parts[0] === "submissions") {
-        category = "submission";
-        entityId = parts[1];
-      } else if (parts[0] === "donors") {
-        category = "donor";
-        entityId = parts[1];
-      } else if (parts[0] === "donor-events") {
-        category = "donor_event";
-        entityId = parts[1];
-      } else if (parts[0] === "settings") {
-        category = "logo";
-        entityId = parts[1];
-      } else if (parts[0] === "banners") {
-        category = "banner";
-        entityId = parts[1];
-      } else if (parts[0] === "chat") {
-        category = "chat";
-        entityId = parts[1];
-      } else if (parts[0] === "categories") {
-        category = "category";
-        entityId = parts[1];
-      }
-
-      const res = await uploadImageToFirebaseStorage(file, {
-        category,
-        entityId,
-      });
-
-      if (res && res.downloadUrl) {
-        return res.downloadUrl;
-      }
-    } catch (uploadErr) {
-      console.warn("[uploadPublicImage] Direct Firebase Storage error, fallback to client reader:", uploadErr);
-    }
+  if (parts[0] === "staff_avatars") {
+    category = "staff_avatar";
+    entityId = parts[1];
+  } else if (parts[0] === "users") {
+    category = "profile";
+    entityId = parts[1];
+  } else if (parts[0] === "submissions") {
+    category = "submission";
+    entityId = parts[1];
+  } else if (parts[0] === "donors") {
+    category = "donor";
+    entityId = parts[1];
+  } else if (parts[0] === "donor-events") {
+    category = "donor_event";
+    entityId = parts[1];
+  } else if (parts[0] === "settings") {
+    category = "logo";
+    entityId = parts[1];
+  } else if (parts[0] === "banners") {
+    category = "banner";
+    entityId = parts[1];
+  } else if (parts[0] === "chat") {
+    category = "chat_private";
+    entityId = parts[1];
+  } else if (parts[0] === "categories") {
+    category = "category_icon";
+    entityId = parts[1];
   }
 
-  // Audio or small file fallback
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const res = String(reader.result || "");
-      resolve(res.length <= 350000 ? res : null);
-    };
-    reader.onerror = () => resolve(null);
-    reader.readAsDataURL(file);
-  });
+  try {
+    const { uploadFileToR2 } = await import("@/lib/r2Storage");
+    const res = await uploadFileToR2(file, {
+      category,
+      entityId,
+    });
+    return res?.fileUrl || null;
+  } catch (err) {
+    console.warn("[uploadPublicImage R2 Error]", err);
+    throw err;
+  }
 }
 
 export interface UserFullActivitySummary {

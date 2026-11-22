@@ -411,7 +411,13 @@ export function installSafeStaticFallback() {
       urlStr.startsWith("/api/") ||
       urlStr.includes(`${window.location.origin}/api/`);
 
-    if (!isApiCall || urlStr.includes("/api/apps/download") || urlStr.includes("/api/netlify-deploy")) {
+    if (
+      !isApiCall ||
+      urlStr.includes("/api/storage") ||
+      urlStr.includes("/api/health") ||
+      urlStr.includes("/api/apps/download") ||
+      urlStr.includes("/api/netlify-deploy")
+    ) {
       return nativeFetch(input, init);
     }
 

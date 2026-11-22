@@ -13,10 +13,11 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import {
-  uploadImageToFirebaseStorage,
-  deleteStorageImageByUrl,
-  type ImageUploadCategory,
-} from "@/lib/imageUpload";
+  uploadImageToR2,
+  deleteR2FileByUrl,
+  useResolvedR2Url,
+} from "@/lib/r2Storage";
+import type { ImageUploadCategory } from "@/lib/imageUpload";
 import {
   formatFileSizeBn,
   getFileSignature,
@@ -59,7 +60,7 @@ function getStageBengaliText(stage: UploadLifecycle, progress: number): string {
     case "compressing":
       return "সাইজ ও রেজোলিউশন অপ্টিমাইজ হচ্ছে...";
     case "uploading":
-      return `ক্লাউড স্টোরেজে আপলোড হচ্ছে (${progress}%)...`;
+      return `Cloudflare R2 স্টোরেজে আপলোড হচ্ছে (${progress}%)...`;
     case "saving":
       return "ডাউনলোড লিংক প্রস্তুত করা হচ্ছে...";
     case "success":
@@ -113,8 +114,10 @@ export function UniversalImageUploader({
 
   const instantPreviewRef = useRef<string | null>(null);
 
-  // Effective displayed image: instant local blob preview while processing, or saved remote value
-  const displayImage = instantPreview || (value && value.trim() ? value : null);
+  const { resolvedUrl: resolvedRemoteValue } = useResolvedR2Url(value);
+  // Effective displayed image: instant local blob preview while processing, or saved remote value (resolved if private R2)
+  const displayImage =
+    instantPreview || (resolvedRemoteValue && resolvedRemoteValue.trim() ? resolvedRemoteValue : null);
 
   useEffect(() => {
     setImgLoadFailed(false);
@@ -201,8 +204,8 @@ export function UniversalImageUploader({
 
     try {
       const oldUrl = value;
-      const result = await uploadImageToFirebaseStorage(file, {
-        category,
+      const result = await uploadImageToR2(file, {
+        category: category === "category" ? "category_icon" : category,
         entityId,
         compression,
         abortSignal: controller.signal,
@@ -224,7 +227,7 @@ export function UniversalImageUploader({
       setStats(result.processed);
       updateLifecycle("success");
       onChange(result.downloadUrl);
-      toast.success("ছবি সফলভাবে আপলোড ও অপ্টিমাইজ হয়েছে!");
+      toast.success("ছবি সফলভাবে Cloudflare R2-তে আপলোড ও অপ্টিমাইজ হয়েছে!");
 
       if (instantPreviewRef.current) {
         URL.revokeObjectURL(instantPreviewRef.current);
@@ -232,9 +235,9 @@ export function UniversalImageUploader({
       }
       setInstantPreview(null);
 
-      // If requested, clean up old storage image in background safely
+      // If requested, clean up old R2 storage object in background safely
       if (autoDeleteOld && oldUrl && oldUrl !== result.downloadUrl) {
-        void deleteStorageImageByUrl(oldUrl);
+        void deleteR2FileByUrl(oldUrl);
       }
     } catch (err: any) {
       if (!isMountedRef.current) return;
@@ -277,7 +280,7 @@ export function UniversalImageUploader({
     updateLifecycle("idle");
 
     if (autoDeleteOld && oldUrl) {
-      void deleteStorageImageByUrl(oldUrl);
+      void deleteR2FileByUrl(oldUrl);
     }
     toast.info("ছবি মুছে ফেলা হয়েছে।");
   };

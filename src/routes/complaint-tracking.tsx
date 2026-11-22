@@ -27,6 +27,8 @@ import {
   type ComplaintStatus,
 } from "@/lib/district-platform";
 import { useAuth } from "@/lib/auth";
+import { UniversalImageUploader } from "@/components/UniversalImageUploader";
+import { useResolvedR2Url } from "@/lib/r2Storage";
 
 export const Route = createFileRoute("/complaint-tracking")({
   head: () => ({
@@ -72,6 +74,7 @@ function ComplaintTrackingPage() {
     upazila: "নোয়াখালী সদর (মাইজদী)",
     location: "",
     contact_phone: "",
+    attachment_url: "",
   });
   const [submitting, setSubmitting] = useState(false);
   const [generatedTracking, setGeneratedTracking] = useState<string | null>(null);
@@ -113,6 +116,7 @@ function ComplaintTrackingPage() {
         upazila: newComplaint.upazila,
         location: newComplaint.location.trim(),
         contact_phone: newComplaint.contact_phone.trim(),
+        attachment_url: newComplaint.attachment_url.trim() || undefined,
         user_id: user?.uid,
         user_name: user?.displayName || user?.email || "নাগরিক",
       });
@@ -126,6 +130,7 @@ function ComplaintTrackingPage() {
         upazila: "নোয়াখালী সদর (মাইজদী)",
         location: "",
         contact_phone: "",
+        attachment_url: "",
       });
     } catch {
       toast.error("অভিযোগ জমা দিতে সমস্যা হয়েছে। আবার চেষ্টা করুন।");
@@ -311,6 +316,10 @@ function ComplaintTrackingPage() {
                   </p>
                 </div>
               )}
+
+              {foundComplaint.attachment_url && (
+                <ComplaintPrivateAttachmentPreview url={foundComplaint.attachment_url} />
+              )}
             </div>
           )}
 
@@ -460,6 +469,25 @@ function ComplaintTrackingPage() {
                 />
               </div>
 
+              <div>
+                <label className="text-xs font-bold text-foreground">
+                  প্রমাণক ছবি / ডকুমেন্ট সংযুক্তি (ঐচ্ছিক • প্রাইভেট ও নিরাপদ R2 স্টোরেজ)
+                </label>
+                <div className="mt-1">
+                  <UniversalImageUploader
+                    variant="inline"
+                    category="complaint_attachment"
+                    entityId={user?.uid || "citizen"}
+                    value={newComplaint.attachment_url}
+                    onChange={(url) =>
+                      setNewComplaint((prev) => ({ ...prev, attachment_url: url || "" }))
+                    }
+                    label="প্রমাণক ছবি আপলোড করুন"
+                    hint="শুধুমাত্র আপনি এবং অনুমোদিত কর্তৃপক্ষ দেখতে পারবেন"
+                  />
+                </div>
+              </div>
+
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="submit"
@@ -474,6 +502,30 @@ function ComplaintTrackingPage() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function ComplaintPrivateAttachmentPreview({ url }: { url: string }) {
+  const { resolvedUrl, loading, error } = useResolvedR2Url(url);
+  return (
+    <div className="mt-4 rounded-2xl border border-border bg-muted/30 p-3">
+      <p className="text-[11px] font-bold text-muted-foreground">সংযুক্ত ব্যক্তিগত প্রমাণক ফাইল</p>
+      {loading ? (
+        <p className="mt-1 text-xs text-muted-foreground">লোড হচ্ছে...</p>
+      ) : error ? (
+        <p className="mt-1 text-xs text-amber-700">
+          এই ফাইলটি দেখার জন্য অভিযোগকারীর অ্যাকাউন্ট বা অনুমোদিত এডমিন সেশন প্রয়োজন।
+        </p>
+      ) : resolvedUrl ? (
+        <a href={resolvedUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block">
+          <img
+            src={resolvedUrl}
+            alt="অভিযোগের প্রমাণক"
+            className="max-h-44 rounded-xl border border-border object-contain"
+          />
+        </a>
+      ) : null}
     </div>
   );
 }

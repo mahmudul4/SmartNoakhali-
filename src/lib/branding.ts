@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { db, storage, isSuperAdminEmail, ensureFirebaseAuthUser } from "@/lib/firebase";
+import { db, isSuperAdminEmail, ensureFirebaseAuthUser } from "@/lib/firebase";
+import { uploadFileToR2 } from "@/lib/r2Storage";
 import { upsertSettingDoc, SITE_CONFIG_ID, LOCAL_LOGO_KEY } from "@/lib/store";
 import { useAuth } from "@/lib/auth";
 
@@ -262,77 +262,29 @@ export async function uploadBrandingFile(
     img.src = objUrl;
   });
 
-  // Ensure Firebase Auth session exists so Storage write rules pass (request.auth != null)
+  // Ensure Firebase Auth session exists for R2 authorization
   await ensureFirebaseAuthUser().catch(() => {});
 
-  // Try uploading directly to Firebase Storage first (Standard & recommended path)
-  try {
-    const ext = file.name.split(".").pop()?.toLowerCase() || "png";
-    const filename = `${assetType}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
-    const storageRef = ref(storage, `branding/${filename}`);
-    await uploadBytes(storageRef, file, {
-      contentType: file.type || "image/png",
-      cacheControl: "public, max-age=31536000",
-    });
-    const downloadUrl = await getDownloadURL(storageRef);
-    return {
-      url: downloadUrl,
-      width: dims.width,
-      height: dims.height,
-      size: file.size,
-    };
-  } catch (storageErr) {
-    console.warn("Firebase Storage direct upload fallback to compact compressed WebP/PNG:", storageErr);
+  const ext = file.name.split(".").pop()?.toLowerCase() || "png";
+  const filename = `${assetType}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
+  const isIco =
+    file.type.toLowerCase().includes("icon") || file.name.toLowerCase().endsWith(".ico");
 
-    // Ultra-safe client-side fallback: compress image on canvas to keep strictly under 80KB (never exceed Firestore 1MB)
-    const compressedDataUrl = await new Promise<string>((resolve, reject) => {
-      const img = new Image();
-      const objUrl = URL.createObjectURL(file);
-      img.onload = () => {
-        URL.revokeObjectURL(objUrl);
-        const maxDim = assetType === "favicon" ? 64 : assetType === "pwa192" ? 192 : 512;
-        let w = img.width || 512;
-        let h = img.height || 512;
-        if (w > maxDim || h > maxDim) {
-          if (w > h) {
-            h = Math.round((h * maxDim) / w);
-            w = maxDim;
-          } else {
-            w = Math.round((w * maxDim) / h);
-            h = maxDim;
-          }
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, w);
-        canvas.height = Math.max(1, h);
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          return reject(new Error("ক্যানভাস কনটেক্সট তৈরি ব্যর্থ হয়েছে"));
-        }
-        ctx.clearRect(0, 0, w, h);
-        ctx.drawImage(img, 0, 0, w, h);
-        // Preserve transparency: export WebP or PNG
-        try {
-          const webp = canvas.toDataURL("image/webp", 0.85);
-          if (webp.startsWith("data:image/webp") && webp.length < 200000) {
-            return resolve(webp);
-          }
-        } catch {}
-        const png = canvas.toDataURL("image/png");
-        resolve(png.length > 250000 ? png.slice(0, 250000) : png);
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(objUrl);
-        reject(new Error("ছবিটি লোড করা যায়নি"));
-      };
-      img.src = objUrl;
-    });
+  const r2Meta = await uploadFileToR2(file, {
+    category: "branding",
+    entityId: assetType,
+    customKey: `branding/${filename}`,
+    skipCompression: isIco || file.type === "image/svg+xml",
+    compression:
+      assetType === "favicon"
+        ? { preset: "custom", maxWidth: 128, maxHeight: 128, targetMaxSizeBytes: 100 * 1024, preserveTransparency: true }
+        : { preset: "logo" },
+  });
 
-    return {
-      url: compressedDataUrl,
-      width: dims.width,
-      height: dims.height,
-      size: compressedDataUrl.length,
-    };
-  }
+  return {
+    url: r2Meta.fileUrl,
+    width: dims.width,
+    height: dims.height,
+    size: r2Meta.size || file.size,
+  };
 }

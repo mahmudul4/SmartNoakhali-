@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
-import { auth, db, storage, sanitizeString } from "@/lib/firebase";
+import { auth, db, sanitizeString } from "@/lib/firebase";
+import {
+  uploadFileToR2,
+  deleteR2FileByUrl,
+  type R2BucketType,
+} from "@/lib/r2Storage";
 import {
   MEDIA_LIBRARY_CONFIG_ID,
   LOCAL_MEDIA_LIBRARY_KEY,
@@ -22,6 +26,10 @@ export interface MediaAssetRecord {
   type: MediaAssetType;
   url: string;
   storagePath?: string;
+  storageProvider?: "cloudflare-r2" | "external" | "legacy";
+  bucketType?: R2BucketType;
+  objectKey?: string;
+  checksumSha256?: string;
   mimeType: string;
   sizeBytes: number;
   width?: number;
@@ -234,24 +242,13 @@ export function useMediaLibrary() {
             : mimeType.includes("jpeg") || mimeType.includes("jpg")
               ? "jpg"
               : "webp";
-        const storagePath = `media_library/${assetId}.${ext}`;
-
-        let finalUrl = "";
-        try {
-          const storageRef = ref(storage, storagePath);
-          await uploadBytes(storageRef, uploadFile, { contentType: mimeType });
-          finalUrl = await getDownloadURL(storageRef);
-        } catch (storageErr) {
-          if (uploadFile.size <= 90 * 1024) {
-            finalUrl = await readBlobAsDataUrl(uploadFile);
-          } else {
-            throw new Error(
-              storageErr instanceof Error
-                ? `Firebase Storage আপলোড ব্যর্থ হয়েছে: ${storageErr.message}`
-                : "Firebase Storage আপলোড ব্যর্থ হয়েছে।"
-            );
-          }
-        }
+        const customObjectKey = `media_library/${assetId}.${ext}`;
+        const r2Meta = await uploadFileToR2(uploadFile, {
+          category: "media_library",
+          entityId: assetId,
+          customKey: customObjectKey,
+          skipCompression: true,
+        });
 
         const cleanName = sanitizeString(
           options?.name || file.name.replace(/\.[^/.]+$/, ""),
@@ -264,10 +261,14 @@ export function useMediaLibrary() {
           id: assetId,
           name: cleanName,
           type: assetType,
-          url: finalUrl,
-          storagePath: finalUrl.startsWith("data:") ? undefined : storagePath,
-          mimeType,
-          sizeBytes: uploadFile.size,
+          url: r2Meta.fileUrl,
+          storagePath: r2Meta.objectKey,
+          storageProvider: "cloudflare-r2",
+          bucketType: r2Meta.bucketType,
+          objectKey: r2Meta.objectKey,
+          checksumSha256: r2Meta.checksumSha256,
+          mimeType: r2Meta.contentType || mimeType,
+          sizeBytes: r2Meta.size || uploadFile.size,
           width,
           height,
           isSystemProtected: existing?.isSystemProtected || false,
@@ -289,9 +290,9 @@ export function useMediaLibrary() {
           target_id: assetId,
           target_label: cleanName,
           summary: options?.replaceId
-            ? `মিডিয়া অ্যাসেট রিপ্লেস করা হয়েছে (${assetType})`
-            : `নতুন মিডিয়া অ্যাসেট আপলোড করা হয়েছে (${assetType})`,
-          metadata: { mimeType, sizeBytes: uploadFile.size, assetType },
+            ? `মিডিয়া অ্যাসেট Cloudflare R2-তে রিপ্লেস করা হয়েছে (${assetType})`
+            : `নতুন মিডিয়া অ্যাসেট Cloudflare R2-তে আপলোড করা হয়েছে (${assetType})`,
+          metadata: { mimeType, sizeBytes: record.sizeBytes, assetType, objectKey: r2Meta.objectKey },
         });
 
         return record;
@@ -385,8 +386,11 @@ export function useMediaLibrary() {
       if (target.isSystemProtected) {
         throw new Error("সিস্টেম-সুরক্ষিত অ্যাসেট স্থায়ীভাবে ডিলিট করা যাবে না।");
       }
-      if (target.storagePath) {
-        await deleteObject(ref(storage, target.storagePath)).catch(() => {});
+      if (target.url || target.objectKey || target.storagePath) {
+        await deleteR2FileByUrl(
+          target.url || target.objectKey || target.storagePath,
+          target.bucketType || "public"
+        ).catch(() => {});
       }
       const nextList = allAssets.filter((a) => a.id !== id);
       await persistAssets(nextList);

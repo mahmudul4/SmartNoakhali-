@@ -9,6 +9,9 @@ import {
   Sparkles,
   Layers,
   Upload,
+  CloudUpload,
+  Loader2,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -18,6 +21,7 @@ import {
 import { CATEGORY_ICONS } from "@/data/categories";
 import type { CategoryConfigItem } from "@/lib/store";
 import { UniversalImageUploader } from "@/components/UniversalImageUploader";
+import { isR2Url, migrateSourceUrlToR2 } from "@/lib/r2Storage";
 
 type IconLibraryTab = "all" | "active_png" | "custom_upload" | "vector_only";
 
@@ -28,11 +32,19 @@ export interface CategoryIconLibraryPanelProps {
     customIconUrl: string,
     iconCleared?: boolean
   ) => Promise<void>;
+  onBatchAssignIcons?: (
+    updates: Array<{
+      slug: string;
+      customIconUrl: string;
+      iconCleared?: boolean;
+    }>
+  ) => Promise<void>;
 }
 
 export function CategoryIconLibraryPanel({
   rawItems,
   onAssignIcon,
+  onBatchAssignIcons,
 }: CategoryIconLibraryPanelProps) {
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState<IconLibraryTab>("all");
@@ -40,6 +52,13 @@ export function CategoryIconLibraryPanel({
     rawItems[0]?.slug || ""
   );
   const [busySlug, setBusySlug] = useState<string | null>(null);
+  const [r2SyncBusy, setR2SyncBusy] = useState(false);
+  const [r2SyncProgress, setR2SyncProgress] = useState<{
+    total: number;
+    done: number;
+    failed: number;
+    currentFile: string;
+  } | null>(null);
 
   const categoryBySlug = useMemo(() => {
     const map = new Map<string, CategoryConfigItem>();
@@ -60,13 +79,17 @@ export function CategoryIconLibraryPanel({
     let usingBuiltInPng = 0;
     let usingCustomIcon = 0;
     let usingVector = 0;
+    let hostedOnR2 = 0;
 
     for (const c of rawItems) {
       const builtIn = getBuiltInCategoryIconUrl(c.slug);
       const url = c.customIconUrl?.trim() || "";
+      if (url && isR2Url(url)) {
+        hostedOnR2++;
+      }
       if (c.iconCleared || !url) {
         usingVector++;
-      } else if (builtIn && url === builtIn) {
+      } else if ((builtIn && url === builtIn) || url.includes(`/categories/${c.slug}.png`)) {
         usingBuiltInPng++;
       } else {
         usingCustomIcon++;
@@ -78,6 +101,7 @@ export function CategoryIconLibraryPanel({
       usingBuiltInPng,
       usingCustomIcon,
       usingVector,
+      hostedOnR2,
     };
   }, [rawItems]);
 
@@ -144,6 +168,96 @@ export function CategoryIconLibraryPanel({
     }
   }
 
+  async function handleSyncAllIconsToR2(onlyMissing = false) {
+    if (r2SyncBusy) return;
+    const queue = BUILTIN_CATEGORY_ICON_ITEMS.filter((item) => {
+      if (!onlyMissing) return true;
+      const cat = categoryBySlug.get(item.slug);
+      return !cat || !isR2Url(cat.customIconUrl);
+    });
+
+    if (queue.length === 0) {
+      toast.info("সকল ম্যাচিং ক্যাটাগরি আইকন ইতিমধ্যে Cloudflare R2-তে সংরক্ষিত আছে।");
+      return;
+    }
+
+    setR2SyncBusy(true);
+    setR2SyncProgress({
+      total: queue.length,
+      done: 0,
+      failed: 0,
+      currentFile: queue[0]?.filename || "",
+    });
+
+    const updates: Array<{ slug: string; customIconUrl: string; iconCleared?: boolean }> = [];
+    let done = 0;
+    let failed = 0;
+
+    try {
+      const concurrency = 4;
+      let cursor = 0;
+
+      const worker = async () => {
+        while (cursor < queue.length) {
+          const idx = cursor++;
+          const item = queue[idx];
+          try {
+            const res = await migrateSourceUrlToR2({
+              sourceUrl: item.url,
+              targetKey: `categories/${item.filename}`,
+              bucketType: "public",
+              category: "category_icon",
+              overwrite: !onlyMissing,
+            });
+            if (categoryBySlug.has(item.slug)) {
+              updates.push({
+                slug: item.slug,
+                customIconUrl: res.fileUrl,
+                iconCleared: false,
+              });
+            }
+          } catch {
+            failed++;
+          } finally {
+            done++;
+            setR2SyncProgress({
+              total: queue.length,
+              done,
+              failed,
+              currentFile: item.filename,
+            });
+          }
+        }
+      };
+
+      await Promise.all(Array.from({ length: concurrency }, () => worker()));
+
+      if (updates.length > 0) {
+        if (onBatchAssignIcons) {
+          await onBatchAssignIcons(updates);
+        } else {
+          for (const u of updates) {
+            await onAssignIcon(u.slug, u.customIconUrl, false);
+          }
+        }
+      }
+
+      if (failed === 0) {
+        toast.success(
+          `সফলভাবে ${done}টি PNG আইকন Cloudflare R2-তে আপলোড ও ${updates.length}টি ক্যাটাগরিতে সংযুক্ত হয়েছে!`
+        );
+      } else {
+        toast.warning(
+          `${done - failed}টি আইকন R2-তে আপলোড হয়েছে, ${failed}টি ব্যর্থ হয়েছে। পুনরায় চেষ্টা করুন।`
+        );
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "R2 আইকন সিঙ্ক ব্যর্থ হয়েছে");
+    } finally {
+      setR2SyncBusy(false);
+    }
+  }
+
   return (
     <div className="space-y-4 rounded-3xl border border-[#E6E1D6] bg-card p-4 sm:p-5 shadow-card">
       {/* Header & Metrics */}
@@ -154,13 +268,16 @@ export function CategoryIconLibraryPanel({
             ক্যাটাগরি আইকন ম্যানেজমেন্ট ও লাইব্রেরি ({stats.totalBuiltIn}টি বিল্ট-ইন PNG)
           </h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            ৫১২×৫১২ ফ্ল্যাট PNG, কাস্টম PNG/SVG/JPG/WebP আপলোড, ১-ক্লিক রিসেট ও তাৎক্ষণিক অ্যাসাইনমেন্ট।
+            ৫১২×৫১২ ফ্ল্যাট PNG, Cloudflare R2 ক্লাউড স্টোরেজ সিঙ্ক, কাস্টম আপলোড ও ১-ক্লিক অ্যাসাইনমেন্ট।
           </p>
         </div>
 
         <div className="flex flex-wrap gap-1.5 text-[11px] font-bold">
+          <span className="rounded-xl bg-teal-500/12 px-2.5 py-1 text-teal-800 dark:text-teal-300">
+            R2 হোস্টেড: {stats.hostedOnR2}টি
+          </span>
           <span className="rounded-xl bg-emerald-500/12 px-2.5 py-1 text-emerald-800 dark:text-emerald-300">
-            বিল্ট-ইন PNG সক্রিয়: {stats.usingBuiltInPng}টি
+            বিল্ট-ইন PNG: {stats.usingBuiltInPng}টি
           </span>
           <span className="rounded-xl bg-blue-500/12 px-2.5 py-1 text-blue-800 dark:text-blue-300">
             কাস্টম আপলোড: {stats.usingCustomIcon}টি
@@ -169,6 +286,65 @@ export function CategoryIconLibraryPanel({
             ভেক্টর ডিফল্ট: {stats.usingVector}টি
           </span>
         </div>
+      </div>
+
+      {/* Cloudflare R2 Bulk Sync Card */}
+      <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/5 p-3.5">
+        <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="flex items-center gap-1.5 text-xs font-bold text-emerald-900 dark:text-emerald-200">
+              <CloudUpload className="h-4 w-4 text-emerald-600" />
+              Cloudflare R2-তে ১৮২টি ক্যাটাগরি আইকন সিঙ্ক ও আপলোড
+            </p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              সব ৫১২×৫১২ PNG আইকন <code>smart-noakhali-public/categories/&lt;slug&gt;.png</code> পাথে আপলোড করে ডাটাবেসে সংরক্ষণ করুন।
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={r2SyncBusy}
+              onClick={() => void handleSyncAllIconsToR2(true)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-600/30 bg-background px-3 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-500/10 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${r2SyncBusy ? "animate-spin" : ""}`} />
+              বাকিগুলো R2-তে সিঙ্ক করুন
+            </button>
+            <button
+              type="button"
+              disabled={r2SyncBusy}
+              onClick={() => void handleSyncAllIconsToR2(false)}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-[#0F4D3A] px-3.5 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-[#0B3B2C] disabled:opacity-50"
+            >
+              {r2SyncBusy ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <CloudUpload className="h-3.5 w-3.5" />
+              )}
+              সকল ১৮২টি আইকন R2-তে আপলোড করুন
+            </button>
+          </div>
+        </div>
+        {r2SyncProgress && (
+          <div className="mt-2.5 space-y-1">
+            <div className="flex items-center justify-between text-[11px] font-semibold">
+              <span>
+                প্রগতি: {r2SyncProgress.done}/{r2SyncProgress.total} ({r2SyncProgress.currentFile})
+              </span>
+              {r2SyncProgress.failed > 0 && (
+                <span className="text-rose-600">ব্যর্থ: {r2SyncProgress.failed}টি</span>
+              )}
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-emerald-950/10">
+              <div
+                className="h-full bg-emerald-600 transition-all duration-200"
+                style={{
+                  width: `${Math.round((r2SyncProgress.done / Math.max(1, r2SyncProgress.total)) * 100)}%`,
+                }}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Quick Target Category Assignment & Custom Upload Bar */}

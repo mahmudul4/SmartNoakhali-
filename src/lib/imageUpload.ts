@@ -1,17 +1,17 @@
+/**
+ * Smart Noakhali — Compatibility Bridge & Image Upload Helper (Cloudflare R2 Backed)
+ *
+ * All image uploads and deletions now route through Cloudflare R2 via `@/lib/r2Storage`.
+ * Firebase Storage SDK is no longer imported or invoked.
+ */
+
 import {
-  ref,
-  uploadBytesResumable,
-  getDownloadURL,
-  deleteObject,
-  type UploadMetadata,
-} from "firebase/storage";
-import { storage, auth, ensureFirebaseAuthUser } from "@/lib/firebase";
-import {
-  processAndCompressImage,
-  getFileSignature,
-  type CompressionOptions,
-  type ProcessedImageResult,
-} from "./imageProcessor";
+  uploadImageToR2,
+  deleteR2FileByUrl,
+  checkR2StorageHealth,
+  type R2UploadMetadata,
+} from "@/lib/r2Storage";
+import type { CompressionOptions, ProcessedImageResult } from "./imageProcessor";
 
 export type ImageUploadCategory =
   | "profile"
@@ -23,11 +23,16 @@ export type ImageUploadCategory =
   | "banner"
   | "logo"
   | "chat"
+  | "complaint_attachment"
+  | "expense_receipt"
+  | "donation_slip"
+  | "service"
+  | "notice"
   | "general";
 
 export interface ImageUploadOptions {
   category: ImageUploadCategory;
-  entityId?: string; // e.g. uid, categorySlug, submissionId, donorId, threadId
+  entityId?: string;
   compression?: CompressionOptions;
   onProgress?: (progressPercent: number) => void;
   onStageChange?: (stage: "validating" | "compressing" | "uploading" | "saving") => void;
@@ -35,63 +40,30 @@ export interface ImageUploadOptions {
   abortSignal?: AbortSignal;
   customPath?: string;
   allowClientFallback?: boolean;
+  deterministicSlug?: string;
 }
 
 export interface ImageUploadResult {
   downloadUrl: string;
   storagePath: string;
   processed: ProcessedImageResult;
+  r2?: R2UploadMetadata;
 }
 
-let cachedBucketStatus: "unknown" | "available" | "unavailable" = "unknown";
-let bucketProbeInFlight: Promise<boolean> | null = null;
-const inFlightFileUploads = new Map<string, Promise<ImageUploadResult>>();
-
-/**
- * Probes once per session whether the configured Firebase Storage bucket actually exists.
- * Prevents 10-second SDK retry stalls when the bucket has not been provisioned (HTTP 404).
- */
 export async function probeStorageBucketAvailable(): Promise<boolean> {
-  if (cachedBucketStatus === "available") return true;
-  if (cachedBucketStatus === "unavailable") return false;
-  if (bucketProbeInFlight) return bucketProbeInFlight;
-
-  const bucket = (storage.app.options.storageBucket || "").trim();
-  if (!bucket) {
-    cachedBucketStatus = "unavailable";
+  try {
+    const health = await checkR2StorageHealth();
+    return Boolean(health.ok || health.publicReady);
+  } catch {
     return false;
   }
-
-  bucketProbeInFlight = (async () => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 1800);
-    try {
-      const res = await fetch(
-        `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o?maxResults=1`,
-        { method: "GET", signal: controller.signal }
-      );
-      if (res.status === 404) {
-        cachedBucketStatus = "unavailable";
-        return false;
-      }
-      cachedBucketStatus = "available";
-      return true;
-    } catch {
-      // Transient network error/timeout: don't permanently mark unavailable
-      return true;
-    } finally {
-      clearTimeout(timer);
-      bucketProbeInFlight = null;
-    }
-  })();
-
-  return bucketProbeInFlight;
 }
 
-/**
- * Generates an organized, standardized Firebase Storage path
- */
-export function buildStoragePath(category: ImageUploadCategory, entityId?: string, fileName?: string): string {
+export function buildStoragePath(
+  category: ImageUploadCategory,
+  entityId?: string,
+  fileName?: string
+): string {
   const timestamp = Date.now();
   const safeEntity = (entityId || "default").replace(/[^a-zA-Z0-9_-]/g, "_");
   const randomSuffix = Math.random().toString(36).substring(2, 8);
@@ -100,7 +72,7 @@ export function buildStoragePath(category: ImageUploadCategory, entityId?: strin
 
   switch (category) {
     case "profile":
-      return `users/${safeEntity}/avatar/${uniqueName}`;
+      return `profiles/${safeEntity}/${uniqueName}`;
     case "staff_avatar":
       return `staff_avatars/${safeEntity}/${uniqueName}`;
     case "submission":
@@ -112,11 +84,21 @@ export function buildStoragePath(category: ImageUploadCategory, entityId?: strin
     case "category":
       return `categories/${safeEntity}/${uniqueName}`;
     case "logo":
-      return `settings/logo/${uniqueName}`;
+      return `logos/${safeEntity}/${uniqueName}`;
     case "banner":
       return `banners/${safeEntity}/${uniqueName}`;
+    case "service":
+      return `services/${safeEntity}/${uniqueName}`;
+    case "notice":
+      return `notices/${safeEntity}/${uniqueName}`;
+    case "complaint_attachment":
+      return `private/complaints/${safeEntity}/${uniqueName}`;
+    case "expense_receipt":
+      return `expenses/${safeEntity}/${uniqueName}`;
+    case "donation_slip":
+      return `private/donations/${safeEntity}/${uniqueName}`;
     case "chat":
-      return `chat/${safeEntity}/${uniqueName}`;
+      return `private/chat/${safeEntity}/${uniqueName}`;
     default:
       return `uploads/${safeEntity}/${uniqueName}`;
   }
@@ -131,325 +113,32 @@ export function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-function mapUploadErrorMessage(err: any): string {
-  const code = String(err?.code || "");
-  if (err?.message === "আপলোড বাতিল করা হয়েছে।") return err.message;
-  if (err?.message === "STORAGE_TIMEOUT") {
-    return "আপলোড সময়সীমা শেষ হয়েছে। ইন্টারনেট সংযোগ যাচাই করে পুনরায় চেষ্টা করুন।";
-  }
-  if (code === "storage/unauthorized" || code === "storage/unauthenticated") {
-    return "ছবি আপলোডের অনুমতি নেই। সুপার অ্যাডমিন হিসেবে লগইন যাচাই করুন।";
-  }
-  if (code === "storage/quota-exceeded") {
-    return "Firebase Storage কোটা পূর্ণ হয়েছে।";
-  }
-  if (code === "storage/retry-limit-exceeded" || code === "storage/canceled") {
-    return "নেটওয়ার্ক সমস্যার কারণে ছবি আপলোড সম্পন্ন হয়নি। পুনরায় চেষ্টা করুন।";
-  }
-  return err?.message || "ছবি আপলোড ব্যর্থ হয়েছে। পুনরায় চেষ্টা করুন।";
-}
-
-async function encodeCompactFallbackDataUrl(
-  processed: ProcessedImageResult,
-  category: ImageUploadCategory
-): Promise<string> {
-  if (processed.format === "svg" || processed.file.type === "image/svg+xml") {
-    return blobToDataUrl(processed.blob);
-  }
-
-  const maxFallbackBytes =
-    category === "profile" || category === "staff_avatar"
-      ? 60 * 1024
-      : category === "category"
-      ? 100 * 1024
-      : category === "logo"
-      ? 140 * 1024
-      : 165 * 1024;
-
-  if (processed.blob.size <= maxFallbackBytes) {
-    return blobToDataUrl(processed.blob);
-  }
-
-  const maxDim =
-    category === "profile" || category === "staff_avatar"
-      ? 384
-      : category === "logo" || category === "category"
-      ? 512
-      : 1200;
-
-  const tempFile = new File([processed.blob], processed.file.name || "fallback.webp", {
-    type: processed.blob.type || "image/webp",
-    lastModified: Date.now(),
-  });
-  const compacted = await processAndCompressImage(tempFile, {
-    preset: "custom",
-    maxWidth: maxDim,
-    maxHeight: maxDim,
-    targetMaxSizeBytes: maxFallbackBytes,
-    initialQuality: 0.78,
-    minQuality: 0.45,
-    preserveTransparency: category === "logo" || category === "category",
-    squareCrop: category === "profile" || category === "staff_avatar",
-  });
-  try {
-    URL.revokeObjectURL(compacted.previewUrl);
-  } catch {
-    // ignore
-  }
-  return blobToDataUrl(compacted.blob);
-}
-
 /**
- * Compress an image and upload directly to Firebase Storage with live resumable progress,
- * or fast firestore_asset encoding if the project's Storage bucket is not yet provisioned.
+ * Uploads an image directly to Cloudflare R2 via `/api/storage/upload`.
+ * Name retained as compatibility wrapper while callers migrate cleanly to `@/lib/r2Storage`.
  */
 export async function uploadImageToFirebaseStorage(
   file: File,
   options: ImageUploadOptions
 ): Promise<ImageUploadResult> {
-  if (options.abortSignal?.aborted) {
-    throw new Error("আপলোড বাতিল করা হয়েছে।");
-  }
-
-  const dedupKey = `${options.category}::${options.entityId || "default"}::${getFileSignature(file)}`;
-  const existingTask = inFlightFileUploads.get(dedupKey);
-  if (existingTask && !options.abortSignal) {
-    return existingTask;
-  }
-
-  const taskPromise = runImageUploadInternal(file, options).finally(() => {
-    if (inFlightFileUploads.get(dedupKey) === taskPromise) {
-      inFlightFileUploads.delete(dedupKey);
-    }
+  return uploadImageToR2(file, {
+    category: options.category === "category" ? "category_icon" : options.category,
+    entityId: options.entityId,
+    customKey: options.customPath,
+    deterministicSlug: options.deterministicSlug,
+    compression: options.compression,
+    onProgress: options.onProgress,
+    onStageChange: options.onStageChange,
+    timeoutMs: options.timeoutMs,
+    abortSignal: options.abortSignal,
   });
-  if (!options.abortSignal) {
-    inFlightFileUploads.set(dedupKey, taskPromise);
-  }
-  return taskPromise;
 }
 
-async function runImageUploadInternal(
-  file: File,
-  options: ImageUploadOptions
-): Promise<ImageUploadResult> {
-  const timeoutMs = options.timeoutMs ?? 20000;
-  const allowFallback = options.allowClientFallback !== false;
-
-  if (options.abortSignal?.aborted) {
-    throw new Error("আপলোড বাতিল করা হয়েছে।");
-  }
-
-  // 1. Validating & auth session
-  options.onStageChange?.("validating");
-  options.onProgress?.(8);
-  const fbUser = await ensureFirebaseAuthUser();
-
-  if (options.abortSignal?.aborted) {
-    throw new Error("আপলোড বাতিল করা হয়েছে।");
-  }
-
-  // 2. Compress & optimize image + probe bucket availability concurrently
-  options.onStageChange?.("compressing");
-  options.onProgress?.(16);
-
-  const compressionPreset =
-    options.compression?.preset ||
-    (options.category === "profile" || options.category === "staff_avatar"
-      ? "avatar"
-      : options.category === "category"
-      ? "icon"
-      : options.category === "logo"
-      ? "logo"
-      : options.category === "banner"
-      ? "banner"
-      : options.category === "chat"
-      ? "chat"
-      : "content");
-
-  const [processed, bucketAvailable] = await Promise.all([
-    processAndCompressImage(file, {
-      preset: compressionPreset,
-      ...options.compression,
-    }),
-    probeStorageBucketAvailable(),
-  ]);
-
-  if (options.abortSignal?.aborted) {
-    throw new Error("আপলোড বাতিল করা হয়েছে।");
-  }
-
-  // Fast exit when Firebase Storage bucket returns 404 (not yet provisioned in console)
-  if (!bucketAvailable) {
-    options.onStageChange?.("saving");
-    options.onProgress?.(85);
-    const dataUrl = await encodeCompactFallbackDataUrl(processed, options.category);
-    options.onProgress?.(100);
-    return {
-      downloadUrl: dataUrl,
-      storagePath: "firestore_asset",
-      processed,
-    };
-  }
-
-  // 3. Build target Firebase Storage reference
-  options.onStageChange?.("uploading");
-  options.onProgress?.(25);
-  const resolvedEntityId =
-    options.entityId ||
-    (options.category === "profile" || options.category === "staff_avatar"
-      ? fbUser?.uid || auth.currentUser?.uid || "anonymous"
-      : "general");
-
-  const storagePath =
-    options.customPath || buildStoragePath(options.category, resolvedEntityId, processed.file.name);
-  const storageRef = ref(storage, storagePath);
-
-  const metadata: UploadMetadata = {
-    contentType: processed.file.type,
-    cacheControl: "public, max-age=31536000, immutable",
-    customMetadata: {
-      uploadedBy: auth.currentUser?.uid || "anonymous",
-      originalName: file.name,
-      category: options.category,
-      width: String(processed.width),
-      height: String(processed.height),
-      format: processed.format,
-      originalSize: file.size.toString(),
-      compressedSize: processed.compressedSizeBytes.toString(),
-      uploadedAt: new Date().toISOString(),
-    },
-  };
-
-  // 4. Resumable upload with real byte-level progress + cancellation + timeout
-  const attemptFirebaseUpload = (): Promise<ImageUploadResult> =>
-    new Promise((resolve, reject) => {
-      const task = uploadBytesResumable(storageRef, processed.blob, metadata);
-      let settled = false;
-
-      const timer = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          try {
-            task.cancel();
-          } catch {
-            // ignore
-          }
-          reject(new Error("STORAGE_TIMEOUT"));
-        }
-      }, timeoutMs);
-
-      const onAbort = () => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          try {
-            task.cancel();
-          } catch {
-            // ignore
-          }
-          reject(new Error("আপলোড বাতিল করা হয়েছে।"));
-        }
-      };
-
-      if (options.abortSignal) {
-        options.abortSignal.addEventListener("abort", onAbort, { once: true });
-      }
-
-      task.on(
-        "state_changed",
-        (snapshot) => {
-          if (snapshot.totalBytes > 0) {
-            const pct = 25 + Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 68);
-            options.onProgress?.(Math.min(93, Math.max(25, pct)));
-          }
-        },
-        (err) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          options.abortSignal?.removeEventListener("abort", onAbort);
-          reject(err);
-        },
-        async () => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          options.abortSignal?.removeEventListener("abort", onAbort);
-          try {
-            options.onStageChange?.("saving");
-            options.onProgress?.(95);
-            const downloadUrl = await getDownloadURL(task.snapshot.ref);
-            options.onProgress?.(100);
-            resolve({
-              downloadUrl,
-              storagePath,
-              processed,
-            });
-          } catch (urlErr) {
-            reject(urlErr);
-          }
-        }
-      );
-    });
-
-  try {
-    return await attemptFirebaseUpload();
-  } catch (err: any) {
-    if (err?.message === "আপলোড বাতিল করা হয়েছে।") {
-      throw err;
-    }
-    // If bucket returned 404 dynamically during upload, mark unavailable and encode cleanly
-    const rawMsg = String(err?.message || err?.serverResponse || "");
-    if (err?.code === "storage/bucket-not-found" || rawMsg.includes("404") || rawMsg.includes("bucket does not exist")) {
-      cachedBucketStatus = "unavailable";
-      options.onStageChange?.("saving");
-      options.onProgress?.(95);
-      const dataUrl = await encodeCompactFallbackDataUrl(processed, options.category);
-      options.onProgress?.(100);
-      return {
-        downloadUrl: dataUrl,
-        storagePath: "firestore_asset",
-        processed,
-      };
-    }
-
-    if (!allowFallback) {
-      throw new Error(mapUploadErrorMessage(err));
-    }
-
-    console.warn("[Firebase Storage notice: falling back to client-optimized format]", err);
-    options.onStageChange?.("saving");
-    options.onProgress?.(100);
-    const dataUrl = await encodeCompactFallbackDataUrl(processed, options.category);
-    return {
-      downloadUrl: dataUrl,
-      storagePath: "client_fallback",
-      processed,
-    };
-  }
-}
+export { uploadImageToR2 };
 
 /**
- * Safely delete an existing image from Firebase Storage using its download URL.
- * Only deletes if the URL belongs to this project's storage bucket.
+ * Deletes an image stored on Cloudflare R2 using its fileUrl or objectKey.
  */
 export async function deleteStorageImageByUrl(url: string | null | undefined): Promise<boolean> {
-  if (!url || typeof url !== "string") return false;
-  // Ignore base64 data URLs, local blob URLs, or external CDNs
-  if (url.startsWith("data:") || url.startsWith("blob:") || !url.includes("firebasestorage.googleapis.com")) {
-    return false;
-  }
-
-  try {
-    const storageRef = ref(storage, url);
-    await deleteObject(storageRef);
-    return true;
-  } catch (err: any) {
-    // 404 object-not-found is considered clean
-    if (err?.code === "storage/object-not-found") {
-      return true;
-    }
-    console.warn("[Storage Delete Warning] Could not delete image:", err);
-    return false;
-  }
+  return deleteR2FileByUrl(url);
 }

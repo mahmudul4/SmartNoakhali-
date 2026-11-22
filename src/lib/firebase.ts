@@ -20,7 +20,6 @@ import {
   serverTimestamp,
   getDocFromServer,
 } from "firebase/firestore";
-import { getStorage } from "firebase/storage";
 import firebaseConfig from "../../firebase-applet-config.json";
 
 const envConfig = {
@@ -63,9 +62,6 @@ function initFirestoreInstance() {
 export const db = initFirestoreInstance();
 export { enableNetwork, disableNetwork };
 export const auth = getAuth(app);
-export const storage = getStorage(app);
-storage.maxUploadRetryTime = 10000;
-storage.maxOperationRetryTime = 10000;
 
 let anonAuthPromise: Promise<User | null> | null = null;
 let anonAuthDisabled = false;
