@@ -140,6 +140,12 @@ import {
   type DonorRow,
   type DonorEventRow,
   type EmergencyReqRow,
+  type EmergencyRequestStatus,
+  type EmergencyUrgency,
+  EMERGENCY_BLOOD_GROUPS,
+  getEmergencyStatusMeta,
+  getEmergencyUrgencyMeta,
+  isEmergencyRequestPubliclyActive,
   type ExpenseRow,
   type ExpenseCategory,
   EXPENSE_CATEGORY_LABELS,
@@ -1065,13 +1071,13 @@ function Dashboard({
         )}
         <Stat
           label="অপেক্ষমাণ দাতা"
-          value={String(pendingDonors.length)}
-          accent={pendingDonors.length > 0}
+          value={donors.loading ? "..." : String(pendingDonors.length)}
+          accent={!donors.loading && pendingDonors.length > 0}
         />
         {isMainAdmin && (
           <Stat label="মোট অনুদান" value={`${totalAmount.toLocaleString("bn-BD")}৳`} />
         )}
-        <Stat label="অনুমোদিত দাতা" value={String(approvedDonors)} />
+        <Stat label="অনুমোদিত দাতা" value={donors.loading ? "..." : String(approvedDonors)} />
         <Stat
           label="জরুরি রিকোয়েস্ট"
           value={String(pendingEmerg.length)}
@@ -6033,6 +6039,9 @@ function DonorsAdminPanel({
   const [search, setSearch] = useState("");
 
   const pendingItems = donors.items.filter((d) => d.status === "pending");
+  const approvedCount = donors.items.filter((d) => d.status === "approved").length;
+  const rejectedCount = donors.items.filter((d) => d.status === "rejected").length;
+  const hasActiveFilter = statusFilter !== "all" || bloodFilter !== "all" || Boolean(search.trim());
 
   const filtered = donors.items.filter((d) => {
     if (statusFilter !== "all" && d.status !== statusFilter) return false;
@@ -6083,9 +6092,19 @@ function DonorsAdminPanel({
     <div className="space-y-3">
       <div className="space-y-3 rounded-[12px] border border-[#E6E1D6] bg-white p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="font-display text-sm font-bold text-[#1C1C1C]">
-            রক্তদাতা পরিচালনা ({filtered.length} জন)
-          </p>
+          <div>
+            <p className="font-display text-sm font-bold text-[#1C1C1C]">
+              {donors.loading
+                ? "রক্তদাতা পরিচালনা (লোড হচ্ছে...)"
+                : `রক্তদাতা পরিচালনা (অনুমোদিত: ${approvedCount} জন)`}
+            </p>
+            {!donors.loading && (
+              <p className="text-[11px] text-[#5F5F5A]">
+                মোট তালিকাভুক্ত: {donors.items.length} জন • অপেক্ষমাণ: {pendingItems.length} • বাতিল: {rejectedCount}
+                {hasActiveFilter ? ` • ফিল্টার ফলাফল: ${filtered.length} জন` : ""}
+              </p>
+            )}
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             {canBulkImportDonors && (
               <button
@@ -6134,12 +6153,8 @@ function DonorsAdminPanel({
           >
             <option value="all">সব অবস্থা ({donors.items.length})</option>
             <option value="pending">অপেক্ষমাণ ({pendingItems.length})</option>
-            <option value="approved">
-              অনুমোদিত ({donors.items.filter((x) => x.status === "approved").length})
-            </option>
-            <option value="rejected">
-              বাতিল ({donors.items.filter((x) => x.status === "rejected").length})
-            </option>
+            <option value="approved">অনুমোদিত ({approvedCount})</option>
+            <option value="rejected">বাতিল ({rejectedCount})</option>
           </select>
           <input
             value={search}
@@ -6150,7 +6165,13 @@ function DonorsAdminPanel({
         </div>
       </div>
 
-      <List empty="কোনো দাতা নেই" items={filtered}>
+      {donors.loading ? (
+        <div className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin text-[#C62828]" />
+          <span>রক্তদাতাদের তথ্য লোড হচ্ছে...</span>
+        </div>
+      ) : (
+        <List empty="কোনো দাতা নেই" items={filtered}>
         {(d) => (
           <div key={d.id} className="rounded-[12px] border border-[#E6E1D6] bg-white p-4">
             <div className="flex items-start gap-3">
@@ -6204,6 +6225,7 @@ function DonorsAdminPanel({
           </div>
         )}
       </List>
+      )}
 
       {editing && (
         <div
@@ -6536,25 +6558,45 @@ function EmergencyEditor() {
     patient_name: "",
     phone: "",
     blood_group: "",
+    bags_needed: 1,
+    urgency: "urgent" as EmergencyUrgency,
+    needed_date: new Date().toISOString().slice(0, 10),
+    needed_time: "",
     hospital: "",
+    district: "নোয়াখালী",
+    upazila: "",
+    address: "",
+    requester_name: "",
     message: "",
+    autoApprove: true,
   });
+  const [statusFilter, setStatusFilter] = useState<"all" | EmergencyRequestStatus>("all");
   const [editing, setEditing] = useState<EmergencyReqRow | null>(null);
   const [busy, setBusy] = useState(false);
+  const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
   const [approvingAll, setApprovingAll] = useState(false);
   const { isMainAdmin, isAdmin } = useAuth();
   const canManage = isMainAdmin || isAdmin;
 
   const pendingItems = items.filter((e) => e.status === "pending");
+  const activePublicCount = items.filter((e) => isEmergencyRequestPubliclyActive(e)).length;
+  const filteredItems =
+    statusFilter === "all" ? items : items.filter((e) => e.status === statusFilter);
 
   async function handleApproveAllPending() {
     if (pendingItems.length === 0 || approvingAll) return;
     setApprovingAll(true);
     try {
+      let okCount = 0;
       for (const e of pendingItems) {
-        await setStatus(e.id, "approved");
+        const res = await setStatus(e.id, "approved");
+        if (!res?.error) okCount += 1;
       }
-      toast.success(`${pendingItems.length} টি অপেক্ষমাণ জরুরি রক্তের আবেদন অনুমোদিত হয়েছে!`);
+      if (okCount > 0) {
+        toast.success(`${okCount} টি অপেক্ষমাণ জরুরি রক্তের আবেদন অনুমোদিত হয়েছে ও হোমে প্রকাশিত হয়েছে!`);
+      } else {
+        toast.error("অনুমোদন করা যায়নি");
+      }
     } catch (e) {
       toast.error((e as Error).message || "ত্রুটি");
     } finally {
@@ -6562,18 +6604,53 @@ function EmergencyEditor() {
     }
   }
 
+  async function handleQuickStatus(id: string, nextStatus: EmergencyRequestStatus, successMsg: string) {
+    if (statusBusyId) return;
+    setStatusBusyId(id);
+    const res = await setStatus(id, nextStatus);
+    setStatusBusyId(null);
+    if (res?.error) {
+      toast.error(res.error.message);
+    } else {
+      toast.success(successMsg);
+    }
+  }
+
   async function submit() {
     if (!form.patient_name || !form.phone || !form.blood_group)
-      return toast.error("নাম, ফোন ও গ্রুপ আবশ্যক");
+      return toast.error("নাম, ফোন ও রক্তের গ্রুপ আবশ্যক");
     setBusy(true);
-    const res = await add(form);
+    const res = await add({
+      ...form,
+      consent_accurate: true,
+      consent_public: true,
+    });
     setBusy(false);
     if (!res.ok) return toast.error(res.error || "ত্রুটি");
-    toast.success("জরুরি রক্তের আবেদন যুক্ত হয়েছে");
+    toast.success(
+      form.autoApprove
+        ? "জরুরি রক্তের আবেদন যুক্ত ও হোমে প্রকাশিত হয়েছে"
+        : "জরুরি রক্তের আবেদন যুক্ত হয়েছে"
+    );
     sendBrowserNotification(`জরুরি রক্ত প্রয়োজন (${form.blood_group})`, {
       body: `রোগী: ${form.patient_name} • ${form.hospital || "হাসপাতাল"} • ফোন: ${form.phone}`,
     });
-    setForm({ patient_name: "", phone: "", blood_group: "", hospital: "", message: "" });
+    setForm({
+      patient_name: "",
+      phone: "",
+      blood_group: "",
+      bags_needed: 1,
+      urgency: "urgent",
+      needed_date: new Date().toISOString().slice(0, 10),
+      needed_time: "",
+      hospital: "",
+      district: "নোয়াখালী",
+      upazila: "",
+      address: "",
+      requester_name: "",
+      message: "",
+      autoApprove: true,
+    });
   }
 
   async function saveEdit() {
@@ -6582,9 +6659,20 @@ function EmergencyEditor() {
     const { error } = await update(editing.id, {
       patient_name: editing.patient_name,
       phone: editing.phone,
+      alt_phone: editing.alt_phone ?? "",
+      requester_name: editing.requester_name ?? "",
+      relation: editing.relation ?? "",
       blood_group: editing.blood_group,
+      bags_needed: Number(editing.bags_needed ?? 1) || 1,
+      needed_date: editing.needed_date ?? "",
+      needed_time: editing.needed_time ?? "",
+      urgency: (editing.urgency as EmergencyUrgency) || "urgent",
       hospital: editing.hospital,
+      district: editing.district ?? "",
+      upazila: editing.upazila ?? "",
+      address: editing.address ?? "",
       message: editing.message,
+      instructions: editing.instructions ?? "",
       status: editing.status,
     });
     setBusy(false);
@@ -6595,12 +6683,19 @@ function EmergencyEditor() {
 
   return (
     <div className="space-y-3">
+      {/* Summary & Quick Add */}
       {canManage && (
-        <div className="space-y-2 rounded-[12px] border border-[#E6E1D6] bg-white p-4">
+        <div className="space-y-2.5 rounded-[12px] border border-[#E6E1D6] bg-white p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="flex items-center gap-2 font-display font-bold text-[#1C1C1C]">
-              <AlertCircle className="h-4 w-4 text-[#C62828]" strokeWidth={1.5} /> নতুন জরুরি রক্ত অনুরোধ
-            </p>
+            <div>
+              <p className="flex items-center gap-2 font-display font-bold text-[#1C1C1C]">
+                <AlertCircle className="h-4 w-4 text-[#C62828]" strokeWidth={1.5} /> নতুন জরুরি রক্ত অনুরোধ
+              </p>
+              <p className="text-[11px] text-[#5F5F5A]">
+                হোমে সক্রিয়: <strong className="text-[#0F4D3A]">{activePublicCount}</strong> · অপেক্ষমাণ:{" "}
+                <strong className="text-[#C62828]">{pendingItems.length}</strong> · মোট: {items.length}
+              </p>
+            </div>
             {pendingItems.length > 0 && (
               <button
                 type="button"
@@ -6617,7 +6712,7 @@ function EmergencyEditor() {
               </button>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
             <input
               value={form.patient_name}
               onChange={(e) => setForm({ ...form, patient_name: e.target.value })}
@@ -6627,7 +6722,7 @@ function EmergencyEditor() {
             <input
               value={form.phone}
               onChange={(e) => setForm({ ...form, phone: e.target.value })}
-              placeholder="ফোন *"
+              placeholder="মোবাইল ফোন *"
               className="rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-sm"
             />
             <select
@@ -6635,17 +6730,49 @@ function EmergencyEditor() {
               onChange={(e) => setForm({ ...form, blood_group: e.target.value })}
               className="rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-sm font-bold text-[#C62828]"
             >
-              <option value="">গ্রুপ *</option>
-              {["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"].map((g) => (
+              <option value="">রক্তের গ্রুপ *</option>
+              {EMERGENCY_BLOOD_GROUPS.map((g) => (
                 <option key={g} value={g}>
                   {g}
                 </option>
               ))}
             </select>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={form.bags_needed}
+                onChange={(e) => setForm({ ...form, bags_needed: Math.max(1, Number(e.target.value) || 1) })}
+                placeholder="ব্যাগ"
+                className="rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-sm"
+              />
+              <select
+                value={form.urgency}
+                onChange={(e) => setForm({ ...form, urgency: e.target.value as EmergencyUrgency })}
+                className="rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-2 py-2 text-xs font-semibold"
+              >
+                <option value="critical">অত্যন্ত জরুরি</option>
+                <option value="urgent">জরুরি</option>
+                <option value="scheduled">নির্ধারিত</option>
+              </select>
+            </div>
             <input
               value={form.hospital}
               onChange={(e) => setForm({ ...form, hospital: e.target.value })}
-              placeholder="হাসপাতাল"
+              placeholder="হাসপাতালের নাম"
+              className="rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-sm sm:col-span-2"
+            />
+            <input
+              value={form.upazila}
+              onChange={(e) => setForm({ ...form, upazila: e.target.value })}
+              placeholder="উপজেলা / এলাকা"
+              className="rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-sm"
+            />
+            <input
+              type="date"
+              value={form.needed_date}
+              onChange={(e) => setForm({ ...form, needed_date: e.target.value })}
               className="rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-sm"
             />
           </div>
@@ -6653,55 +6780,174 @@ function EmergencyEditor() {
             value={form.message}
             onChange={(e) => setForm({ ...form, message: e.target.value })}
             rows={2}
-            placeholder="বার্তা (ঐচ্ছিক)"
+            placeholder="বার্তা / বিবরণ (ঐচ্ছিক)"
             className="w-full rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] p-3 text-sm"
           />
-          <button
-            disabled={busy}
-            onClick={submit}
-            className="flex min-h-[40px] items-center gap-1 rounded-[10px] bg-[#0F4D3A] px-4 py-2 text-sm font-semibold text-white hover:bg-[#0B3C2D] disabled:opacity-60"
-          >
-            <Plus className="h-3.5 w-3.5" strokeWidth={1.5} /> যোগ করুন
-          </button>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="flex items-center gap-2 text-xs font-medium text-[#1C1C1C]">
+              <input
+                type="checkbox"
+                checked={form.autoApprove}
+                onChange={(e) => setForm({ ...form, autoApprove: e.target.checked })}
+                className="h-4 w-4 accent-[#0F4D3A]"
+              />
+              সরাসরি অনুমোদন করে হোমপেজে প্রকাশ করুন
+            </label>
+            <button
+              disabled={busy}
+              onClick={submit}
+              className="flex min-h-[40px] items-center gap-1 rounded-[10px] bg-[#0F4D3A] px-4 py-2 text-sm font-semibold text-white hover:bg-[#0B3C2D] disabled:opacity-60"
+            >
+              <Plus className="h-3.5 w-3.5" strokeWidth={1.5} /> যোগ করুন
+            </button>
+          </div>
         </div>
       )}
-      <List empty="কোনো জরুরি অনুরোধ নেই" items={items}>
-        {(e) => (
-          <div key={e.id} className="rounded-[12px] border border-[#E6E1D6] bg-white p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <p className="font-semibold text-[#1C1C1C]">
-                  {e.patient_name}{" "}
-                  <span className="ml-1 rounded-[6px] bg-[#C62828]/10 px-1.5 py-0.5 text-[11px] font-bold text-[#C62828]">
-                    {e.blood_group}
-                  </span>
-                </p>
-                <p className="text-xs text-[#5F5F5A]">
-                  {e.phone}
-                  {e.hospital ? ` • ${e.hospital}` : ""}
-                </p>
-                {e.message && <p className="mt-1 text-xs text-[#1C1C1C]">{e.message}</p>}
+
+      {/* Status Filter Bar */}
+      <div className="flex flex-wrap items-center gap-1.5 rounded-[12px] border border-[#E6E1D6] bg-white p-2.5">
+        {(
+          [
+            { id: "all", label: `সব (${items.length})` },
+            { id: "pending", label: `অপেক্ষমাণ (${items.filter((x) => x.status === "pending").length})` },
+            { id: "approved", label: `অনুমোদিত (${items.filter((x) => x.status === "approved").length})` },
+            { id: "completed", label: `সম্পন্ন (${items.filter((x) => x.status === "completed").length})` },
+            { id: "rejected", label: `বাতিল (${items.filter((x) => x.status === "rejected" || x.status === "cancelled").length})` },
+            { id: "expired", label: `মেয়াদোত্তীর্ণ (${items.filter((x) => x.status === "expired").length})` },
+          ] as const
+        ).map((tabItem) => (
+          <button
+            key={tabItem.id}
+            type="button"
+            onClick={() => setStatusFilter(tabItem.id)}
+            className={`min-h-[34px] rounded-[8px] px-3 text-xs font-semibold transition ${
+              statusFilter === tabItem.id
+                ? "bg-[#0F4D3A] text-white"
+                : "bg-[#FAF7F2] text-[#5F5F5A] hover:text-[#1C1C1C]"
+            }`}
+          >
+            {tabItem.label}
+          </button>
+        ))}
+      </div>
+
+      <List empty="এই তালিকায় কোনো জরুরি রক্তের অনুরোধ নেই" items={filteredItems}>
+        {(e) => {
+          const isPublicLive = isEmergencyRequestPubliclyActive(e);
+          const urgencyMeta = getEmergencyUrgencyMeta(e.urgency);
+          const statusMeta = getEmergencyStatusMeta(e.status);
+          return (
+            <div key={e.id} className="rounded-[12px] border border-[#E6E1D6] bg-white p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="rounded-[6px] bg-[#C62828] px-2 py-0.5 text-xs font-extrabold text-white">
+                      {e.blood_group}
+                    </span>
+                    <span className="rounded-[6px] border border-[#E6E1D6] bg-[#FAF7F2] px-2 py-0.5 text-[11px] font-bold text-[#1C1C1C]">
+                      {Math.max(1, Number(e.bags_needed ?? 1))} ব্যাগ
+                    </span>
+                    <span className={`rounded-[6px] px-2 py-0.5 text-[11px] font-bold ${urgencyMeta.badgeClass}`}>
+                      {urgencyMeta.label}
+                    </span>
+                    {e.request_code && (
+                      <span className="text-[11px] font-mono text-[#5F5F5A]">{e.request_code}</span>
+                    )}
+                    {isPublicLive && (
+                      <span className="rounded-[6px] bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                        হোমপেজে দৃশ্যমান
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="font-semibold text-[#1C1C1C]">
+                    রোগী: {e.patient_name}
+                    {e.patient_age ? ` (${e.patient_age} বছর)` : ""}
+                    {e.requester_name ? ` · আবেদনকারী: ${e.requester_name}` : ""}
+                    {e.relation ? ` (${e.relation})` : ""}
+                  </p>
+
+                  <p className="text-xs text-[#5F5F5A]">
+                    ফোন: <strong className="text-[#1C1C1C]">{e.phone}</strong>
+                    {e.alt_phone ? ` · বিকল্প: ${e.alt_phone}` : ""}
+                    {e.hospital ? ` · ${e.hospital}` : ""}
+                  </p>
+
+                  {(e.upazila || e.district || e.needed_date || e.address) && (
+                    <p className="text-xs text-[#5F5F5A]">
+                      {[e.upazila, e.district, e.address].filter(Boolean).join(", ")}
+                      {e.needed_date
+                        ? ` · প্রয়োজন: ${e.needed_date}${e.needed_time ? ` (${e.needed_time})` : ""}`
+                        : ""}
+                    </p>
+                  )}
+
+                  {e.message && <p className="mt-1 text-xs text-[#1C1C1C]">{e.message}</p>}
+                  {e.instructions && (
+                    <p className="text-[11px] text-[#5F5F5A]">নির্দেশনা: {e.instructions}</p>
+                  )}
+                  {(e.approved_by_name || e.approved_by) && e.status === "approved" && (
+                    <p className="text-[11px] text-[#0F4D3A]">
+                      অনুমোদনকারী: {e.approved_by_name || e.approved_by}
+                    </p>
+                  )}
+                </div>
+                <span className={`shrink-0 rounded-[8px] px-2.5 py-1 text-[10px] font-bold ${statusMeta.toneClass}`}>
+                  {statusMeta.label}
+                </span>
               </div>
-              <Status status={e.status} />
+
+              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[#E6E1D6]/70 pt-2.5">
+                <Actions
+                  onApprove={() => setStatus(e.id, "approved")}
+                  onReject={() => setStatus(e.id, "rejected")}
+                  onDelete={() => remove(e.id)}
+                  status={e.status}
+                  inline
+                />
+                {e.status === "approved" && (
+                  <button
+                    type="button"
+                    disabled={statusBusyId === e.id}
+                    onClick={() =>
+                      void handleQuickStatus(
+                        e.id,
+                        "completed",
+                        "অনুরোধটি রক্ত সংগ্রহ সম্পন্ন হিসেবে চিহ্নিত হয়েছে"
+                      )
+                    }
+                    className="flex min-h-[34px] items-center gap-1 rounded-[8px] border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-800 transition hover:bg-sky-100 disabled:opacity-60"
+                  >
+                    <CheckCircle2 className="h-3 w-3" /> সম্পন্ন
+                  </button>
+                )}
+                {e.status !== "expired" && e.status !== "completed" && (
+                  <button
+                    type="button"
+                    disabled={statusBusyId === e.id}
+                    onClick={() =>
+                      void handleQuickStatus(
+                        e.id,
+                        "expired",
+                        "অনুরোধটি মেয়াদোত্তীর্ণ হিসেবে চিহ্নিত হয়েছে"
+                      )
+                    }
+                    className="flex min-h-[34px] items-center gap-1 rounded-[8px] border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100 disabled:opacity-60"
+                  >
+                    <Clock className="h-3 w-3" /> মেয়াদোত্তীর্ণ
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setEditing({ ...e })}
+                  className="flex min-h-[34px] items-center gap-1 rounded-[8px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-1.5 text-xs font-semibold text-[#1C1C1C] transition hover:border-[#0F4D3A]"
+                >
+                  <Edit3 className="h-3 w-3" strokeWidth={1.5} /> সম্পাদনা
+                </button>
+              </div>
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[#E6E1D6]/70 pt-2.5">
-              <Actions
-                onApprove={() => setStatus(e.id, "approved")}
-                onReject={() => setStatus(e.id, "rejected")}
-                onDelete={() => remove(e.id)}
-                status={e.status}
-                inline
-              />
-              <button
-                type="button"
-                onClick={() => setEditing({ ...e })}
-                className="flex min-h-[34px] items-center gap-1 rounded-[8px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-1.5 text-xs font-semibold text-[#1C1C1C] transition hover:border-[#0F4D3A]"
-              >
-                <Edit3 className="h-3 w-3" strokeWidth={1.5} /> সম্পাদনা
-              </button>
-            </div>
-          </div>
-        )}
+          );
+        }}
       </List>
 
       {editing && (
@@ -6710,61 +6956,125 @@ function EmergencyEditor() {
           onClick={() => setEditing(null)}
         >
           <div
-            className="w-full max-w-sm space-y-2.5 rounded-[12px] border border-[#E6E1D6] bg-white p-4"
+            className="max-h-[90vh] w-full max-w-md space-y-2.5 overflow-y-auto rounded-[12px] border border-[#E6E1D6] bg-white p-4"
             onClick={(ev) => ev.stopPropagation()}
           >
             <p className="font-display text-sm font-bold text-[#1C1C1C]">
               জরুরি রক্তের আবেদন সম্পাদনা
             </p>
-            <input
-              value={editing.patient_name}
-              onChange={(ev) => setEditing({ ...editing, patient_name: ev.target.value })}
-              placeholder="রোগীর নাম"
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
-            />
-            <input
-              value={editing.phone}
-              onChange={(ev) => setEditing({ ...editing, phone: ev.target.value })}
-              placeholder="ফোন নম্বর"
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
-            />
-            <select
-              value={editing.blood_group}
-              onChange={(ev) => setEditing({ ...editing, blood_group: ev.target.value })}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-bold text-rose-600"
-            >
-              {["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"].map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </select>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                value={editing.patient_name}
+                onChange={(ev) => setEditing({ ...editing, patient_name: ev.target.value })}
+                placeholder="রোগীর নাম"
+                className="w-full rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-sm"
+              />
+              <input
+                value={editing.phone}
+                onChange={(ev) => setEditing({ ...editing, phone: ev.target.value })}
+                placeholder="ফোন নম্বর"
+                className="w-full rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-sm"
+              />
+              <select
+                value={editing.blood_group}
+                onChange={(ev) => setEditing({ ...editing, blood_group: ev.target.value })}
+                className="w-full rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-sm font-bold text-[#C62828]"
+              >
+                {EMERGENCY_BLOOD_GROUPS.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={editing.bags_needed ?? 1}
+                onChange={(ev) =>
+                  setEditing({ ...editing, bags_needed: Math.max(1, Number(ev.target.value) || 1) })
+                }
+                placeholder="ব্যাগ সংখ্যা"
+                className="w-full rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-sm"
+              />
+              <select
+                value={editing.urgency || "urgent"}
+                onChange={(ev) => setEditing({ ...editing, urgency: ev.target.value })}
+                className="w-full rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-xs font-semibold"
+              >
+                <option value="critical">অত্যন্ত জরুরি</option>
+                <option value="urgent">জরুরি</option>
+                <option value="scheduled">নির্ধারিত সময়ে</option>
+              </select>
+              <select
+                value={editing.status}
+                onChange={(ev) =>
+                  setEditing({ ...editing, status: ev.target.value as EmergencyRequestStatus })
+                }
+                className="w-full rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-xs font-semibold"
+              >
+                <option value="pending">অপেক্ষমাণ (pending)</option>
+                <option value="approved">অনুমোদিত (approved)</option>
+                <option value="completed">সম্পন্ন (completed)</option>
+                <option value="expired">মেয়াদোত্তীর্ণ (expired)</option>
+                <option value="rejected">বাতিল (rejected)</option>
+                <option value="cancelled">আবেদনকারী বাতিল (cancelled)</option>
+              </select>
+            </div>
             <input
               value={editing.hospital ?? ""}
               onChange={(ev) => setEditing({ ...editing, hospital: ev.target.value })}
               placeholder="হাসপাতাল"
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              className="w-full rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-sm"
             />
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                value={editing.district ?? ""}
+                onChange={(ev) => setEditing({ ...editing, district: ev.target.value })}
+                placeholder="জেলা"
+                className="w-full rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-sm"
+              />
+              <input
+                value={editing.upazila ?? ""}
+                onChange={(ev) => setEditing({ ...editing, upazila: ev.target.value })}
+                placeholder="উপজেলা"
+                className="w-full rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-sm"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="date"
+                value={editing.needed_date ?? ""}
+                onChange={(ev) => setEditing({ ...editing, needed_date: ev.target.value })}
+                className="w-full rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-sm"
+              />
+              <input
+                type="time"
+                value={editing.needed_time ?? ""}
+                onChange={(ev) => setEditing({ ...editing, needed_time: ev.target.value })}
+                className="w-full rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-3 py-2 text-sm"
+              />
+            </div>
             <textarea
               value={editing.message ?? ""}
               onChange={(ev) => setEditing({ ...editing, message: ev.target.value })}
               rows={2}
               placeholder="বার্তা"
-              className="w-full rounded-xl border border-border bg-background p-3 text-sm"
+              className="w-full rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] p-3 text-sm"
             />
-            <div className="flex gap-2">
+            <div className="flex gap-2 pt-1">
               <button
                 type="button"
                 disabled={busy}
                 onClick={saveEdit}
-                className="flex items-center gap-1 rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground"
+                className="flex min-h-[40px] items-center gap-1 rounded-[10px] bg-[#0F4D3A] px-4 py-1.5 text-xs font-bold text-white hover:bg-[#0B3C2D]"
               >
-                <Save className="h-3 w-3" /> সংরক্ষণ
+                <Save className="h-3.5 w-3.5" /> সংরক্ষণ
               </button>
               <button
                 type="button"
                 onClick={() => setEditing(null)}
-                className="rounded-full bg-muted px-3 py-1.5 text-xs"
+                className="min-h-[40px] rounded-[10px] border border-[#E6E1D6] bg-[#FAF7F2] px-4 py-1.5 text-xs font-semibold text-[#1C1C1C]"
               >
                 বাতিল
               </button>
@@ -9407,11 +9717,17 @@ function Status({ status }: { status: string }) {
     pending: "border border-[#E6E1D6] bg-[#FAF7F2] text-[#5F5F5A]",
     approved: "bg-[#0F4D3A]/10 text-[#0F4D3A]",
     rejected: "bg-[#C62828]/10 text-[#C62828]",
+    completed: "bg-sky-500/10 text-sky-700",
+    expired: "bg-amber-500/15 text-amber-800",
+    cancelled: "bg-[#5F5F5A]/15 text-[#5F5F5A]",
   };
   const label: Record<string, string> = {
     pending: "অপেক্ষমাণ",
     approved: "অনুমোদিত",
     rejected: "বাতিল",
+    completed: "সম্পন্ন",
+    expired: "মেয়াদোত্তীর্ণ",
+    cancelled: "বাতিলকৃত",
   };
   return (
     <span className={`shrink-0 rounded-[8px] px-2 py-0.5 text-[10px] font-bold ${map[status] || ""}`}>

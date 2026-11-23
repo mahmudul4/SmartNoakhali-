@@ -539,6 +539,14 @@ export async function restoreDeletedAuditItem(
           updatedAt: serverTimestamp(),
         }).catch(() => {});
       } else if (col === "emergency_blood_requests") {
+        const restoredStatus =
+          snap.status === "approved" ||
+          snap.status === "rejected" ||
+          snap.status === "completed" ||
+          snap.status === "expired" ||
+          snap.status === "cancelled"
+            ? snap.status
+            : "approved";
         await setDoc(doc(db, "emergency_blood_requests", id), {
           author_id: uid,
           patient_name: sanitizeString(String(snap.patient_name || entry.target_title), 120, "রোগী"),
@@ -546,10 +554,10 @@ export async function restoreDeletedAuditItem(
           blood_group: String(snap.blood_group || "O+"),
           hospital: sanitizeString(String(snap.hospital || ""), 200, ""),
           message: sanitizeString(String(snap.message || ""), 1000, ""),
-          status:
-            snap.status === "approved" || snap.status === "rejected"
-              ? snap.status
-              : "approved",
+          consent_accurate: true,
+          consent_public: snap.consent_public !== false,
+          public_visible: restoredStatus === "approved" && snap.consent_public !== false,
+          status: restoredStatus,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         }).catch(() => {});

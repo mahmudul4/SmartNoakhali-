@@ -18,7 +18,12 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useEmergencyBanners, useEmergencyRequests } from "@/lib/cloud";
+import {
+  useEmergencyBanners,
+  useEmergencyRequests,
+  isEmergencyRequestPubliclyActive,
+  sortEmergencyRequestsPublic,
+} from "@/lib/cloud";
 import { useAuth } from "@/lib/auth";
 import {
   useUserNotifications,
@@ -94,7 +99,10 @@ export function useNotifications() {
 
   const activeBanners = useMemo(() => banners.filter((b) => b.visible), [banners]);
   const activeBlood = useMemo(
-    () => bloodRequests.filter((r) => r.status === "approved" || r.status === "pending"),
+    () =>
+      sortEmergencyRequestsPublic(
+        bloodRequests.filter((r) => isEmergencyRequestPubliclyActive(r))
+      ),
     [bloodRequests]
   );
 
@@ -586,10 +594,10 @@ export function NotificationBell() {
                               </div>
                             </div>
                             <p className="mt-0.5 text-[11.5px] text-[#5F5F5A]">
-                              রোগী: <strong className="text-[#1C1C1C]">{r.patient_name}</strong> •{" "}
+                              রোগী: <strong className="text-[#1C1C1C]">{r.patient_name}</strong> ·{" "}
                               {r.hospital || "হাসপাতাল"}
                             </p>
-                            {r.phone && (
+                            {r.consent_public !== false && r.phone && (
                               <a
                                 href={`tel:${r.phone}`}
                                 onClick={(e) => e.stopPropagation()}

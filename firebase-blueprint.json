@@ -546,7 +546,7 @@
     },
     "EmergencyRequest": {
       "title": "EmergencyRequest",
-      "description": "Urgent patient blood request submitted by users.",
+      "description": "Urgent patient blood request submitted by users with moderation lifecycle and approval audit trail.",
       "type": "object",
       "properties": {
         "author_id": {
@@ -556,17 +556,50 @@
           "pattern": "^[a-zA-Z0-9_\\-]+$",
           "description": "Submitting user UID."
         },
+        "request_code": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 40,
+          "description": "Human-readable unique request reference code."
+        },
         "patient_name": {
           "type": "string",
           "minLength": 1,
           "maxLength": 120,
           "description": "Patient name."
         },
+        "patient_age": {
+          "type": "number",
+          "description": "Optional patient age in years."
+        },
+        "patient_gender": {
+          "type": "string",
+          "enum": ["", "male", "female", "other"],
+          "description": "Optional patient gender."
+        },
         "phone": {
           "type": "string",
           "minLength": 3,
           "maxLength": 30,
-          "description": "Emergency contact number."
+          "description": "Primary emergency contact mobile number."
+        },
+        "alt_phone": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 30,
+          "description": "Optional alternative contact mobile number."
+        },
+        "requester_name": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 120,
+          "description": "Name of the person submitting the request."
+        },
+        "relation": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 80,
+          "description": "Optional relationship between requester and patient."
         },
         "blood_group": {
           "type": "string",
@@ -575,24 +608,136 @@
           "maxLength": 3,
           "description": "Required blood group."
         },
+        "bags_needed": {
+          "type": "number",
+          "description": "Number of blood bags required (1 to 20)."
+        },
+        "needed_date": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 20,
+          "description": "ISO date when blood is needed (YYYY-MM-DD)."
+        },
+        "needed_time": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 20,
+          "description": "Time when blood is needed (HH:MM)."
+        },
+        "urgency": {
+          "type": "string",
+          "enum": ["urgent", "critical", "scheduled"],
+          "description": "Urgency tier: critical, urgent, or scheduled."
+        },
         "hospital": {
           "type": "string",
           "minLength": 0,
           "maxLength": 200,
-          "description": "Hospital name."
+          "description": "Hospital or clinic name."
+        },
+        "district": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 80,
+          "description": "District name."
+        },
+        "upazila": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 80,
+          "description": "Upazila or municipality name."
+        },
+        "address": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300,
+          "description": "Detailed ward/area address."
+        },
+        "map_link": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500,
+          "description": "Optional Google Maps URL."
         },
         "message": {
           "type": "string",
           "minLength": 0,
           "maxLength": 1000,
-          "description": "Additional urgency details."
+          "description": "Patient condition or urgency details."
+        },
+        "instructions": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500,
+          "description": "Optional extra donor instructions."
+        },
+        "consent_accurate": {
+          "type": "boolean",
+          "description": "Requester confirms accuracy of submitted details."
+        },
+        "consent_public": {
+          "type": "boolean",
+          "description": "Requester consents to public display of the request and contact."
+        },
+        "public_visible": {
+          "type": "boolean",
+          "description": "Whether approved request is currently visible on the public homepage."
+        },
+        "duplicate_fingerprint": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 120,
+          "description": "Normalized key used to guard duplicate submissions."
         },
         "status": {
           "type": "string",
-          "enum": ["pending", "approved", "rejected"],
+          "enum": ["pending", "approved", "rejected", "completed", "expired", "cancelled"],
           "minLength": 7,
-          "maxLength": 10,
-          "description": "Moderation status."
+          "maxLength": 12,
+          "description": "Request lifecycle status."
+        },
+        "approvedBy": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 150,
+          "description": "Email or UID of approving administrator."
+        },
+        "approved_by": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 150,
+          "description": "Normalized approving admin identifier."
+        },
+        "approved_by_name": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 150,
+          "description": "Display name of approving admin."
+        },
+        "approvedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of approval."
+        },
+        "approved_at": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "ISO timestamp of approval."
+        },
+        "completed_at": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "ISO timestamp when request was completed."
+        },
+        "cancelled_at": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "ISO timestamp when request was cancelled."
+        },
+        "rejected_reason": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Optional reason when rejected."
         },
         "createdAt": {
           "type": "string",

@@ -271,17 +271,209 @@ export interface AppLinkRow {
   updated_at: string;
 }
 
+export const EMERGENCY_BLOOD_GROUPS: readonly BloodGroupType[] = [
+  "A+",
+  "A-",
+  "B+",
+  "B-",
+  "AB+",
+  "AB-",
+  "O+",
+  "O-",
+] as const;
+
+export type EmergencyRequestStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "completed"
+  | "expired"
+  | "cancelled";
+
+export type EmergencyUrgency = "urgent" | "critical" | "scheduled";
+
 export interface EmergencyReqRow {
   id: string;
+  request_code?: string | null;
   author_id?: string;
   patient_name: string;
+  patient_age?: number | null;
+  patient_gender?: "" | "male" | "female" | "other" | string;
   phone: string;
+  alt_phone?: string | null;
+  requester_name?: string | null;
+  relation?: string | null;
   blood_group: string;
+  bags_needed?: number | null;
+  needed_date?: string | null;
+  needed_time?: string | null;
+  urgency?: EmergencyUrgency | string;
   hospital: string | null;
+  district?: string | null;
+  upazila?: string | null;
+  address?: string | null;
+  map_link?: string | null;
   message: string | null;
-  status: ModerationStatus;
+  instructions?: string | null;
+  consent_accurate?: boolean;
+  consent_public?: boolean;
+  public_visible?: boolean;
+  duplicate_fingerprint?: string | null;
+  status: EmergencyRequestStatus;
+  approvedBy?: string | null;
+  approved_by?: string | null;
+  approved_by_uid?: string | null;
+  approved_by_name?: string | null;
+  approvedAt?: string | null;
+  approved_at?: string | null;
+  completed_at?: string | null;
+  cancelled_at?: string | null;
+  rejected_reason?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+const BN_TO_EN_DIGITS: Record<string, string> = {
+  "০": "0",
+  "১": "1",
+  "২": "2",
+  "৩": "3",
+  "৪": "4",
+  "৫": "5",
+  "৬": "6",
+  "৭": "7",
+  "৮": "8",
+  "৯": "9",
+};
+
+export function toEnglishDigits(input: string): string {
+  return String(input || "").replace(/[০-৯]/g, (d) => BN_TO_EN_DIGITS[d] ?? d);
+}
+
+export function normalizeBdPhone(rawPhone: string): string | null {
+  const ascii = toEnglishDigits(rawPhone).replace(/[\s\-().]/g, "");
+  if (!ascii) return null;
+  let normalized = ascii;
+  if (normalized.startsWith("+880")) {
+    normalized = "0" + normalized.slice(4);
+  } else if (normalized.startsWith("880")) {
+    normalized = "0" + normalized.slice(3);
+  }
+  if (/^01[3-9]\d{8}$/.test(normalized)) {
+    return normalized;
+  }
+  return null;
+}
+
+export function isValidOptionalMapUrl(rawUrl: string): boolean {
+  const trimmed = String(rawUrl || "").trim();
+  if (!trimmed) return true;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+export function generateEmergencyRequestCode(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  const rand = Math.random().toString(36).slice(2, 6).toUpperCase().padEnd(4, "X");
+  return `SN-BLD-${y}${m}${d}-${rand}`;
+}
+
+export function isEmergencyRequestExpired(
+  req: Pick<EmergencyReqRow, "status" | "needed_date" | "needed_time">,
+  nowMs = Date.now()
+): boolean {
+  if (req.status === "expired") return true;
+  const dateStr = String(req.needed_date || "").trim();
+  if (!dateStr) return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
+
+  const [y, m, d] = dateStr.split("-").map((n) => Number(n));
+  if (!y || !m || !d) return false;
+
+  let hh = 23;
+  let mm = 59;
+  const timeStr = String(req.needed_time || "").trim();
+  if (/^\d{2}:\d{2}/.test(timeStr)) {
+    const [th, tm] = timeStr.split(":").map((n) => Number(n));
+    if (!Number.isNaN(th) && !Number.isNaN(tm)) {
+      hh = Math.min(Math.max(th, 0), 23);
+      mm = Math.min(Math.max(tm, 0), 59);
+    }
+  }
+  const targetMs = new Date(y, m - 1, d, hh, mm, 59, 999).getTime();
+  if (Number.isNaN(targetMs)) return false;
+  // Keep request active through target date/time + 24h grace window so urgent needs remain visible until completed
+  const graceMs = 24 * 60 * 60 * 1000;
+  return nowMs > targetMs + graceMs;
+}
+
+export function isEmergencyRequestPubliclyActive(
+  req: EmergencyReqRow,
+  nowMs = Date.now()
+): boolean {
+  if (req.status !== "approved") return false;
+  if (req.public_visible === false) return false;
+  if (req.consent_public === false) return false;
+  if (isEmergencyRequestExpired(req, nowMs)) return false;
+  return true;
+}
+
+export function sortEmergencyRequestsPublic(list: EmergencyReqRow[]): EmergencyReqRow[] {
+  return [...list].sort((a, b) => {
+    const ta = Date.parse(String(a.approved_at || a.approvedAt || a.updated_at || a.created_at || "")) || 0;
+    const tb = Date.parse(String(b.approved_at || b.approvedAt || b.updated_at || b.created_at || "")) || 0;
+    if (tb !== ta) return tb - ta;
+    const ca = Date.parse(String(a.created_at || "")) || 0;
+    const cb = Date.parse(String(b.created_at || "")) || 0;
+    return cb - ca;
+  });
+}
+
+export function getEmergencyStatusMeta(status: string): { label: string; toneClass: string } {
+  switch (status) {
+    case "approved":
+      return { label: "অনুমোদিত (সক্রিয়)", toneClass: "bg-[#0F4D3A]/10 text-[#0F4D3A]" };
+    case "rejected":
+      return { label: "বাতিল (রিজেক্ট)", toneClass: "bg-[#C62828]/10 text-[#C62828]" };
+    case "completed":
+      return { label: "রক্ত সংগ্রহ সম্পন্ন", toneClass: "bg-sky-500/10 text-sky-700" };
+    case "expired":
+      return { label: "মেয়াদোত্তীর্ণ", toneClass: "bg-amber-500/15 text-amber-800" };
+    case "cancelled":
+      return { label: "বাতিলকৃত", toneClass: "bg-[#5F5F5A]/15 text-[#5F5F5A]" };
+    default:
+      return { label: "অনুমোদনের অপেক্ষায়", toneClass: "border border-[#E6E1D6] bg-[#FAF7F2] text-[#5F5F5A]" };
+  }
+}
+
+export function getEmergencyUrgencyMeta(urgency?: string): {
+  label: string;
+  badgeClass: string;
+} {
+  switch (urgency) {
+    case "critical":
+      return {
+        label: "অত্যন্ত জরুরি",
+        badgeClass: "bg-[#C62828] text-white",
+      };
+    case "scheduled":
+      return {
+        label: "নির্ধারিত সময়ে",
+        badgeClass: "border border-[#C62828]/30 bg-[#C62828]/8 text-[#C62828]",
+      };
+    default:
+      return {
+        label: "জরুরি",
+        badgeClass: "bg-[#C62828]/12 text-[#C62828]",
+      };
+  }
 }
 
 export interface CategoryAccessRow {
@@ -344,8 +536,11 @@ function tsToIso(val: unknown): string {
 function normalizeDoc<T>(id: string, data: DocumentData): T {
   const created_at = tsToIso(data.createdAt ?? data.created_at);
   const updated_at = tsToIso(data.updatedAt ?? data.updated_at ?? created_at);
+  const approvedAtRaw = data.approvedAt ?? data.approved_at;
+  const approved_at = approvedAtRaw ? tsToIso(approvedAtRaw) : undefined;
   return {
     ...data,
+    ...(approved_at ? { approved_at, approvedAt: approved_at } : {}),
     id,
     created_at,
     updated_at,
@@ -745,7 +940,9 @@ async function syncSingleDocToNativeFirestore(
       await ensureCurrentUserProfileDoc(u).catch(() => {});
     }
     const ref = doc(db, collectionName, id);
-    const authorId = String(item.author_id || u?.uid || item.user_id || `usr_${id.slice(-6)}`);
+    const authorId = isStaffSession
+      ? String(item.author_id || u?.uid || item.user_id || `usr_${id.slice(-6)}`)
+      : String(u?.uid || item.author_id || item.user_id || `usr_${id.slice(-6)}`);
     const createdAtVal = item.created_at || serverTimestamp();
 
     if (collectionName === "donations") {
@@ -902,23 +1099,78 @@ async function syncSingleDocToNativeFirestore(
 
     if (collectionName === "emergency_blood_requests") {
       const canMod = isStaffSession;
-      const status =
-        canMod && (item.status === "approved" || item.status === "rejected" || item.status === "pending")
-          ? item.status
-          : item.status || "pending";
+      const allowedStatuses: EmergencyRequestStatus[] = [
+        "pending",
+        "approved",
+        "rejected",
+        "completed",
+        "expired",
+        "cancelled",
+      ];
+      const requestedStatus = allowedStatuses.includes(item.status as EmergencyRequestStatus)
+        ? (item.status as EmergencyRequestStatus)
+        : "pending";
+      const status: EmergencyRequestStatus = canMod ? requestedStatus : "pending";
       const validGroups = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
       const bg = validGroups.includes(String(item.blood_group)) ? String(item.blood_group) : "O+";
-      const payload = {
+      const genderVal =
+        item.patient_gender === "male" || item.patient_gender === "female" || item.patient_gender === "other"
+          ? item.patient_gender
+          : "";
+      const urgencyVal: EmergencyUrgency =
+        item.urgency === "critical" || item.urgency === "scheduled" || item.urgency === "urgent"
+          ? item.urgency
+          : "urgent";
+      const ageNum =
+        item.patient_age !== null &&
+        item.patient_age !== undefined &&
+        item.patient_age !== "" &&
+        !Number.isNaN(Number(item.patient_age))
+          ? Math.min(Math.max(Math.round(Number(item.patient_age)), 0), 120)
+          : null;
+      const bagsNum = Math.min(Math.max(Math.round(Number(item.bags_needed ?? 1) || 1), 1), 20);
+      const consentAccurate = canMod ? item.consent_accurate !== false : true;
+      const consentPublic = canMod ? item.consent_public !== false : true;
+      const publicVisible = status === "approved" && consentPublic;
+
+      const payload: Record<string, unknown> = {
         author_id: authorId,
+        request_code: sanitizeString(item.request_code ?? "", 40, generateEmergencyRequestCode()),
         patient_name: sanitizeString(item.patient_name, 120, "রোগী"),
+        patient_age: ageNum,
+        patient_gender: genderVal,
         phone: sanitizeString(item.phone, 30, "01700000000"),
+        alt_phone: sanitizeString(item.alt_phone ?? "", 30, ""),
+        requester_name: sanitizeString(item.requester_name ?? "", 120, ""),
+        relation: sanitizeString(item.relation ?? "", 80, ""),
         blood_group: bg,
+        bags_needed: bagsNum,
+        needed_date: sanitizeString(item.needed_date ?? "", 20, ""),
+        needed_time: sanitizeString(item.needed_time ?? "", 20, ""),
+        urgency: urgencyVal,
         hospital: sanitizeString(item.hospital ?? "", 200, ""),
+        district: sanitizeString(item.district ?? "", 80, ""),
+        upazila: sanitizeString(item.upazila ?? "", 80, ""),
+        address: sanitizeString(item.address ?? "", 300, ""),
+        map_link: sanitizeString(item.map_link ?? "", 500, ""),
         message: sanitizeString(item.message ?? "", 1000, ""),
+        instructions: sanitizeString(item.instructions ?? "", 500, ""),
+        consent_accurate: consentAccurate,
+        consent_public: consentPublic,
+        public_visible: publicVisible,
+        duplicate_fingerprint: sanitizeString(item.duplicate_fingerprint ?? "", 120, ""),
         status,
         createdAt: createdAtVal,
         updatedAt: serverTimestamp(),
       };
+      if (status === "approved") {
+        payload.approvedAt = serverTimestamp();
+        payload.approved_at = sanitizeString(item.approved_at ?? new Date().toISOString(), 64, new Date().toISOString());
+        if (item.approvedBy) payload.approvedBy = sanitizeString(item.approvedBy, 150, "");
+        if (item.approved_by) payload.approved_by = sanitizeString(item.approved_by, 150, "");
+        if (item.approved_by_uid) payload.approved_by_uid = sanitizeString(item.approved_by_uid, 128, "");
+        if (item.approved_by_name) payload.approved_by_name = sanitizeString(item.approved_by_name, 150, "");
+      }
       await setDoc(ref, payload, { merge: true });
       return { ok: true };
     }
@@ -983,6 +1235,8 @@ function useFirestoreRealtime<
     isFirebaseVerifiedSuperAdmin,
   } = useAuth();
   const [fsItems, setFsItems] = useState<T[]>([]);
+  const [fsLoaded, setFsLoaded] = useState(false);
+  const [fsFailed, setFsFailed] = useState(false);
   const [mirrorState, setMirrorState] = useState<CloudMirrorState>(() => readLocalCloudMirror());
   const [loading, setLoading] = useState(true);
 
@@ -995,7 +1249,9 @@ function useFirestoreRealtime<
     ? isMainAdmin
     : isMainAdmin || isAdmin || isStaff;
 
-  // 1. Subscribe to CloudMirrorState (Local + Hosting API + Firestore Settings)
+  const effectiveUid = mode === "user_owned" || canQueryUnfiltered ? (firebaseUser?.uid ?? "") : "";
+
+  // 1. Subscribe to CloudMirrorState (Offline fallback cache only — never clears loading prematurely)
   useEffect(() => {
     let active = true;
     const onMirrorEvent = () => {
@@ -1006,7 +1262,6 @@ function useFirestoreRealtime<
     void pullCloudMirrorFromRemote().then((s) => {
       if (active) {
         setMirrorState(s);
-        setLoading(false);
       }
     });
 
@@ -1023,89 +1278,159 @@ function useFirestoreRealtime<
     };
   }, [collectionName]);
 
-  // 2. Subscribe to Native Firebase Firestore Collection
+  // 2. Subscribe to Native Firebase Firestore Collection (Single Authoritative Source)
   useEffect(() => {
     if (authLoading) return;
 
     if (mode === "user_owned" && !firebaseUser && !isMainAdmin) {
       setFsItems([]);
+      setFsLoaded(true);
+      setFsFailed(false);
       setLoading(false);
       return;
     }
 
     const colRef = collection(db, collectionName);
-    const q = canQueryUnfiltered
-      ? query(colRef)
-      : mode === "moderated"
-      ? query(colRef, where("status", "==", "approved"))
-      : mode === "visible"
-      ? query(colRef, where("visible", "==", true))
-      : firebaseUser
-      ? query(colRef, where("user_id", "==", firebaseUser.uid))
-      : null;
+    const publicFallbackQuery =
+      mode === "moderated"
+        ? query(colRef, where("status", "==", "approved"))
+        : mode === "visible"
+        ? query(colRef, where("visible", "==", true))
+        : null;
 
-    if (!q) {
+    const primaryQuery = canQueryUnfiltered
+      ? query(colRef)
+      : publicFallbackQuery ??
+        (firebaseUser ? query(colRef, where("user_id", "==", firebaseUser.uid)) : null);
+
+    if (!primaryQuery) {
       setFsItems([]);
+      setFsLoaded(true);
+      setFsFailed(false);
       setLoading(false);
       return;
     }
 
-    // Immediate getDocs to populate UI without waiting for snapshot stream
-    getDocs(q)
-      .then((snap) => {
-        if (!snap.empty) {
+    let active = true;
+    let receivedServerSnapshot = false;
+    let latestCachedList: T[] | null = null;
+    let activeUnsub: (() => void) | null = null;
+    let downgradedToPublic = false;
+
+    setFsLoaded(false);
+    setFsFailed(false);
+    setLoading(true);
+
+    // Safety fallback if Firestore server stays unreachable beyond 5 seconds
+    const fallbackTimer = setTimeout(() => {
+      if (!active || receivedServerSnapshot) return;
+      if (latestCachedList !== null) {
+        setFsItems(latestCachedList);
+        setFsLoaded(true);
+        setFsFailed(false);
+      } else {
+        setFsFailed(true);
+      }
+      setLoading(false);
+    }, 5000);
+
+    const subscribe = (q: Query<DocumentData>) => {
+      if (activeUnsub) {
+        activeUnsub();
+        activeUnsub = null;
+      }
+      activeUnsub = onSnapshot(
+        q,
+        { includeMetadataChanges: true },
+        (snap) => {
+          if (!active) return;
           const list = snap.docs.map((d) => normalizeDoc<T>(d.id, d.data()));
+          const isOffline = typeof navigator !== "undefined" && navigator.onLine === false;
+
+          if (snap.metadata.fromCache && !receivedServerSnapshot && !isOffline) {
+            // While online, hold stale IndexedDB cache until the authoritative server snapshot arrives
+            // so partial/outdated cached donor counts (e.g. 14) never flash before live data (e.g. 707).
+            latestCachedList = list;
+            return;
+          }
+
+          if (!snap.metadata.fromCache) {
+            receivedServerSnapshot = true;
+          }
+          clearTimeout(fallbackTimer);
           setFsItems(list);
+          setFsLoaded(true);
+          setFsFailed(false);
+          setLoading(false);
+        },
+        (err) => {
+          if (!active) return;
+          const code = (err as { code?: string })?.code;
+          // If an unfiltered admin/staff query is rejected by security rules, automatically fall back
+          // to the public approved/visible Firestore query instead of dropping to partial mirror cache.
+          if (
+            !downgradedToPublic &&
+            canQueryUnfiltered &&
+            publicFallbackQuery &&
+            (code === "permission-denied" ||
+              String(err?.message || "").toLowerCase().includes("permission"))
+          ) {
+            downgradedToPublic = true;
+            subscribe(publicFallbackQuery);
+            return;
+          }
+          clearTimeout(fallbackTimer);
+          if (latestCachedList !== null) {
+            setFsItems(latestCachedList);
+            setFsLoaded(true);
+            setFsFailed(false);
+          } else {
+            setFsFailed(true);
+          }
           setLoading(false);
         }
-      })
-      .catch(() => {});
+      );
+    };
 
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const list = snap.docs.map((d) => normalizeDoc<T>(d.id, d.data()));
-        setFsItems(list);
-        setLoading(false);
-      },
-      () => {
-        setLoading(false);
-      }
-    );
+    subscribe(primaryQuery);
 
-    return () => unsub();
+    return () => {
+      active = false;
+      clearTimeout(fallbackTimer);
+      if (activeUnsub) activeUnsub();
+    };
   }, [
     collectionName,
     mode,
     order.col,
     order.asc,
     authLoading,
-    firebaseUser?.uid,
+    effectiveUid,
     canQueryUnfiltered,
     isMainAdmin,
   ]);
 
-  // 4. Merge Native Firestore + Mirror State + Role Filtering
+  // 4. Authoritative Firestore State + Offline-Only Mirror Fallback + Role Filtering
   const items = (() => {
+    if (!fsLoaded && !fsFailed) {
+      return [];
+    }
+
     const colMirror = mirrorState.collections[collectionName] || {};
     const colDeleted = mirrorState.deletedIds[collectionName] || {};
     const mergedMap = new Map<string, T>();
 
-    // Live Firestore items are authoritative
+    // Live Firestore items are the sole authoritative source when loaded.
     for (const f of fsItems) {
       mergedMap.set(f.id, f);
     }
 
-    if (collectionName !== "chat_threads") {
+    // Only use mirror cache if Firestore failed and returned no items (never resurrect stale/deleted mirror docs).
+    if (!fsLoaded && fsFailed && fsItems.length === 0 && collectionName !== "chat_threads") {
       for (const [docId, mRaw] of Object.entries(colMirror)) {
         const m = mRaw as T;
-        const delAt = colDeleted[docId];
-        if (delAt) continue;
-
-        const existing = mergedMap.get(docId);
-        if (!existing) {
-          mergedMap.set(docId, { ...m, id: docId });
-        }
+        if (colDeleted[docId]) continue;
+        mergedMap.set(docId, { ...m, id: docId });
       }
     }
 
@@ -2145,9 +2470,13 @@ export function useCloudDonorEvents() {
       upsertCloudMirrorDoc("donation_events", id, updated);
 
       if (status === "approved" && existing?.donor_id) {
+        const donorRef = doc(db, "blood_donors", existing.donor_id);
+        const liveDonorSnap = await getDoc(donorRef).catch(() => null);
+        const liveDonorData = liveDonorSnap?.exists() ? liveDonorSnap.data() : null;
         const curMirror = readLocalCloudMirror();
         const donorDoc = curMirror.collections.blood_donors?.[existing.donor_id];
-        const nextTotal = donorDoc ? Math.min((Number(donorDoc.total_donations) || 0) + 1, 500) : 1;
+        const prevTotal = Number(liveDonorData?.total_donations ?? donorDoc?.total_donations ?? 0) || 0;
+        const nextTotal = Math.min(prevTotal + 1, 500);
         if (donorDoc) {
           upsertCloudMirrorDoc("blood_donors", existing.donor_id, {
             ...donorDoc,
@@ -2157,7 +2486,7 @@ export function useCloudDonorEvents() {
           });
         }
         await setDoc(
-          doc(db, "blood_donors", existing.donor_id),
+          donorRef,
           {
             total_donations: nextTotal,
             last_donation_date: sanitizeString(existing.event_date, 40, ""),
@@ -2416,64 +2745,280 @@ export function useAppLinks() {
 }
 
 // ---------- Emergency blood requests ----------
+const EMERGENCY_SUBMIT_CACHE_KEY = "sn_emergency_recent_fingerprints_v1";
+
+export interface EmergencyRequestCreateInput {
+  patient_name: string;
+  patient_age?: number | null;
+  patient_gender?: "" | "male" | "female" | "other";
+  phone: string;
+  alt_phone?: string;
+  requester_name?: string;
+  relation?: string;
+  blood_group: string;
+  bags_needed?: number;
+  needed_date?: string;
+  needed_time?: string;
+  urgency?: EmergencyUrgency;
+  hospital?: string;
+  district?: string;
+  upazila?: string;
+  address?: string;
+  map_link?: string;
+  message?: string;
+  instructions?: string;
+  consent_accurate?: boolean;
+  consent_public?: boolean;
+  autoApprove?: boolean;
+}
+
 export function useEmergencyRequests() {
   const { items, loading } = useFirestoreRealtime<EmergencyReqRow>("emergency_blood_requests", "moderated");
 
-  const add = async (r: {
-    patient_name: string;
-    phone: string;
-    blood_group: string;
-    hospital?: string;
-    message?: string;
-  }) => {
+  const add = async (
+    r: EmergencyRequestCreateInput
+  ): Promise<{ ok: boolean; error?: string; id?: string; requestCode?: string }> => {
     try {
+      await ensureFirebaseAuthUser().catch(() => null);
       const actor = getCurrentActorInfo();
+      const firebaseUid = auth.currentUser?.uid || actor.uid;
+
+      const patientName = sanitizeString(r.patient_name, 120, "");
+      if (!patientName) {
+        return { ok: false, error: "রোগীর নাম আবশ্যক।" };
+      }
+
+      const normalizedPhone = normalizeBdPhone(r.phone);
+      if (!normalizedPhone) {
+        return {
+          ok: false,
+          error: "সঠিক ১১ ডিজিটের বাংলাদেশি মোবাইল নম্বর দিন (যেমন: 017XXXXXXXX)।",
+        };
+      }
+
+      if (r.alt_phone && r.alt_phone.trim()) {
+        const normalizedAlt = normalizeBdPhone(r.alt_phone);
+        if (!normalizedAlt) {
+          return {
+            ok: false,
+            error: "বিকল্প মোবাইল নম্বরটি সঠিক ১১ ডিজিটের বাংলাদেশি নম্বর হতে হবে।",
+          };
+        }
+      }
+
+      if (!EMERGENCY_BLOOD_GROUPS.includes(r.blood_group as BloodGroupType)) {
+        return { ok: false, error: "সঠিক রক্তের গ্রুপ নির্বাচন করুন।" };
+      }
+
+      if (r.map_link && !isValidOptionalMapUrl(r.map_link)) {
+        return { ok: false, error: "সঠিক Google Maps লিংক (https://...) দিন অথবা খালি রাখুন।" };
+      }
+
+      if (!actor.isStaff) {
+        if (r.consent_accurate === false || r.consent_public === false) {
+          return { ok: false, error: "তথ্যের সত্যতা ও প্রকাশের সম্মতি নিশ্চিত করা আবশ্যক।" };
+        }
+      }
+
+      const neededDate = sanitizeString(r.needed_date ?? "", 20, "");
+      const fingerprint = `${normalizedPhone}_${r.blood_group}_${neededDate || sanitizeString(r.hospital ?? "", 40, "").toLowerCase()}`;
+
+      // Duplicate submission protection (live active items + 2-minute rapid-click session guard)
+      const nowMs = Date.now();
+      const twoHoursMs = 2 * 60 * 60 * 1000;
+      const existingDup = items.find((ex) => {
+        if (ex.status !== "pending" && ex.status !== "approved") return false;
+        const exPhone = normalizeBdPhone(ex.phone) || ex.phone;
+        const exDate = String(ex.needed_date || "");
+        const createdMs = Date.parse(ex.created_at || "") || 0;
+        const sameTarget =
+          exPhone === normalizedPhone &&
+          ex.blood_group === r.blood_group &&
+          (neededDate ? exDate === neededDate : nowMs - createdMs < twoHoursMs);
+        return sameTarget;
+      });
+      if (existingDup) {
+        return {
+          ok: false,
+          error:
+            "এই নম্বর ও রক্তের গ্রুপের জন্য ইতোমধ্যে একটি সক্রিয় অনুরোধ জমা আছে। প্রয়োজনে আগের অনুরোধটি দেখুন বা এডমিনের অনুমোদনের জন্য অপেক্ষা করুন।",
+        };
+      }
+
+      try {
+        const rawCache = sessionStorage.getItem(EMERGENCY_SUBMIT_CACHE_KEY);
+        const recentMap: Record<string, number> = rawCache ? JSON.parse(rawCache) : {};
+        const lastSubmittedAt = Number(recentMap[fingerprint] || 0);
+        if (lastSubmittedAt && nowMs - lastSubmittedAt < 120000) {
+          return {
+            ok: false,
+            error: "অনুরোধটি ইতোমধ্যেই জমা হয়েছে। অনুগ্রহ করে ২ মিনিট অপেক্ষা করুন।",
+          };
+        }
+      } catch {
+        // ignore storage access issues
+      }
+
       const id = genId();
       const nowIso = new Date().toISOString();
+      const requestCode = generateEmergencyRequestCode();
+      const shouldApprove = Boolean(r.autoApprove && actor.isStaff);
+      const staffName = auth.currentUser?.displayName || actor.email || "Admin";
+      const altPhoneNormalized = r.alt_phone?.trim() ? normalizeBdPhone(r.alt_phone) || "" : "";
+
       const row: EmergencyReqRow = {
         id,
-        author_id: actor.uid,
-        patient_name: sanitizeString(r.patient_name, 120, "রোগী"),
-        phone: sanitizeString(r.phone, 30, "01700000000"),
+        request_code: requestCode,
+        author_id: firebaseUid,
+        patient_name: patientName,
+        patient_age:
+          r.patient_age !== null &&
+          r.patient_age !== undefined &&
+          !Number.isNaN(Number(r.patient_age))
+            ? Math.min(Math.max(Math.round(Number(r.patient_age)), 0), 120)
+            : null,
+        patient_gender:
+          r.patient_gender === "male" || r.patient_gender === "female" || r.patient_gender === "other"
+            ? r.patient_gender
+            : "",
+        phone: normalizedPhone,
+        alt_phone: altPhoneNormalized,
+        requester_name: sanitizeString(r.requester_name ?? "", 120, ""),
+        relation: sanitizeString(r.relation ?? "", 80, ""),
         blood_group: r.blood_group,
+        bags_needed: Math.min(Math.max(Math.round(Number(r.bags_needed ?? 1) || 1), 1), 20),
+        needed_date: neededDate,
+        needed_time: sanitizeString(r.needed_time ?? "", 20, ""),
+        urgency:
+          r.urgency === "critical" || r.urgency === "scheduled" || r.urgency === "urgent"
+            ? r.urgency
+            : "urgent",
         hospital: sanitizeString(r.hospital ?? "", 200, ""),
+        district: sanitizeString(r.district ?? "", 80, ""),
+        upazila: sanitizeString(r.upazila ?? "", 80, ""),
+        address: sanitizeString(r.address ?? "", 300, ""),
+        map_link: sanitizeString(r.map_link ?? "", 500, ""),
         message: sanitizeString(r.message ?? "", 1000, ""),
-        status: "pending",
+        instructions: sanitizeString(r.instructions ?? "", 500, ""),
+        consent_accurate: r.consent_accurate !== false,
+        consent_public: r.consent_public !== false,
+        public_visible: shouldApprove && r.consent_public !== false,
+        duplicate_fingerprint: fingerprint.slice(0, 120),
+        status: shouldApprove ? "approved" : "pending",
+        ...(shouldApprove
+          ? {
+              approvedBy: staffName,
+              approved_by: staffName,
+              approved_by_uid: firebaseUid,
+              approved_by_name: staffName,
+              approvedAt: nowIso,
+              approved_at: nowIso,
+            }
+          : {}),
         created_at: nowIso,
         updated_at: nowIso,
       };
+
       const syncRes = await syncSingleDocToNativeFirestore("emergency_blood_requests", id, row);
       if (!syncRes.ok) {
         return { ok: false, error: syncRes.error || "Firebase-এ রক্তের অনুরোধ সংরক্ষণ ব্যর্থ হয়েছে" };
       }
+
+      try {
+        const rawCache = sessionStorage.getItem(EMERGENCY_SUBMIT_CACHE_KEY);
+        const recentMap: Record<string, number> = rawCache ? JSON.parse(rawCache) : {};
+        recentMap[fingerprint] = nowMs;
+        sessionStorage.setItem(EMERGENCY_SUBMIT_CACHE_KEY, JSON.stringify(recentMap));
+      } catch {
+        // ignore
+      }
+
       upsertCloudMirrorDoc("emergency_blood_requests", id, row);
-      return { ok: true };
+      return { ok: true, id, requestCode };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : "ত্রুটি" };
     }
   };
 
-  const setStatus = async (id: string, status: "approved" | "rejected" | "pending") => {
+  const setStatus = async (
+    id: string,
+    status: EmergencyRequestStatus,
+    opts?: { reason?: string }
+  ) => {
     const existing = items.find((x) => x.id === id);
+    const actor = getCurrentActorInfo();
+    if (!actor.isStaff) {
+      return { error: { message: "শুধুমাত্র অনুমোদিত এডমিন বা স্টাফ স্ট্যাটাস পরিবর্তন করতে পারবেন।" } };
+    }
     try {
       const nowIso = new Date().toISOString();
-      await setDoc(
-        doc(db, "emergency_blood_requests", id),
-        { status, updatedAt: serverTimestamp() },
-        { merge: true }
+      const actorName = sanitizeString(
+        auth.currentUser?.displayName || actor.email || "Admin",
+        150,
+        "Admin"
       );
-      const updated = {
+      const actorUid = sanitizeString(auth.currentUser?.uid || actor.uid, 128, "admin");
+      const isApproved = status === "approved" && existing?.consent_public !== false;
+
+      const patchPayload: Record<string, unknown> = {
+        status,
+        public_visible: isApproved,
+        updatedAt: serverTimestamp(),
+      };
+
+      if (status === "approved") {
+        patchPayload.approvedAt = serverTimestamp();
+        patchPayload.approved_at = nowIso;
+        patchPayload.approvedBy = actorName;
+        patchPayload.approved_by = actorName;
+        patchPayload.approved_by_uid = actorUid;
+        patchPayload.approved_by_name = actorName;
+        patchPayload.rejected_reason = null;
+      } else if (status === "completed") {
+        patchPayload.completed_at = nowIso;
+      } else if (status === "cancelled") {
+        patchPayload.cancelled_at = nowIso;
+      } else if (status === "rejected" && opts?.reason !== undefined) {
+        patchPayload.rejected_reason = sanitizeString(opts.reason, 300, "") || null;
+      }
+
+      await setDoc(doc(db, "emergency_blood_requests", id), patchPayload, { merge: true });
+
+      const updated: Record<string, unknown> = {
         ...(existing || { id }),
         status,
+        public_visible: isApproved,
         updated_at: nowIso,
       };
+      if (status === "approved") {
+        updated.approvedAt = nowIso;
+        updated.approved_at = nowIso;
+        updated.approvedBy = actorName;
+        updated.approved_by = actorName;
+        updated.approved_by_uid = actorUid;
+        updated.approved_by_name = actorName;
+      } else if (status === "completed") {
+        updated.completed_at = nowIso;
+      } else if (status === "cancelled") {
+        updated.cancelled_at = nowIso;
+      } else if (status === "rejected" && opts?.reason) {
+        updated.rejected_reason = opts.reason;
+      }
+
       upsertCloudMirrorDoc("emergency_blood_requests", id, updated);
+
+      const statusLabels: Record<EmergencyRequestStatus, string> = {
+        approved: "জরুরি রক্তের অনুরোধ অনুমোদন করেছে",
+        rejected: "জরুরি রক্তের অনুরোধ বাতিল (রিজেক্ট) করেছে",
+        completed: "জরুরি রক্তের অনুরোধ সম্পন্ন হিসেবে চিহ্নিত করেছে",
+        expired: "জরুরি রক্তের অনুরোধ মেয়াদোত্তীর্ণ করেছে",
+        cancelled: "জরুরি রক্তের অনুরোধ বাতিল করেছে",
+        pending: "জরুরি রক্তের অনুরোধ অপেক্ষমাণ অবস্থায় ফিরিয়েছে",
+      };
+
       void recordStaffActivity({
-        action_type: status === "approved" ? "approve" : "reject",
-        action_label:
-          status === "approved"
-            ? "জরুরি রক্তের অনুরোধ অনুমোদন করেছে"
-            : "জরুরি রক্তের অনুরোধ বাতিল করেছে",
+        action_type: status === "approved" ? "approve" : status === "rejected" ? "reject" : "edit",
+        action_label: statusLabels[status] || "জরুরি রক্তের অনুরোধের স্ট্যাটাস পরিবর্তন করেছে",
         module: "emergency",
         module_label: "জরুরি রক্ত অনুরোধ",
         target_id: id,
@@ -2491,20 +3036,68 @@ export function useEmergencyRequests() {
 
   const update = async (id: string, patch: Partial<EmergencyReqRow>) => {
     const existing = items.find((x) => x.id === id);
+    const actor = getCurrentActorInfo();
     try {
       const nowIso = new Date().toISOString();
       const sanitizedPatch: Record<string, unknown> = { updatedAt: serverTimestamp() };
       if (patch.patient_name !== undefined) sanitizedPatch.patient_name = sanitizeString(patch.patient_name, 120, "রোগী");
+      if (patch.patient_age !== undefined) {
+        sanitizedPatch.patient_age =
+          patch.patient_age === null || Number.isNaN(Number(patch.patient_age))
+            ? null
+            : Math.min(Math.max(Math.round(Number(patch.patient_age)), 0), 120);
+      }
+      if (patch.patient_gender !== undefined) {
+        sanitizedPatch.patient_gender =
+          patch.patient_gender === "male" || patch.patient_gender === "female" || patch.patient_gender === "other"
+            ? patch.patient_gender
+            : "";
+      }
       if (patch.phone !== undefined) sanitizedPatch.phone = sanitizeString(patch.phone, 30, "01700000000");
+      if (patch.alt_phone !== undefined) sanitizedPatch.alt_phone = sanitizeString(patch.alt_phone ?? "", 30, "");
+      if (patch.requester_name !== undefined) sanitizedPatch.requester_name = sanitizeString(patch.requester_name ?? "", 120, "");
+      if (patch.relation !== undefined) sanitizedPatch.relation = sanitizeString(patch.relation ?? "", 80, "");
       if (patch.blood_group !== undefined) sanitizedPatch.blood_group = patch.blood_group;
+      if (patch.bags_needed !== undefined) {
+        sanitizedPatch.bags_needed = Math.min(Math.max(Math.round(Number(patch.bags_needed) || 1), 1), 20);
+      }
+      if (patch.needed_date !== undefined) sanitizedPatch.needed_date = sanitizeString(patch.needed_date ?? "", 20, "");
+      if (patch.needed_time !== undefined) sanitizedPatch.needed_time = sanitizeString(patch.needed_time ?? "", 20, "");
+      if (patch.urgency !== undefined) {
+        sanitizedPatch.urgency =
+          patch.urgency === "critical" || patch.urgency === "scheduled" || patch.urgency === "urgent"
+            ? patch.urgency
+            : "urgent";
+      }
       if (patch.hospital !== undefined) sanitizedPatch.hospital = sanitizeString(patch.hospital ?? "", 200, "");
+      if (patch.district !== undefined) sanitizedPatch.district = sanitizeString(patch.district ?? "", 80, "");
+      if (patch.upazila !== undefined) sanitizedPatch.upazila = sanitizeString(patch.upazila ?? "", 80, "");
+      if (patch.address !== undefined) sanitizedPatch.address = sanitizeString(patch.address ?? "", 300, "");
+      if (patch.map_link !== undefined) sanitizedPatch.map_link = sanitizeString(patch.map_link ?? "", 500, "");
       if (patch.message !== undefined) sanitizedPatch.message = sanitizeString(patch.message ?? "", 1000, "");
-      if (patch.status !== undefined) sanitizedPatch.status = patch.status;
+      if (patch.instructions !== undefined) sanitizedPatch.instructions = sanitizeString(patch.instructions ?? "", 500, "");
+      if (patch.status !== undefined) {
+        sanitizedPatch.status = patch.status;
+        sanitizedPatch.public_visible = patch.status === "approved" && existing?.consent_public !== false;
+        if (patch.status === "approved") {
+          const actorName = sanitizeString(auth.currentUser?.displayName || actor.email || "Admin", 150, "Admin");
+          sanitizedPatch.approvedAt = serverTimestamp();
+          sanitizedPatch.approved_at = nowIso;
+          sanitizedPatch.approvedBy = actorName;
+          sanitizedPatch.approved_by = actorName;
+          sanitizedPatch.approved_by_name = actorName;
+        } else if (patch.status === "completed") {
+          sanitizedPatch.completed_at = nowIso;
+        } else if (patch.status === "cancelled") {
+          sanitizedPatch.cancelled_at = nowIso;
+        }
+      }
 
       await setDoc(doc(db, "emergency_blood_requests", id), sanitizedPatch, { merge: true });
       const updated = {
         ...(existing || { id }),
         ...patch,
+        ...(patch.status !== undefined ? { public_visible: patch.status === "approved" } : {}),
         updated_at: nowIso,
       };
       upsertCloudMirrorDoc("emergency_blood_requests", id, updated);
@@ -2550,6 +3143,74 @@ export function useEmergencyRequests() {
   };
 
   return { items, loading, add, setStatus, update, remove };
+}
+
+export function useMyEmergencyRequests() {
+  const { firebaseUser, loading: authLoading } = useAuth();
+  const [items, setItems] = useState<EmergencyReqRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!firebaseUser?.uid) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
+
+    const q = query(
+      collection(db, "emergency_blood_requests"),
+      where("author_id", "==", firebaseUser.uid)
+    );
+    setLoading(true);
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const list = snap.docs
+          .map((d) => normalizeDoc<EmergencyReqRow>(d.id, d.data()))
+          .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+        setItems(list);
+        setLoading(false);
+      },
+      () => {
+        setLoading(false);
+      }
+    );
+    return () => unsub();
+  }, [authLoading, firebaseUser?.uid]);
+
+  const cancelMyRequest = async (id: string): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      await ensureFirebaseAuthUser().catch(() => null);
+      const nowIso = new Date().toISOString();
+      await setDoc(
+        doc(db, "emergency_blood_requests", id),
+        {
+          status: "cancelled",
+          public_visible: false,
+          cancelled_at: nowIso,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      const existing = items.find((x) => x.id === id);
+      if (existing) {
+        upsertCloudMirrorDoc("emergency_blood_requests", id, {
+          ...existing,
+          status: "cancelled",
+          public_visible: false,
+          cancelled_at: nowIso,
+          updated_at: nowIso,
+        });
+      }
+      return { ok: true };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { ok: false, error: msg || "অনুরোধ বাতিল করা সম্ভব হয়নি।" };
+    }
+  };
+
+  return { items, loading, cancelMyRequest };
 }
 
 // ---------- Category access ----------

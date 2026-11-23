@@ -38,6 +38,7 @@ import {
 import type { Category, Division } from "@/data/categories";
 import { BannerPopup } from "@/components/BannerPopup";
 import { EmergencyBanner } from "@/components/EmergencyBanner";
+import { EmergencyBloodSection } from "@/components/EmergencyBloodSection";
 import { ServiceCategoryCard } from "@/components/ServiceCategoryCard";
 import {
   getElementCanvasStyle,
@@ -986,8 +987,9 @@ function Index() {
         </div>
       )}
 
-      {/* Live Emergency Alert Banner */}
+      {/* Live Emergency Alert Banner & Approved Emergency Blood Requests */}
       {homepageConfig.showEmergencyBanner !== false && <EmergencyBanner />}
+      <EmergencyBloodSection />
 
       {/* Optional Public Notices */}
       {activeNotices.length > 0 && (

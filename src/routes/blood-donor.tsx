@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { ArrowLeft, Droplet, Phone, Send, HeartPulse, CheckCircle2, XCircle, Search, X, MapPin, Edit3, Trash2, Save } from "lucide-react";
+import { ArrowLeft, Droplet, Phone, Send, HeartPulse, CheckCircle2, XCircle, Search, X, MapPin, Edit3, Trash2, Save, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useCloudDonors, useCloudDonorEvents, type DonorRow } from "@/lib/cloud";
 import { useAuth } from "@/lib/auth";
@@ -14,7 +14,7 @@ export const Route = createFileRoute("/blood-donor")({
 const GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"] as const;
 
 function BloodPage() {
-  const { items, add, update, remove } = useCloudDonors();
+  const { items, loading, add, update, remove } = useCloudDonors();
   const { add: addEvent } = useCloudDonorEvents();
   const { isAdmin } = useAuth();
   const [showForm, setShowForm] = useState(false);
@@ -67,7 +67,11 @@ function BloodPage() {
         </div>
         <div className="min-w-0 flex-1">
           <h1 className="truncate font-display text-lg font-bold text-[#1C1C1C]">রক্তদাতা</h1>
-          <p className="truncate text-xs text-[#5F5F5A]">স্বেচ্ছা রক্তদাতা তালিকা ({approved.length} জন)</p>
+          <p className="truncate text-xs text-[#5F5F5A]">
+            {loading
+              ? "স্বেচ্ছা রক্তদাতা তালিকা লোড হচ্ছে..."
+              : `স্বেচ্ছা রক্তদাতা তালিকা (${approved.length} জন)`}
+          </p>
         </div>
         <button
           type="button"
@@ -105,21 +109,27 @@ function BloodPage() {
       </div>
 
       <div className="grid w-full min-w-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 lg:gap-4">
-        {filtered.length === 0 && (
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground md:col-span-2 xl:col-span-3 2xl:col-span-4">
+            <Loader2 className="h-4 w-4 animate-spin text-[#C62828]" />
+            <span>রক্তদাতাদের তালিকা লোড হচ্ছে...</span>
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground md:col-span-2 xl:col-span-3 2xl:col-span-4">
             কোনো রক্তদাতা নেই।
           </div>
-        )}
-        {filtered.map((d) => (
-          <DonorCard
-            key={d.id}
-            d={d}
-            isAdmin={isAdmin}
-            onDonate={() => setDonatedFor(d)}
-            onEdit={() => setEditingDonor({ ...d })}
-            onDelete={() => void handleDeleteDonor(d.id)}
-          />
-        ))}
+        ) : null}
+        {!loading &&
+          filtered.map((d) => (
+            <DonorCard
+              key={d.id}
+              d={d}
+              isAdmin={isAdmin}
+              onDonate={() => setDonatedFor(d)}
+              onEdit={() => setEditingDonor({ ...d })}
+              onDelete={() => void handleDeleteDonor(d.id)}
+            />
+          ))}
       </div>
 
       {editingDonor && isAdmin && (

@@ -477,22 +477,90 @@ service cloud.firestore {
       allow delete: if isValidId(bannerId) && isMainAdmin();
     }
 
+    function isValidEmergencyBloodGroup(bg) {
+      return bg is string && (
+        bg == 'A+' || bg == 'A-' || bg == 'B+' || bg == 'B-' ||
+        bg == 'AB+' || bg == 'AB-' || bg == 'O+' || bg == 'O-'
+      );
+    }
+
+    function isValidEmergencyStatus(st) {
+      return st is string && (
+        st == 'pending' || st == 'approved' || st == 'rejected' ||
+        st == 'completed' || st == 'expired' || st == 'cancelled'
+      );
+    }
+
+    function isValidEmergencyBloodRequest(data) {
+      return data.keys().hasAll(['author_id', 'patient_name', 'phone', 'blood_group', 'status']) &&
+        data.author_id is string && data.author_id.size() >= 1 && data.author_id.size() <= 128 &&
+        data.patient_name is string && data.patient_name.size() >= 1 && data.patient_name.size() <= 120 &&
+        data.phone is string && data.phone.size() >= 3 && data.phone.size() <= 30 &&
+        isValidEmergencyBloodGroup(data.blood_group) &&
+        isValidEmergencyStatus(data.status) &&
+        (!('hospital' in data) || (data.hospital is string && data.hospital.size() <= 200)) &&
+        (!('message' in data) || (data.message is string && data.message.size() <= 1000)) &&
+        (!('request_code' in data) || (data.request_code is string && data.request_code.size() <= 40)) &&
+        (!('patient_age' in data) || data.patient_age == null || (data.patient_age is number && data.patient_age >= 0 && data.patient_age <= 120)) &&
+        (!('patient_gender' in data) || (data.patient_gender is string && (data.patient_gender == '' || data.patient_gender == 'male' || data.patient_gender == 'female' || data.patient_gender == 'other'))) &&
+        (!('bags_needed' in data) || (data.bags_needed is number && data.bags_needed >= 1 && data.bags_needed <= 20)) &&
+        (!('needed_date' in data) || (data.needed_date is string && data.needed_date.size() <= 20)) &&
+        (!('needed_time' in data) || (data.needed_time is string && data.needed_time.size() <= 20)) &&
+        (!('urgency' in data) || (data.urgency is string && (data.urgency == 'urgent' || data.urgency == 'critical' || data.urgency == 'scheduled'))) &&
+        (!('district' in data) || (data.district is string && data.district.size() <= 80)) &&
+        (!('upazila' in data) || (data.upazila is string && data.upazila.size() <= 80)) &&
+        (!('address' in data) || (data.address is string && data.address.size() <= 300)) &&
+        (!('map_link' in data) || (data.map_link is string && data.map_link.size() <= 500)) &&
+        (!('requester_name' in data) || (data.requester_name is string && data.requester_name.size() <= 120)) &&
+        (!('alt_phone' in data) || (data.alt_phone is string && data.alt_phone.size() <= 30)) &&
+        (!('relation' in data) || (data.relation is string && data.relation.size() <= 80)) &&
+        (!('instructions' in data) || (data.instructions is string && data.instructions.size() <= 500)) &&
+        (!('consent_accurate' in data) || data.consent_accurate is bool) &&
+        (!('consent_public' in data) || data.consent_public is bool) &&
+        (!('public_visible' in data) || data.public_visible is bool) &&
+        (!('duplicate_fingerprint' in data) || (data.duplicate_fingerprint is string && data.duplicate_fingerprint.size() <= 120)) &&
+        (!('approvedBy' in data) || data.approvedBy == null || (data.approvedBy is string && data.approvedBy.size() <= 150)) &&
+        (!('approved_by' in data) || data.approved_by == null || (data.approved_by is string && data.approved_by.size() <= 150)) &&
+        (!('approved_by_uid' in data) || data.approved_by_uid == null || (data.approved_by_uid is string && data.approved_by_uid.size() <= 128)) &&
+        (!('approved_by_name' in data) || data.approved_by_name == null || (data.approved_by_name is string && data.approved_by_name.size() <= 150)) &&
+        (!('approved_at' in data) || data.approved_at == null || (data.approved_at is string && data.approved_at.size() <= 64)) &&
+        (!('completed_at' in data) || data.completed_at == null || (data.completed_at is string && data.completed_at.size() <= 64)) &&
+        (!('cancelled_at' in data) || data.cancelled_at == null || (data.cancelled_at is string && data.cancelled_at.size() <= 64)) &&
+        (!('rejected_reason' in data) || data.rejected_reason == null || (data.rejected_reason is string && data.rejected_reason.size() <= 300));
+    }
+
     match /emergency_blood_requests/{requestId} {
       allow get: if isValidId(requestId) && (resource == null || existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isEditor());
       allow list: if existing().status == 'approved' || (isSignedIn() && existing().author_id == request.auth.uid) || isMainAdmin() || isBootstrappedOrdinaryAdmin() || isEditor();
-      allow create: if isValidId(requestId) && isSignedIn() && (
-        isEditor() ||
-        (incoming().author_id == request.auth.uid && incoming().status == 'pending')
-      );
-      allow update: if isValidId(requestId) && (
-        isEditor() || (
-          isSignedIn() &&
-          existing().author_id == request.auth.uid &&
-          existing().status == 'pending' &&
-          incoming().status == 'pending' &&
-          incoming().author_id == existing().author_id
-        )
-      );
+      allow create: if isValidId(requestId) && isSignedIn() &&
+        isValidEmergencyBloodRequest(incoming()) && (
+          isEditor() || (
+            incoming().author_id == request.auth.uid &&
+            incoming().status == 'pending' &&
+            (!('public_visible' in incoming()) || incoming().public_visible == false) &&
+            (!('consent_accurate' in incoming()) || incoming().consent_accurate == true) &&
+            (!('consent_public' in incoming()) || incoming().consent_public == true)
+          )
+        );
+      allow update: if isValidId(requestId) &&
+        isValidEmergencyBloodRequest(incoming()) && (
+          isEditor() || (
+            isSignedIn() &&
+            existing().author_id == request.auth.uid &&
+            incoming().author_id == existing().author_id && (
+              (
+                existing().status == 'pending' &&
+                incoming().status == 'pending' &&
+                (!('public_visible' in incoming()) || incoming().public_visible == false)
+              ) || (
+                (existing().status == 'pending' || existing().status == 'approved') &&
+                incoming().status == 'cancelled' &&
+                incoming().public_visible == false &&
+                incoming().diff(existing()).affectedKeys().hasOnly(['status', 'public_visible', 'cancelled_at', 'updatedAt'])
+              )
+            )
+          )
+        );
       allow delete: if isValidId(requestId) && isMainAdmin();
     }
 
